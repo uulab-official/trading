@@ -1,0 +1,57 @@
+# Example Configuration: Paper Trading (모의투자)
+# 이 설정은 테스트넷에서 안전하게 전략을 테스트하는 예시입니다.
+
+bot:
+  id: "paper-trading-bot"
+  name: "Paper Trading Bot"
+  version: "1.0.0"
+  mode: paper  # paper 모드: 실제 거래 없이 시뮬레이션만
+  timezone: "Asia/Seoul"
+
+exchange:
+  id: binance
+  sandbox: true  # 테스트넷 사용
+  default_type: spot
+  testnet: true
+
+telegram:
+  enabled: true
+  notifications:
+    trade: true
+    error: true
+    daily_report: true
+    position: true
+  commands:
+    enabled: true
+
+risk:
+  max_daily_loss_pct: 5.0
+  max_daily_trades: 20
+  max_position_size_pct: 20.0
+  max_positions: 3
+  risk_per_trade_pct: 2.0
+  max_leverage: 1.0
+  default_stop_loss_pct: 3.0
+  default_take_profit_pct: 6.0
+  circuit_breaker_loss_pct: 10.0
+  cooldown_minutes_after_loss: 60
+
+strategies:
+  - name: "BTC_RSI_Strategy"
+    enabled: true
+    type: rsi
+    symbol: "BTC/USDT"
+    timeframe: "1h"
+    params:
+      period: 14
+      oversold: 30
+      overbought: 70
+
+  - name: "ETH_MA_Cross"
+    enabled: true
+    type: ma_cross
+    symbol: "ETH/USDT"
+    timeframe: "4h"
+    params:
+      fast_period: 50
+      slow_period: 200

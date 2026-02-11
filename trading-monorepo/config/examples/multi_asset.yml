@@ -1,0 +1,90 @@
+# Example Configuration: Multi-Asset Trading
+# 이 설정은 여러 자산을 동시에 거래하는 예시입니다.
+
+bot:
+  id: "multi-asset-bot"
+  name: "Multi-Asset Trading Bot"
+  version: "1.0.0"
+  mode: paper  # 테스트 시 paper 모드로 시작하세요
+  timezone: "Asia/Seoul"
+
+exchange:
+  id: binance
+  sandbox: true
+  default_type: spot
+  testnet: true
+
+telegram:
+  enabled: true
+  notifications:
+    trade: true
+    error: true
+    daily_report: true
+    position: true
+  commands:
+    enabled: true
+
+risk:
+  max_daily_loss_pct: 3.0
+  max_daily_trades: 15
+  max_position_size_pct: 15.0
+  max_positions: 5  # 여러 자산 동시 거래
+  risk_per_trade_pct: 1.0
+  max_leverage: 1.0
+  default_stop_loss_pct: 2.0
+  default_take_profit_pct: 4.0
+  circuit_breaker_loss_pct: 8.0
+  cooldown_minutes_after_loss: 60
+
+strategies:
+  # Bitcoin 전략
+  - name: "BTC_MA_Cross"
+    enabled: true
+    type: ma_cross
+    symbol: "BTC/USDT"
+    timeframe: "4h"
+    params:
+      fast_period: 50
+      slow_period: 200
+
+  # Ethereum 전략
+  - name: "ETH_RSI"
+    enabled: true
+    type: rsi
+    symbol: "ETH/USDT"
+    timeframe: "1h"
+    params:
+      period: 14
+      oversold: 30
+      overbought: 70
+
+  # Solana 전략
+  - name: "SOL_Breakout"
+    enabled: true
+    type: breakout
+    symbol: "SOL/USDT"
+    timeframe: "1h"
+    params:
+      lookback_period: 20
+      breakout_threshold: 2.0
+
+  # Cardano 전략
+  - name: "ADA_MA_Cross"
+    enabled: true
+    type: ma_cross
+    symbol: "ADA/USDT"
+    timeframe: "2h"
+    params:
+      fast_period: 20
+      slow_period: 50
+
+  # Polygon 전략
+  - name: "MATIC_RSI"
+    enabled: true
+    type: rsi
+    symbol: "MATIC/USDT"
+    timeframe: "1h"
+    params:
+      period: 14
+      oversold: 25
+      overbought: 75

@@ -20,12 +20,13 @@ from trading_core import (
     CCXTExchange,
     OrderManager,
     RiskManager,
-    RiskConfig,
+    RiskConfig as RiskManagerConfig,
     Portfolio,
     SQLiteStateStore,
     BotState,
     OrderSide,
     OrderType,
+    load_config,
 )
 
 # Data imports
@@ -55,11 +56,11 @@ logger = logging.getLogger(__name__)
 
 class TradingBot:
     """메인 트레이딩 봇"""
-    
-    def __init__(self, config_path: str = "config/bot.yml"):
-        self.config = self._load_config(config_path)
+
+    def __init__(self, config_dir: str = "config"):
+        self.config = load_config(config_dir)
         self.running = False
-        
+
         # Core components
         self.exchange: Optional[CCXTExchange] = None
         self.order_manager: Optional[OrderManager] = None
@@ -67,130 +68,133 @@ class TradingBot:
         self.portfolio: Optional[Portfolio] = None
         self.state_store: Optional[SQLiteStateStore] = None
         self.bot_state: Optional[BotState] = None
-        
+
         # Data
         self.websocket: Optional[BinanceWebSocket] = None
         self.candle_buffers: Dict[str, CandleBuffer] = {}
-        
+
         # Strategies
         self.strategies: List[Strategy] = []
-        
+
         # Tasks
         self._tasks: List[asyncio.Task] = []
-        
-    def _load_config(self, path: str) -> Dict:
-        """설정 파일 로드"""
-        with open(path, 'r') as f:
-            return yaml.safe_load(f)
     
     async def initialize(self) -> None:
         """봇 초기화"""
-        logger.info("Initializing Trading Bot...")
-        
-        # Load environment variables
-        load_dotenv()
-        
+        logger.info(f"Initializing Trading Bot: {self.config.name} v{self.config.version}")
+        logger.info(f"Mode: {self.config.mode}")
+
+        # Validate configuration
+        from trading_core.config_manager import get_config_manager
+        config_mgr = get_config_manager()
+        errors = config_mgr.validate_config()
+        if errors:
+            for error in errors:
+                logger.error(f"Config error: {error}")
+            raise ValueError("Invalid configuration")
+
         # State store
         self.state_store = SQLiteStateStore("data/bot_state.db")
-        self.bot_state = BotState(self.state_store, self.config.get('bot_id', 'main'))
-        
+        self.bot_state = BotState(self.state_store, self.config.bot_id)
+
         # Restore or create portfolio
         portfolio_data = self.bot_state.load_portfolio()
         if portfolio_data:
             self.portfolio = Portfolio.from_dict(portfolio_data)
             logger.info(f"Portfolio restored: {self.portfolio.get_total_value()}")
         else:
-            initial_balance = Decimal(str(self.config.get('initial_balance', 1000)))
+            initial_balance = Decimal("10000")  # Default initial balance
             self.portfolio = Portfolio(initial_balance)
             logger.info(f"New portfolio created with {initial_balance}")
-        
+
         # Exchange
-        exchange_config = self.config['exchange']
+        exchange_cfg = self.config.exchange
         self.exchange = CCXTExchange(
-            exchange_id=exchange_config['id'],
-            api_key=os.getenv('EXCHANGE_API_KEY', ''),
-            api_secret=os.getenv('EXCHANGE_API_SECRET', ''),
-            sandbox=exchange_config.get('sandbox', True),
+            exchange_id=exchange_cfg.id,
+            api_key=exchange_cfg.api_key,
+            api_secret=exchange_cfg.api_secret,
+            sandbox=exchange_cfg.sandbox,
         )
         await self.exchange.connect()
-        logger.info(f"Connected to {exchange_config['id']}")
-        
+        logger.info(f"Connected to {exchange_cfg.id} (sandbox: {exchange_cfg.sandbox})")
+
         # Order manager
         self.order_manager = OrderManager(self.exchange)
         await self.order_manager.start()
-        
+
         # Restore orders
         orders_data = self.bot_state.load_orders()
         if orders_data:
             # TODO: Restore orders from state
             pass
-        
+
         # Risk manager
-        risk_config = RiskConfig(
-            max_position_size_pct=Decimal(str(self.config['risk'].get('max_position_size_pct', 10))),
-            max_positions=self.config['risk'].get('max_positions', 2),
-            risk_per_trade_pct=Decimal(str(self.config['risk'].get('risk_per_trade_pct', 1))),
-            max_daily_loss_pct=Decimal(str(self.config['risk'].get('max_daily_loss_pct', 3))),
-            max_leverage=Decimal(str(self.config['risk'].get('max_leverage', 1))),
+        risk_cfg = self.config.risk
+        risk_config = RiskManagerConfig(
+            max_position_size_pct=Decimal(str(risk_cfg.max_position_size_pct)),
+            max_positions=risk_cfg.max_positions,
+            risk_per_trade_pct=Decimal(str(risk_cfg.risk_per_trade_pct)),
+            max_daily_loss_pct=Decimal(str(risk_cfg.max_daily_loss_pct)),
+            max_leverage=Decimal(str(risk_cfg.max_leverage)),
         )
         self.risk_manager = RiskManager(risk_config, self.portfolio)
         logger.info("Risk manager initialized")
-        
+
         # WebSocket
-        ws_config = self.config.get('websocket', {})
-        self.websocket = BinanceWebSocket(testnet=ws_config.get('testnet', True))
-        
+        self.websocket = BinanceWebSocket(testnet=exchange_cfg.testnet)
+
         # Setup strategies
         await self._setup_strategies()
-        
+
         logger.info("Trading Bot initialized successfully")
     
     async def _setup_strategies(self) -> None:
         """전략 설정"""
-        strategies_config = self.config.get('strategies', [])
-        
+        strategies_config = self.config.strategies
+
         for strat_config in strategies_config:
-            if not strat_config.get('enabled', True):
+            if not strat_config.enabled:
                 continue
-            
-            name = strat_config['name']
-            symbol = strat_config['symbol']
-            timeframe = strat_config.get('timeframe', '4h')
-            strategy_type = strat_config['type']
-            
-            strategy_config = StrategyConfig(
+
+            name = strat_config.name
+            symbol = strat_config.symbol
+            timeframe = strat_config.timeframe
+            strategy_type = strat_config.type
+            params = strat_config.params
+
+            strategy_cfg = StrategyConfig(
                 name=name,
                 symbol=symbol,
                 timeframe=timeframe,
             )
-            
+
             # Create strategy based on type
             if strategy_type == 'ma_cross':
                 strategy = MACrossStrategy(
-                    strategy_config,
-                    fast_period=strat_config.get('fast_period', 50),
-                    slow_period=strat_config.get('slow_period', 200),
+                    strategy_cfg,
+                    fast_period=params.get('fast_period', 50),
+                    slow_period=params.get('slow_period', 200),
                 )
             elif strategy_type == 'rsi':
                 strategy = RSIStrategy(
-                    strategy_config,
-                    rsi_period=strat_config.get('period', 14),
-                    oversold=strat_config.get('oversold', 30),
-                    overbought=strat_config.get('overbought', 70),
+                    strategy_cfg,
+                    rsi_period=params.get('period', 14),
+                    oversold=params.get('oversold', 30),
+                    overbought=params.get('overbought', 70),
                 )
             else:
                 logger.warning(f"Unknown strategy type: {strategy_type}")
                 continue
-            
+
             self.strategies.append(strategy)
-            
+
             # Setup candle buffer
             if symbol not in self.candle_buffers:
                 self.candle_buffers[symbol] = CandleBuffer(
                     max_size=500,
                     timeframe=timeframe
                 )
-            
+
             logger.info(f"Strategy added: {name} ({strategy_type}) for {symbol}")
     
     async def start(self) -> None:
