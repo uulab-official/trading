@@ -1,0 +1,57 @@
+# Trading Bot Configuration
+
+# Bot Identity
+bot_id: "main-trading-bot"
+initial_balance: 1000  # USDT
+
+# Exchange Settings
+exchange:
+  id: "binance"  # or "bybit", "okx", etc.
+  sandbox: true  # Set to false for live trading
+  
+# WebSocket Settings
+websocket:
+  testnet: true
+  reconnect_delay: 5  # seconds
+
+# Risk Management
+risk:
+  max_position_size_pct: 10      # Max 10% of portfolio per position
+  max_positions: 2               # Max 2 concurrent positions
+  risk_per_trade_pct: 1          # Risk 1% per trade
+  max_daily_loss_pct: 3          # Stop trading after 3% daily loss
+  max_leverage: 1                # Spot trading (no leverage)
+  
+# Strategies
+strategies:
+  - name: "BTC_MA_Cross"
+    type: "ma_cross"
+    symbol: "BTC/USDT"
+    timeframe: "4h"
+    enabled: true
+    fast_period: 50
+    slow_period: 200
+    
+  - name: "ETH_RSI"
+    type: "rsi"
+    symbol: "ETH/USDT"
+    timeframe: "4h"
+    enabled: true
+    period: 14
+    oversold: 30
+    overbought: 70
+    
+  - name: "SOL_MA_Cross"
+    type: "ma_cross"
+    symbol: "SOL/USDT"
+    timeframe: "4h"
+    enabled: false  # Disabled for now
+    fast_period: 20
+    slow_period: 50
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/trading-bot.log"
+  max_size: "10MB"
+  backup_count: 5

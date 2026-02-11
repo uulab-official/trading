@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-bot"
+version = "0.1.0"
+description = "24/7 Crypto Trading Bot"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "trading-core",
+    "trading-data", 
+    "trading-strategy",
+    "pyyaml>=6.0",
+    "schedule>=1.2.0",
+]
+
+[project.scripts]
+trading-bot = "trading_bot.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["trading_bot*"]
