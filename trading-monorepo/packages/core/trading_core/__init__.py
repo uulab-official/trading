@@ -14,26 +14,24 @@ from trading_core.order_manager import OrderManager, Order, OrderSide, OrderType
 from trading_core.risk_manager import RiskManager, RiskConfig
 from trading_core.portfolio import Portfolio, Position
 from trading_core.state_store import StateStore, SQLiteStateStore
+from trading_core.config_manager import ConfigManager, load_config
 
 __all__ = [
-    # Exchange
     "ExchangeInterface",
     "CCXTExchange",
-    # Orders
     "OrderManager",
     "Order",
     "OrderSide",
-    "OrderType", 
+    "OrderType",
     "OrderStatus",
-    # Risk
     "RiskManager",
     "RiskConfig",
-    # Portfolio
     "Portfolio",
     "Position",
-    # State
     "StateStore",
     "SQLiteStateStore",
+    "ConfigManager",
+    "load_config",
 ]
 
 __version__ = "0.1.0"

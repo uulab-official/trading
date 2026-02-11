@@ -69,6 +69,11 @@ secrets/
 *.pem
 *.crt
 
+# Configuration (active configs with secrets - templates are committed)
+config/active/
+config/secrets/
+!config/templates/
+
 # Temporary files
 tmp/
 temp/

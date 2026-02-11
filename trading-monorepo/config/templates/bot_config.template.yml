@@ -1,0 +1,164 @@
+# Trading Bot Configuration Template
+# 템플릿 파일 - 실제 사용 시 config/active/ 디렉토리에 복사하여 사용
+
+# ============================================
+# BOT IDENTIFICATION
+# ============================================
+bot:
+  id: "trading-bot-001"           # 봇 고유 ID (로깅/식별용)
+  name: "My Trading Bot"          # 봇 이름 (알림에 표시)
+  version: "1.0.0"                # 버전
+  mode: "paper"                   # "paper" (모의) | "live" (실전)
+  timezone: "Asia/Seoul"          # 타임존
+
+# ============================================
+# EXCHANGE CONFIGURATION
+# ============================================
+# ⚠️  API 키는 별도 secrets 파일에 저장 (config/secrets.yml)
+exchange:
+  id: "binance"                   # 거래소 ID (binance, bybit, okx 등)
+  sandbox: true                   # true: 테스트넷, false: 실전
+  
+  # API 설정 (secrets.yml에서 참조)
+  api_key_ref: "${BINANCE_API_KEY}"
+  api_secret_ref: "${BINANCE_API_SECRET}"
+  
+  # 거래 설정
+  default_type: "spot"            # "spot" | "margin" | "futures"
+  testnet: true                   # 테스트넷 사용 여부
+
+# ============================================
+# TELEGRAM NOTIFICATIONS
+# ============================================
+# 텔레그램 알림 설정
+telegram:
+  enabled: true                   # 알림 활성화 여부
+  
+  # 봇 토큰 (secrets.yml에서 참조 또는 환경변수)
+  bot_token_ref: "${TELEGRAM_BOT_TOKEN}"
+  
+  # 채팅 ID (secrets.yml에서 참조 또는 환경변수)
+  chat_id_ref: "${TELEGRAM_CHAT_ID}"
+  
+  # 알림 설정
+  notifications:
+    order_filled: true            # 주문 체결 알림
+    position_closed: true         # 포지션 청산 알림
+    daily_report: true            # 일일 리포트 (UTC 00:00)
+    risk_alert: true              # 리스크 알림
+    error_alert: true             # 에러 알림
+  
+  # 명령어 설정
+  commands:
+    enabled: true                 # 텔레그램 명령어 활성화
+    allowed_users: []             # 허용된 사용자 ID (빈 배열 = 모든 사용자)
+
+# ============================================
+# RISK MANAGEMENT
+# ============================================
+risk:
+  # 일일 리스크 제한
+  max_daily_loss_pct: 3.0         # 일일 최대 손실 %
+  max_daily_trades: 10            # 일일 최대 거래 횟수
+  
+  # 포지션 리스크
+  max_position_size_pct: 10.0     # 계좌 대비 최대 포지션 %
+  max_positions: 2                # 최대 동시 포지션 수
+  risk_per_trade_pct: 1.0         # 거래당 리스크 %
+  
+  # 레버리지
+  max_leverage: 1.0               # 최대 레버리지 (현물=1)
+  
+  # 손절/익절
+  default_stop_loss_pct: 2.0      # 기본 손절 %
+  default_take_profit_pct: 4.0    # 기본 익절 %
+  
+  # 서킷 브레이커
+  circuit_breaker_loss_pct: 5.0   # 서킷 브레이커 발동 손실 %
+  cooldown_minutes_after_loss: 30 # 손실 후 쿨다운 (분)
+
+# ============================================
+# STRATEGIES
+# ============================================
+strategies:
+  - name: "BTC_RSI_Strategy"
+    enabled: true
+    type: "rsi"
+    symbol: "BTC/USDT"
+    timeframe: "4h"
+    
+    # RSI 파라미터
+    params:
+      period: 14
+      oversold: 30
+      overbought: 70
+    
+    # 리스크 오버라이드 (선택)
+    risk_override:
+      position_size_pct: 5.0
+
+  - name: "ETH_MA_Cross"
+    enabled: false                  # 비활성화
+    type: "ma_cross"
+    symbol: "ETH/USDT"
+    timeframe: "4h"
+    
+    params:
+      fast_period: 50
+      slow_period: 200
+
+# ============================================
+# BACKTEST SETTINGS
+# ============================================
+backtest:
+  enabled: false                  # 백테스트 모드 활성화
+  initial_balance: 10000          # 초기 자본
+  commission_pct: 0.1             # 수수료 %
+  slippage_pct: 0.05              # 슬리피지 %
+
+# ============================================
+# LOGGING
+# ============================================
+logging:
+  level: "INFO"                   # DEBUG | INFO | WARNING | ERROR
+  file: "logs/trading-bot.log"
+  max_size: "10MB"
+  backup_count: 5
+  
+  # 외부 로깅 (선택)
+  external:
+    enabled: false
+    # Datadog, Splunk 등 연동 가능
+
+# ============================================
+# DATABASE
+# ============================================
+database:
+  type: "sqlite"                  # sqlite | postgres
+  path: "data/trading.db"         # SQLite 경로
+  # PostgreSQL 사용 시:
+  # host: "localhost"
+  # port: 5432
+  # database: "trading"
+  # username_ref: "${DB_USER}"
+  # password_ref: "${DB_PASS}"
+
+# ============================================
+# WEBSOCKET
+# ============================================
+websocket:
+  enabled: true
+  reconnect_delay: 5              # 재연결 지연 (초)
+  ping_interval: 30               # 핑 간격 (초)
+
+# ============================================
+# MONITORING
+# ============================================
+monitoring:
+  enabled: true
+  health_check_interval: 60       # 건강 체크 간격 (초)
+  
+  # Prometheus 메트릭 (선택)
+  prometheus:
+    enabled: false
+    port: 9090
