@@ -178,8 +178,18 @@ class BacktestEngine:
             
             # 캔들 생성
             from trading_data import Candle
+            # timestamp 처리
+            if 'timestamp' in row:
+                ts = row['timestamp']
+                if hasattr(ts, 'timestamp'):
+                    timestamp = int(ts.timestamp() * 1000)
+                else:
+                    timestamp = int(ts)
+            else:
+                timestamp = int(row.name.timestamp() * 1000)
+            
             candle = Candle(
-                timestamp=int(row['timestamp']) if 'timestamp' in row else int(row.name.timestamp() * 1000),
+                timestamp=timestamp,
                 open=Decimal(str(row['open'])),
                 high=Decimal(str(row['high'])),
                 low=Decimal(str(row['low'])),

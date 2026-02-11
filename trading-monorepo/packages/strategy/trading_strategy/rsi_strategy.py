@@ -62,15 +62,15 @@ class RSIStrategy(Strategy):
         if current_rsi <= self.oversold:
             signal_type = SignalType.BUY
             # RSI가 낮을수록 신뢰도 상승
-            confidence = min(0.9, 0.5 + (self.oversold - current_rsi) / 100)
-            reason = f"RSI oversold: {current_rsi:.1f}"
+            confidence = min(0.9, 0.5 + float((self.oversold - current_rsi) / 100))
+            reason = f"RSI oversold: {float(current_rsi):.1f}"
             
         # 과매수 -> 매도
         elif current_rsi >= self.overbought:
             signal_type = SignalType.SELL
             # RSI가 높을수록 신뢰도 상승
-            confidence = min(0.9, 0.5 + (current_rsi - self.overbought) / 100)
-            reason = f"RSI overbought: {current_rsi:.1f}"
+            confidence = min(0.9, 0.5 + float((current_rsi - self.overbought) / 100))
+            reason = f"RSI overbought: {float(current_rsi):.1f}"
         
         # 크로스 감지 (추가 신뢰도)
         if self._prev_rsi > self.oversold and current_rsi <= self.oversold:
