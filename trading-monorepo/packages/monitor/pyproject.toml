@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-monitor"
+version = "0.1.0"
+description = "Monitoring and alerting system for trading bot"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "trading-core",
+    "python-telegram-bot>=20.0",
+    "requests>=2.31.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["trading_monitor*"]

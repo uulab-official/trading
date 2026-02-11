@@ -189,7 +189,7 @@ class MACrossStrategy(Strategy):
         )
 
 
-class TripleMAStrategy(Stracy):
+class TripleMAStrategy(Strategy):
     """
     삼중 이동평균선 전략
     

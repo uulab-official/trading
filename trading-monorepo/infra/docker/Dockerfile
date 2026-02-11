@@ -33,6 +33,8 @@ RUN pip install --no-cache-dir \
     -e /app/packages/core \
     -e /app/packages/data \
     -e /app/packages/strategy \
+    -e /app/packages/backtest \
+    -e /app/packages/monitor \
     -e /app/apps/trading-bot
 
 # Set environment

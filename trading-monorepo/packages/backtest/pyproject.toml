@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-backtest"
+version = "0.1.0"
+description = "Backtesting engine for trading strategies"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "trading-core",
+    "trading-data",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "matplotlib>=3.7.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["trading_backtest*"]
