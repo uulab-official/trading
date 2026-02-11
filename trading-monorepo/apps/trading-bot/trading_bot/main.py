@@ -27,6 +27,9 @@ from trading_core import (
     OrderSide,
     OrderType,
     load_config,
+    TelegramNotifier,
+    NotificationConfig,
+    NullNotifier,
 )
 
 # Data imports
@@ -78,7 +81,42 @@ class TradingBot:
 
         # Tasks
         self._tasks: List[asyncio.Task] = []
-    
+
+        # Telegram notifier
+        self.notifier = self._create_notifier()
+
+    def _create_notifier(self):
+        """텔레그램 노티파이어 생성"""
+        telegram_cfg = self.config.telegram
+
+        if not telegram_cfg.enabled:
+            logger.info("Telegram notifications disabled")
+            return NullNotifier()
+
+        try:
+            notification_config = NotificationConfig(
+                trade=telegram_cfg.notifications.get('trade', True),
+                error=telegram_cfg.notifications.get('error', True),
+                daily_report=telegram_cfg.notifications.get('daily_report', True),
+                position=telegram_cfg.notifications.get('position', True),
+            )
+
+            notifier = TelegramNotifier(
+                bot_token=telegram_cfg.bot_token,
+                chat_id=telegram_cfg.chat_id,
+                config=notification_config
+            )
+
+            if notifier.enabled:
+                logger.info("Telegram notifier initialized")
+            else:
+                logger.warning("Telegram notifier failed to initialize")
+
+            return notifier
+        except Exception as e:
+            logger.error(f"Failed to create Telegram notifier: {e}")
+            return NullNotifier()
+
     async def initialize(self) -> None:
         """봇 초기화"""
         logger.info(f"Initializing Trading Bot: {self.config.name} v{self.config.version}")
@@ -147,7 +185,14 @@ class TradingBot:
         await self._setup_strategies()
 
         logger.info("Trading Bot initialized successfully")
-    
+
+        # Send startup notification
+        await self.notifier.notify_startup(
+            bot_name=self.config.name,
+            version=self.config.version,
+            mode=self.config.mode
+        )
+
     async def _setup_strategies(self) -> None:
         """전략 설정"""
         strategies_config = self.config.strategies
@@ -243,7 +288,13 @@ class TradingBot:
         
         # Save final state
         await self._save_state()
-        
+
+        # Send shutdown notification
+        await self.notifier.notify_shutdown(
+            bot_name=self.config.name,
+            reason="User initiated"
+        )
+
         logger.info("Trading Bot stopped")
     
     async def _main_loop(self) -> None:
@@ -366,11 +417,26 @@ class TradingBot:
                 strategy_id=signal.strategy_id,
                 order_id=order.client_order_id
             )
-            
+
             logger.info(f"Long position opened: {signal.symbol} {size} @ {signal.price}")
-            
+
+            # Send notification
+            await self.notifier.notify_position_opened(
+                symbol=signal.symbol,
+                side='long',
+                size=size,
+                entry_price=signal.price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                strategy=signal.strategy_id
+            )
+
         except Exception as e:
             logger.error(f"Failed to open position: {e}")
+            await self.notifier.notify_error(
+                error_message=str(e),
+                context=f"Open position {signal.symbol}"
+            )
     
     async def _close_position(self, symbol: str, price: Decimal, reason: str) -> None:
         """포지션 청산"""
@@ -389,16 +455,32 @@ class TradingBot:
             
             # Update portfolio
             trade = self.portfolio.close_position(symbol, price)
-            
+
             # Update risk manager
             self.risk_manager.on_position_closed(trade.pnl)
-            
+
             logger.info(
                 f"Position closed: {symbol} @ {price} (PnL: {trade.pnl:.2f}, Reason: {reason})"
             )
-            
+
+            # Send notification
+            await self.notifier.notify_position_closed(
+                symbol=symbol,
+                side='long',
+                size=position.size,
+                entry_price=position.entry_price,
+                exit_price=price,
+                pnl=trade.pnl,
+                pnl_pct=trade.pnl_pct if hasattr(trade, 'pnl_pct') else Decimal("0"),
+                reason=reason
+            )
+
         except Exception as e:
             logger.error(f"Failed to close position: {e}")
+            await self.notifier.notify_error(
+                error_message=str(e),
+                context=f"Close position {symbol}"
+            )
     
     async def _update_candles(self) -> None:
         """캔들 데이터 업데이트"""
