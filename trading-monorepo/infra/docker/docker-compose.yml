@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  trading-bot:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    container_name: crypto-trading-bot
+    restart: unless-stopped
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Seoul
+    
+    env_file:
+      - ../../apps/trading-bot/.env
+    
+    volumes:
+      # Persistent data storage
+      - trading-data:/app/data
+      # Logs
+      - ./logs:/app/logs
+      # Config (optional override)
+      - ../../apps/trading-bot/config:/app/apps/trading-bot/config:ro
+    
+    networks:
+      - trading-network
+    
+    # Resource limits for NAS
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Redis for state management (if needed)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: trading-redis
+  #   restart: unless-stopped
+  #   volumes:
+  #     - redis-data:/data
+  #   networks:
+  #     - trading-network
+
+volumes:
+  trading-data:
+    driver: local
+  # redis-data:
+  #   driver: local
+
+networks:
+  trading-network:
+    driver: bridge
