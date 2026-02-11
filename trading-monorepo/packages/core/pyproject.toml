@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-core"
+version = "0.1.0"
+description = "Core trading infrastructure - exchange, orders, risk management"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "ccxt>=4.0.0",
+    "pydantic>=2.0.0",
+    "aiohttp>=3.8.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["trading_core*"]
