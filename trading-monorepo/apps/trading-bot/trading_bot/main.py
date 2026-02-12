@@ -483,9 +483,25 @@ class TradingBot:
             )
     
     async def _update_candles(self) -> None:
-        """캔들 데이터 업데이트"""
-        # TODO: Fetch historical candles from exchange
-        pass
+        """캔들 데이터 업데이트 - 거래소에서 가져오기"""
+        for symbol, buffer in self.candle_buffers.items():
+            try:
+                # 거래소에서 캔들 데이터 가져오기
+                candles = await self.exchange.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=buffer.timeframe,
+                    limit=100  # 최근 100개 캔들
+                )
+                
+                if candles:
+                    # 캔들 버퍼 업데이트
+                    for candle in candles:
+                        buffer.add_candle(candle)
+                    
+                    logger.debug(f"Updated {len(candles)} candles for {symbol}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to fetch candles for {symbol}: {e}")
     
     async def _save_state_loop(self) -> None:
         """상태 저장 루프"""
