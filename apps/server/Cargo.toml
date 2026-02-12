@@ -1,0 +1,98 @@
+[package]
+name = "trading-server"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+[[bin]]
+name = "trading-server"
+path = "src/main.rs"
+
+[lib]
+name = "trading_server"
+path = "src/lib.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full", "rt-multi-thread"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+
+# Web framework (embedded dashboard)
+actix-web = "4.4"
+actix-rt = "2.9"
+actix-cors = "0.7"
+actix-files = "0.6"
+actix-ws = "0.2"
+
+# WebSocket client for exchange connections
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+tungstenite = "0.21"
+futures = "0.3"
+futures-util = "0.3"
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "migrate", "chrono"] }
+
+# Concurrency & Parallelism
+rayon = "1.8"
+dashmap = "5.5"
+parking_lot = "0.12"
+crossbeam = "0.8"
+crossbeam-channel = "0.5"
+
+# Type-safe configuration
+config = "0.14"
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+log = "0.4"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+tokio-cron-scheduler = "0.9"
+
+# Cryptography (for API signatures)
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.21"
+
+# Data structures
+indexmap = "2.1"
+
+# Performance
+rustc-hash = "1.1"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+mockall = "0.12"
+wiremock = "0.6"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true

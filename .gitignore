@@ -78,3 +78,15 @@ config/secrets/
 tmp/
 temp/
 *.tmp
+
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+*.rlib
+*.rmeta
+
+# Rust build artifacts
+apps/**/target/
+packages/**/target/
+**/*.pdb
