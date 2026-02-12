@@ -24,6 +24,15 @@ pub struct DashboardState {
     event_tx: broadcast::Sender<DashboardEvent>,
 }
 
+impl Clone for WebDashboard {
+    fn clone(&self) -> Self {
+        Self {
+            port: self.port,
+            event_tx: self.event_tx.clone(),
+        }
+    }
+}
+
 impl WebDashboard {
     pub fn new(port: u16) -> Self {
         let (event_tx, _) = broadcast::channel(1000);
@@ -34,7 +43,7 @@ impl WebDashboard {
         self.event_tx.clone()
     }
 
-    pub async fn run(self) -> std::io::Result<()> {
+    pub async fn run(&self) -> std::io::Result<()> {
         info!("Starting web dashboard on port {}", self.port);
 
         let state = web::Data::new(DashboardState {

@@ -1,6 +1,9 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+use tokio::net::UnixStream;
 use tokio::sync::{broadcast, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{error, info, warn};
@@ -17,6 +20,16 @@ use crate::strategy::{Signal, Strategy};
 use crate::strategy::rsi::RsiStrategy;
 use crate::strategy::ma_cross::MaCrossStrategy;
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum WorkerMessage {
+    PriceUpdate { symbol: String, price: f64 },
+    OrderUpdate(Order),
+    PositionUpdate(crate::core::models::Position),
+    TradeSignal { symbol: String, signal: String },
+    SystemStatus { status: String, message: String },
+    Heartbeat,
+}
+
 pub struct WorkerProcess {
     config: Config,
     master_socket: String,
@@ -28,11 +41,12 @@ pub struct WorkerProcess {
     strategies: Arc<RwLock<Vec<Box<dyn Strategy>>>>,
     shutdown_tx: broadcast::Sender<()>,
     binance_client: Arc<RwLock<Option<BinanceClient>>>,
+    master_tx: RwLock<Option<UnixStream>>,
 }
 
 impl WorkerProcess {
     pub async fn new(config_path: String, master_socket: String) -> Result<Self> {
-        let config = Config::from_file(&format!("{}/bot.yml", config_path))?;
+        let config = Config::from_file(&format!("{}/bot.toml", config_path))?;
         
         std::fs::create_dir_all("data")?;
         let db = Arc::new(Database::new("sqlite://data/trading.db").await?);
@@ -65,26 +79,67 @@ impl WorkerProcess {
             strategies: Arc::new(RwLock::new(Vec::new())),
             shutdown_tx,
             binance_client: Arc::new(RwLock::new(None)),
+            master_tx: RwLock::new(None),
         })
+    }
+
+    async fn connect_to_master(&self) -> Result<()> {
+        let stream = UnixStream::connect(&self.master_socket).await?;
+        let mut master_tx = self.master_tx.write().await;
+        *master_tx = Some(stream);
+        info!("Connected to master at {}", self.master_socket);
+        Ok(())
+    }
+
+    async fn send_to_master(&self, message: WorkerMessage) -> Result<()> {
+        let mut master_tx = self.master_tx.write().await;
+        if let Some(stream) = master_tx.as_mut() {
+            let json = serde_json::to_string(&message)?;
+            let bytes = json.as_bytes();
+            let len = bytes.len() as u32;
+            stream.write_all(&len.to_be_bytes()).await?;
+            stream.write_all(bytes).await?;
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Not connected to master"))
+        }
     }
     
     pub async fn run(self) -> Result<()> {
         info!("Worker process starting...");
-        
+
+        // Connect to master first
+        if let Err(e) = self.connect_to_master().await {
+            error!("Failed to connect to master: {}", e);
+            return Err(e);
+        }
+
+        self.send_to_master(WorkerMessage::SystemStatus {
+            status: "initializing".to_string(),
+            message: "Worker starting up".to_string(),
+        }).await.ok();
+
         self.init_exchanges().await?;
         self.init_strategies().await?;
         self.restore_state().await?;
-        
+
+        self.send_to_master(WorkerMessage::SystemStatus {
+            status: "running".to_string(),
+            message: "Worker initialized and running".to_string(),
+        }).await.ok();
+
         let mut shutdown_rx = self.shutdown_tx.subscribe();
-        let mut ticker_interval = interval(Duration::from_secs(60));
+        let _ticker_interval = interval(Duration::from_secs(60));
         let mut health_interval = interval(Duration::from_secs(30));
-        
+
         let exchange_manager = self.exchange_manager.clone();
         let order_manager = self.order_manager.clone();
         let portfolio_manager = self.portfolio_manager.clone();
         let risk_manager = self.risk_manager.clone();
         let strategies = self.strategies.clone();
         let db = self.db.clone();
+
+        let mut mock_price_interval = interval(Duration::from_secs(5));
         
         tokio::select! {
             _ = self.run_trading_loop(
@@ -103,11 +158,34 @@ impl WorkerProcess {
             _ = tokio::signal::ctrl_c() => {
                 info!("Ctrl+C received, shutting down");
             }
+            _ = async {
+                loop {
+                    health_interval.tick().await;
+                    self.send_to_master(WorkerMessage::Heartbeat).await.ok();
+                }
+            } => {}
+            _ = async {
+                info!("Mock price task started");
+                loop {
+                    mock_price_interval.tick().await;
+                    let price = 45000.0 + (rand::random::<f64>() - 0.5) * 1000.0;
+                    info!("Sending mock price update: BTC/USDT = ${:.2}", price);
+                    self.send_to_master(WorkerMessage::PriceUpdate {
+                        symbol: "BTC/USDT".to_string(),
+                        price,
+                    }).await.ok();
+                }
+            } => {}
         }
-        
+
+        self.send_to_master(WorkerMessage::SystemStatus {
+            status: "shutdown".to_string(),
+            message: "Worker shutting down".to_string(),
+        }).await.ok();
+
         self.cleanup().await?;
         info!("Worker process stopped");
-        
+
         Ok(())
     }
     
@@ -123,34 +201,45 @@ impl WorkerProcess {
 
         let mut binance = BinanceClient::new(exchange_config);
 
-        // WebSocket 연결
-        binance.connect().await?;
+        match binance.connect().await {
+            Ok(_) => {
+                for strategy_config in &self.config.strategies {
+                    if !strategy_config.enabled {
+                        continue;
+                    }
 
-        // 각 전략의 심볼에 대해 구독 설정
-        for strategy_config in &self.config.strategies {
-            if !strategy_config.enabled {
-                continue;
+                    let symbol = &strategy_config.symbol;
+                    let timeframe = &strategy_config.timeframe;
+
+                    if let Err(e) = binance.subscribe_candles(symbol, timeframe).await {
+                        warn!("Failed to subscribe to {} candles: {}", symbol, e);
+                    } else {
+                        info!("Subscribed to {} candles ({})", symbol, timeframe);
+                    }
+
+                    if let Err(e) = binance.subscribe_ticker(symbol).await {
+                        warn!("Failed to subscribe to {} ticker: {}", symbol, e);
+                    } else {
+                        info!("Subscribed to {} ticker", symbol);
+                    }
+                }
+
+                {
+                    let mut client = self.binance_client.write().await;
+                    *client = Some(binance);
+                }
+
+                info!("Exchanges initialized and WebSocket connected");
             }
-
-            let symbol = &strategy_config.symbol;
-            let timeframe = &strategy_config.timeframe;
-
-            // 캔들 구독
-            binance.subscribe_candles(symbol, timeframe).await?;
-            info!("Subscribed to {} candles ({})", symbol, timeframe);
-
-            // 티커 구독
-            binance.subscribe_ticker(symbol).await?;
-            info!("Subscribed to {} ticker", symbol);
+            Err(e) => {
+                warn!("Failed to connect to exchange: {}. Running in mock mode.", e);
+                self.send_to_master(WorkerMessage::SystemStatus {
+                    status: "mock_mode".to_string(),
+                    message: "Running without exchange connection".to_string(),
+                }).await.ok();
+            }
         }
 
-        // BinanceClient 저장
-        {
-            let mut client = self.binance_client.write().await;
-            *client = Some(binance);
-        }
-
-        info!("Exchanges initialized and WebSocket connected");
         Ok(())
     }
     

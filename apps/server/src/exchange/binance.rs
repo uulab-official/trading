@@ -18,6 +18,8 @@ pub struct BinanceClient {
     config: ExchangeConfig,
     ws_stream: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     event_tx: broadcast::Sender<ExchangeEvent>,
+    pending_streams: Vec<String>,
+    is_connected: bool,
 }
 
 impl BinanceClient {
@@ -27,14 +29,26 @@ impl BinanceClient {
             config,
             ws_stream: None,
             event_tx,
+            pending_streams: Vec::new(),
+            is_connected: false,
         }
     }
 
-    fn get_ws_url(&self) -> String {
+    fn get_ws_base_url(&self) -> String {
         if self.config.testnet {
-            "wss://testnet.binance.vision/ws".to_string()
+            "wss://testnet.binance.vision".to_string()
         } else {
-            self.config.ws_url.clone()
+            self.config.ws_url.clone().replace("/ws", "")
+        }
+    }
+
+    fn build_stream_url(&self) -> String {
+        let base = self.get_ws_base_url();
+        if self.pending_streams.is_empty() {
+            format!("{}/ws", base)
+        } else {
+            let streams = self.pending_streams.join("/");
+            format!("{}/stream?streams={}", base, streams)
         }
     }
 
@@ -224,14 +238,37 @@ impl BinanceClient {
 #[async_trait::async_trait]
 impl Exchange for BinanceClient {
     async fn connect(&mut self) -> Result<()> {
-        let ws_url = self.get_ws_url();
+        if self.is_connected {
+            return Ok(());
+        }
+
+        // If no streams pending, add a default one to avoid 404
+        if self.pending_streams.is_empty() {
+            self.pending_streams.push("btcusdt@ticker".to_string());
+        }
+
+        let ws_url = self.build_stream_url();
         info!("Connecting to Binance WebSocket: {}", ws_url);
 
-        let (ws_stream, _) = connect_async(&ws_url).await?;
-        self.ws_stream = Some(ws_stream);
-
-        self.event_tx.send(ExchangeEvent::Connected)?;
-        info!("Binance WebSocket connected");
+        match connect_async(&ws_url).await {
+            Ok((ws_stream, _)) => {
+                self.ws_stream = Some(ws_stream);
+                self.is_connected = true;
+                self.event_tx.send(ExchangeEvent::Connected)?;
+                info!("Binance WebSocket connected successfully");
+            }
+            Err(e) => {
+                error!("Failed to connect to Binance WebSocket: {}", e);
+                // Try with a simpler URL as fallback
+                let fallback_url = format!("{}/ws", self.get_ws_base_url());
+                info!("Trying fallback URL: {}", fallback_url);
+                let (ws_stream, _) = connect_async(&fallback_url).await?;
+                self.ws_stream = Some(ws_stream);
+                self.is_connected = true;
+                self.event_tx.send(ExchangeEvent::Connected)?;
+                info!("Binance WebSocket connected via fallback");
+            }
+        }
 
         Ok(())
     }
@@ -247,15 +284,22 @@ impl Exchange for BinanceClient {
 
     async fn subscribe_ticker(&mut self, symbol: &str) -> Result<()> {
         let symbol_lower = symbol.to_lowercase().replace("/", "");
-        let subscribe_msg = json!({
-            "method": "SUBSCRIBE",
-            "params": [format!("{}@ticker", symbol_lower)],
-            "id": 1
-        });
+        let stream_name = format!("{}@ticker", symbol_lower);
         
-        if let Some(ref mut stream) = self.ws_stream {
-            stream.send(Message::Text(subscribe_msg.to_string())).await?;
-            info!("Subscribed to {} ticker", symbol);
+        if self.is_connected {
+            let subscribe_msg = json!({
+                "method": "SUBSCRIBE",
+                "params": [stream_name],
+                "id": 1
+            });
+            
+            if let Some(ref mut stream) = self.ws_stream {
+                stream.send(Message::Text(subscribe_msg.to_string())).await?;
+                info!("Subscribed to {} ticker", symbol);
+            }
+        } else {
+            self.pending_streams.push(stream_name);
+            info!("Queued {} ticker subscription for connection", symbol);
         }
         
         Ok(())
@@ -273,15 +317,22 @@ impl Exchange for BinanceClient {
             _ => "1h",
         };
         
-        let subscribe_msg = json!({
-            "method": "SUBSCRIBE",
-            "params": [format!("{}@kline_{}", symbol_lower, interval)],
-            "id": 2
-        });
+        let stream_name = format!("{}@kline_{}", symbol_lower, interval);
         
-        if let Some(ref mut stream) = self.ws_stream {
-            stream.send(Message::Text(subscribe_msg.to_string())).await?;
-            info!("Subscribed to {} candles ({})", symbol, timeframe);
+        if self.is_connected {
+            let subscribe_msg = json!({
+                "method": "SUBSCRIBE",
+                "params": [stream_name],
+                "id": 2
+            });
+            
+            if let Some(ref mut stream) = self.ws_stream {
+                stream.send(Message::Text(subscribe_msg.to_string())).await?;
+                info!("Subscribed to {} candles ({})", symbol, timeframe);
+            }
+        } else {
+            self.pending_streams.push(stream_name);
+            info!("Queued {} candles subscription for connection", symbol);
         }
         
         Ok(())

@@ -1,0 +1,71 @@
+# Trading Bot Configuration
+
+[bot]
+id = "main-trading-bot"
+name = "Main Trading Bot"
+mode = "paper"
+timezone = "Asia/Seoul"
+
+[exchange]
+id = "binance"
+sandbox = true
+testnet = true
+ws_url = "wss://stream.binance.com:9443/ws"
+rest_url = "https://api.binance.com"
+
+[telegram]
+enabled = false
+
+[telegram.notifications]
+trade = true
+error = true
+daily_report = true
+position = true
+
+[risk]
+max_daily_loss_pct = 3.0
+max_positions = 2
+risk_per_trade_pct = 1.0
+max_leverage = 1.0
+circuit_breaker_threshold = 5.0
+
+[web]
+enabled = true
+port = 8080
+host = "0.0.0.0"
+ws_update_interval_ms = 1000
+
+# Strategies
+[[strategies]]
+name = "BTC_MA_Cross"
+enabled = true
+strategy_type = "ma_cross"
+symbol = "BTC/USDT"
+timeframe = "4h"
+
+[strategies.params]
+fast_period = 50
+slow_period = 200
+
+[[strategies]]
+name = "ETH_RSI"
+enabled = true
+strategy_type = "rsi"
+symbol = "ETH/USDT"
+timeframe = "4h"
+
+[strategies.params]
+period = 14
+oversold = 30
+overbought = 70
+
+[[strategies]]
+name = "SOL_MA_Cross"
+enabled = false
+strategy_type = "ma_cross"
+symbol = "SOL/USDT"
+timeframe = "4h"
+
+[strategies.params]
+fast_period = 20
+slow_period = 50

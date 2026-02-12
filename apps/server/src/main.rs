@@ -7,6 +7,7 @@ mod worker;
 
 use anyhow::Result;
 use clap::Parser;
+use std::sync::Arc;
 use tracing::{error, info};
 
 #[derive(Parser, Debug)]
@@ -16,9 +17,9 @@ enum Cli {
     Master {
         #[arg(short, long, default_value = "config")]
         config_path: String,
-        #[arg(short, long, default_value = "8080")]
+        #[arg(short = 'p', long, default_value = "8080")]
         web_port: u16,
-        #[arg(short, long, default_value = "9000")]
+        #[arg(short = 'k', long, default_value = "9000")]
         worker_port: u16,
     },
     Worker {
@@ -48,7 +49,7 @@ async fn main() -> Result<()> {
         } => {
             info!("Starting Trading Server Master process");
             let master = master::MasterProcess::new(config_path, web_port, worker_port).await?;
-            master.run().await?;
+            Arc::clone(&master).run().await?;
         }
         Cli::Worker {
             config_path,

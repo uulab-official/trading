@@ -1,13 +1,27 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use tokio::net::{TcpListener, UnixListener};
+use tokio::io::AsyncReadExt;
+use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 pub mod deploy;
 pub mod web;
+
+use web::{DashboardEvent, WebDashboard};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum WorkerMessage {
+    PriceUpdate { symbol: String, price: f64 },
+    OrderUpdate(crate::core::models::Order),
+    PositionUpdate(crate::core::models::Position),
+    TradeSignal { symbol: String, signal: String },
+    SystemStatus { status: String, message: String },
+    Heartbeat,
+}
 
 pub struct MasterProcess {
     config_path: String,
@@ -15,26 +29,30 @@ pub struct MasterProcess {
     worker_port: u16,
     socket_path: PathBuf,
     current_worker: Arc<RwLock<Option<Child>>>,
+    web_dashboard: Arc<WebDashboard>,
 }
 
 impl MasterProcess {
-    pub async fn new(config_path: String, web_port: u16, worker_port: u16) -> Result<Self> {
+    pub async fn new(config_path: String, web_port: u16, worker_port: u16) -> Result<Arc<Self>> {
         let socket_path = PathBuf::from("/tmp/trading-master.sock");
 
         if socket_path.exists() {
             std::fs::remove_file(&socket_path)?;
         }
 
-        Ok(Self {
+        let web_dashboard = Arc::new(WebDashboard::new(web_port));
+
+        Ok(Arc::new(Self {
             config_path,
             web_port,
             worker_port,
             socket_path,
             current_worker: Arc::new(RwLock::new(None)),
-        })
+            web_dashboard,
+        }))
     }
 
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(self: Arc<Self>) -> Result<()> {
         info!(
             web_port = self.web_port,
             worker_port = self.worker_port,
@@ -42,24 +60,32 @@ impl MasterProcess {
             "Master process starting"
         );
 
-        let web_listener = TcpListener::bind(format!("0.0.0.0:{}", self.web_port)).await?;
         let unix_listener = UnixListener::bind(&self.socket_path)?;
 
-        info!("Web server listening on port {}", self.web_port);
         info!("Unix socket created at {:?}", self.socket_path);
 
         self.start_worker().await?;
 
-        tokio::select! {
-            result = self.run_web_server(web_listener) => {
-                if let Err(e) = result {
-                    error!("Web server error: {}", e);
-                }
+        let web_dashboard = self.web_dashboard.clone();
+        let web_task = async move {
+            if let Err(e) = web_dashboard.run().await {
+                error!("Web dashboard error: {}", e);
             }
-            result = self.handle_unix_socket(unix_listener) => {
-                if let Err(e) = result {
-                    error!("Unix socket error: {}", e);
-                }
+        };
+
+        let self_clone = self.clone();
+        let unix_task = async move {
+            if let Err(e) = self_clone.handle_unix_socket(unix_listener).await {
+                error!("Unix socket error: {}", e);
+            }
+        };
+
+        tokio::select! {
+            _ = web_task => {
+                info!("Web dashboard stopped");
+            }
+            _ = unix_task => {
+                info!("Unix socket handler stopped");
             }
             _ = tokio::signal::ctrl_c() => {
                 info!("Shutdown signal received");
@@ -86,8 +112,8 @@ impl MasterProcess {
             .arg(&self.config_path)
             .arg("--master-socket")
             .arg(&self.socket_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .spawn()?;
 
         info!("Worker process started with PID: {:?}", child.id());
@@ -96,28 +122,16 @@ impl MasterProcess {
         Ok(())
     }
 
-    async fn run_web_server(&self, listener: TcpListener) -> Result<()> {
-        info!("Web server started");
-
-        loop {
-            let (stream, addr) = listener.accept().await?;
-            info!("New web connection from: {:?}", addr);
-
-            tokio::spawn(async move {
-                let _ = stream;
-            });
-        }
-    }
-
     async fn handle_unix_socket(&self, listener: UnixListener) -> Result<()> {
         info!("Unix socket handler started");
 
         loop {
             let (stream, _) = listener.accept().await?;
             let worker = self.current_worker.clone();
+            let event_tx = self.web_dashboard.get_event_sender();
 
             tokio::spawn(async move {
-                if let Err(e) = handle_worker_connection(stream, worker).await {
+                if let Err(e) = handle_worker_connection(stream, worker, event_tx).await {
                     error!("Worker connection error: {}", e);
                 }
             });
@@ -177,8 +191,61 @@ impl MasterProcess {
 }
 
 async fn handle_worker_connection(
-    _stream: tokio::net::UnixStream,
+    mut stream: UnixStream,
     _worker: Arc<RwLock<Option<Child>>>,
+    event_tx: tokio::sync::broadcast::Sender<DashboardEvent>,
 ) -> Result<()> {
+    info!("Worker connected to master");
+
+    loop {
+        // Read message length (4 bytes)
+        let mut len_bytes = [0u8; 4];
+        match stream.read_exact(&mut len_bytes).await {
+            Ok(_) => {}
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                    info!("Worker disconnected");
+                    break;
+                }
+                return Err(e.into());
+            }
+        }
+        let len = u32::from_be_bytes(len_bytes) as usize;
+
+        // Read message
+        let mut buffer = vec![0u8; len];
+        stream.read_exact(&mut buffer).await?;
+
+        // Parse message
+        let message: WorkerMessage = serde_json::from_slice(&buffer)?;
+
+        // Convert to DashboardEvent and broadcast
+        let event = match message {
+            WorkerMessage::PriceUpdate { symbol, price } => {
+                Some(DashboardEvent::PriceUpdate { symbol, price })
+            }
+            WorkerMessage::TradeSignal { symbol, signal } => {
+                Some(DashboardEvent::TradeSignal { symbol, signal })
+            }
+            WorkerMessage::OrderUpdate(order) => {
+                Some(DashboardEvent::OrderUpdate(order))
+            }
+            WorkerMessage::PositionUpdate(position) => {
+                Some(DashboardEvent::PositionUpdate(position))
+            }
+            WorkerMessage::SystemStatus { status, message } => {
+                info!("Worker status: {} - {}", status, message);
+                Some(DashboardEvent::SystemStatus { status, message })
+            }
+            WorkerMessage::Heartbeat => {
+                None
+            }
+        };
+
+        if let Some(event) = event {
+            let _ = event_tx.send(event);
+        }
+    }
+
     Ok(())
 }
