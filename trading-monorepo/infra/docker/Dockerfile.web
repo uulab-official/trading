@@ -1,0 +1,22 @@
+# Web Dashboard Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn \
+    websockets
+
+# Copy web dashboard code
+COPY packages/monitor/web_dashboard.py /app/
+
+# Create static directory
+RUN mkdir -p /app/web/static
+
+# Default port
+EXPOSE 8080
+
+# Run web dashboard
+CMD ["python", "-m", "uvicorn", "web_dashboard:app", "--host", "0.0.0.0", "--port", "8080"]

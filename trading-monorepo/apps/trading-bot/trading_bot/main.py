@@ -516,16 +516,46 @@ class TradingBot:
                 await asyncio.sleep(10)
     
     async def _save_state(self) -> None:
-        """상태 저장"""
+        """상태 저장 - 웹 대시보드를 위해 추가 상태 저장"""
         if not self.bot_state or not self.portfolio:
             return
         
+        # 기본 상태 저장
         self.bot_state.save_portfolio(self.portfolio.to_dict())
         self.bot_state.save_orders({
             'orders': {k: v.to_dict() for k, v in self.order_manager.get_all_orders().items()}
         })
         
-        logger.debug("State saved")
+        # 웹 대시보드를 위한 추가 상태 저장
+        try:
+            # 봇 실행 상태
+            self.bot_state.store.save('bot:main:status', {
+                'status': 'running' if self.running else 'stopped',
+                'mode': self.config.mode,
+                'bot_id': self.config.bot_id,
+                'timestamp': datetime.utcnow().isoformat()
+            })
+            
+            # 포지션 정보 (웹에서 바로 읽을 수 있도록)
+            positions = []
+            for symbol, position in self.portfolio.positions.items():
+                pos_dict = position.to_dict()
+                pos_dict['symbol'] = symbol
+                positions.append(pos_dict)
+            
+            self.bot_state.store.save('bot:main:positions', positions)
+            
+            # 리스크 상태
+            self.bot_state.store.save('bot:main:risk', {
+                'daily_pnl': float(self.risk_manager.daily_pnl),
+                'daily_trades': self.risk_manager.daily_stats['trade_count'],
+                'is_trading_allowed': self.risk_manager.is_trading_allowed(),
+                'circuit_breaker': self.risk_manager.circuit_breaker_triggered
+            })
+            
+            logger.debug("State saved with web dashboard data")
+        except Exception as e:
+            logger.error(f"Failed to save web dashboard state: {e}")
     
     async def _risk_check_loop(self) -> None:
         """리스크 체크 루프"""
