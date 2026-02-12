@@ -7,7 +7,7 @@ use tracing::{error, info, warn};
 
 use crate::core::config::Config;
 use crate::core::database::Database;
-use crate::core::models::{Candle, Order, OrderSide, OrderStatus, OrderType, Ticker};
+use crate::core::models::{Candle, Order, OrderSide, OrderStatus, OrderType};
 use crate::core::order_manager::OrderManager;
 use crate::core::portfolio::PortfolioManager;
 use crate::core::risk_manager::{RiskConfig, RiskManager};
@@ -27,6 +27,7 @@ pub struct WorkerProcess {
     risk_manager: Arc<RwLock<RiskManager>>,
     strategies: Arc<RwLock<Vec<Box<dyn Strategy>>>>,
     shutdown_tx: broadcast::Sender<()>,
+    binance_client: Arc<RwLock<Option<BinanceClient>>>,
 }
 
 impl WorkerProcess {
@@ -50,9 +51,9 @@ impl WorkerProcess {
         let risk_manager = Arc::new(RwLock::new(RiskManager::new(risk_config)));
         
         let (shutdown_tx, _) = broadcast::channel(1);
-        
+
         info!("Worker process initialized");
-        
+
         Ok(Self {
             config,
             master_socket,
@@ -63,6 +64,7 @@ impl WorkerProcess {
             risk_manager,
             strategies: Arc::new(RwLock::new(Vec::new())),
             shutdown_tx,
+            binance_client: Arc::new(RwLock::new(None)),
         })
     }
     
@@ -118,14 +120,37 @@ impl WorkerProcess {
             rest_url: self.config.exchange.rest_url.clone(),
             testnet: self.config.exchange.testnet,
         };
-        
-        let binance = BinanceClient::new(exchange_config);
-        
-        self.exchange_manager
-            .add_exchange("binance".to_string(), Box::new(binance))
-            .await?;
-        
-        info!("Exchanges initialized");
+
+        let mut binance = BinanceClient::new(exchange_config);
+
+        // WebSocket 연결
+        binance.connect().await?;
+
+        // 각 전략의 심볼에 대해 구독 설정
+        for strategy_config in &self.config.strategies {
+            if !strategy_config.enabled {
+                continue;
+            }
+
+            let symbol = &strategy_config.symbol;
+            let timeframe = &strategy_config.timeframe;
+
+            // 캔들 구독
+            binance.subscribe_candles(symbol, timeframe).await?;
+            info!("Subscribed to {} candles ({})", symbol, timeframe);
+
+            // 티커 구독
+            binance.subscribe_ticker(symbol).await?;
+            info!("Subscribed to {} ticker", symbol);
+        }
+
+        // BinanceClient 저장
+        {
+            let mut client = self.binance_client.write().await;
+            *client = Some(binance);
+        }
+
+        info!("Exchanges initialized and WebSocket connected");
         Ok(())
     }
     

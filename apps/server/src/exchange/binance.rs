@@ -177,6 +177,48 @@ impl BinanceClient {
         let code_bytes = result.into_bytes();
         hex::encode(code_bytes)
     }
+
+    pub async fn run_message_loop(&mut self) -> Result<()> {
+        info!("Starting Binance message loop");
+
+        loop {
+            let msg = {
+                let ws_stream = self.ws_stream.as_mut().ok_or_else(|| {
+                    anyhow::anyhow!("WebSocket not connected")
+                })?;
+                ws_stream.next().await
+            };
+
+            match msg {
+                Some(Ok(msg)) => {
+                    if let Err(e) = self.handle_message(msg).await {
+                        error!("Error handling message: {}", e);
+                    }
+                }
+                Some(Err(e)) => {
+                    error!("WebSocket error: {}", e);
+                    let _ = self.event_tx.send(ExchangeEvent::Error(e.to_string()));
+                    break;
+                }
+                None => {
+                    warn!("WebSocket stream ended");
+                    break;
+                }
+            }
+        }
+
+        let _ = self.event_tx.send(ExchangeEvent::Disconnected);
+        Ok(())
+    }
+
+    pub async fn start_background_loop(mut self) -> tokio::task::JoinHandle<Result<()>>
+    where
+        Self: 'static,
+    {
+        tokio::spawn(async move {
+            self.run_message_loop().await
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -184,13 +226,13 @@ impl Exchange for BinanceClient {
     async fn connect(&mut self) -> Result<()> {
         let ws_url = self.get_ws_url();
         info!("Connecting to Binance WebSocket: {}", ws_url);
-        
+
         let (ws_stream, _) = connect_async(&ws_url).await?;
         self.ws_stream = Some(ws_stream);
-        
+
         self.event_tx.send(ExchangeEvent::Connected)?;
         info!("Binance WebSocket connected");
-        
+
         Ok(())
     }
 
