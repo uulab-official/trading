@@ -1,93 +1,47 @@
 version: '3.8'
 
 services:
-  trading-bot:
+  trading-server:
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile
-    container_name: crypto-trading-bot
+    container_name: trading-server
     restart: unless-stopped
     
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Asia/Seoul
-      - ENABLE_STATUS_SAVE=true  # 웹 대시보드를 위해 상태 저장 활성화
+    ports:
+      - "8080:8080"  # Web dashboard
+      - "9000:9000"  # Worker communication
     
-    env_file:
-      - ../../apps/trading-bot/.env
+    environment:
+      - RUST_LOG=info
+      - TZ=Asia/Seoul
     
     volumes:
-      # Persistent data storage (Shared with web dashboard)
+      # Persistent data storage
       - trading-data:/app/data
-      # Logs
-      - ./logs:/app/logs
-      # Config (optional override)
-      - ../../apps/trading-bot/config:/app/apps/trading-bot/config:ro
+      # Config override (optional)
+      - ../../apps/server/config:/app/config:ro
     
     networks:
       - trading-network
     
-    # Resource limits for NAS
+    # Resource limits
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 512M
+          cpus: '2.0'
+          memory: 1G
         reservations:
-          cpus: '0.25'
-          memory: 128M
+          cpus: '0.5'
+          memory: 256M
     
     # Health check
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "./trading-server", "--help"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  # Web Dashboard - 코어와 분리되어 항상 실행됨
-  web-dashboard:
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.web  # 별도 Dockerfile
-    container_name: trading-web-dashboard
-    restart: unless-stopped
-    
-    ports:
-      - "8080:8080"  # 웹 대시보드 접속 포트
-    
-    environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Asia/Seoul
-      - DB_PATH=/app/data/state.db  # SQLite 경로
-    
-    volumes:
-      # 읽기 전용으로 데이터 공유 (코어 배포 시에도 계속 읽기 가능)
-      - trading-data:/app/data:ro
-      - ./logs:/app/logs:ro
-    
-    networks:
-      - trading-network
-    
-    depends_on:
-      - trading-bot
-    
-    # 웹은 리소스 적게 사용
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 128M
-        reservations:
-          cpus: '0.1'
-          memory: 64M
-    
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
 
 volumes:
   trading-data:

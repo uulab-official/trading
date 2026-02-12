@@ -1,50 +1,54 @@
-# Multi-stage build for production
-FROM python:3.11-slim as builder
+# Multi-stage build for Rust trading server
+FROM rustlang/rust:nightly-slim AS builder
 
 WORKDIR /app
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies
-COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Production stage
-FROM python:3.11-slim as production
+# Copy Cargo files
+COPY apps/server/Cargo.toml apps/server/Cargo.toml
+COPY apps/server/Cargo.lock apps/server/Cargo.lock
+COPY apps/server/src apps/server/src
+
+# Build release binary
+WORKDIR /app/apps/server
+RUN cargo build --release --locked
+
+# Runtime stage - use testing for newer glibc
+FROM debian:testing-slim
 
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    ca-certificates \
+    sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create directories
-RUN mkdir -p /app/data /app/logs
+# Create data directory
+RUN mkdir -p /app/data
 
-# Copy source code
-COPY packages/ /app/packages/
-COPY apps/trading-bot/ /app/apps/trading-bot/
+# Copy binary from builder
+COPY --from=builder /app/apps/server/target/release/trading-server /app/trading-server
 
-# Install packages in development mode
-RUN pip install --no-cache-dir \
-    -e /app/packages/core \
-    -e /app/packages/data \
-    -e /app/packages/strategy \
-    -e /app/packages/backtest \
-    -e /app/packages/monitor \
-    -e /app/apps/trading-bot
+# Copy config
+COPY apps/server/config /app/config
+
+# Expose ports
+EXPOSE 8080 9000
 
 # Set environment
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
+ENV RUST_LOG=info
+ENV RUST_BACKTRACE=1
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)"
+    CMD ./trading-server --help || exit 1
 
-# Run the bot
-WORKDIR /app/apps/trading-bot
-CMD ["python", "-m", "trading_bot.main"]
+# Run master by default
+CMD ["./trading-server", "master", "--config-path", "/app/config", "--web-port", "8080", "--worker-port", "9000"]

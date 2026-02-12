@@ -64,6 +64,7 @@ thiserror = "1.0"
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
 tokio-cron-scheduler = "0.9"
+time = "=0.3.36"
 
 # Cryptography (for API signatures)
 hmac = "0.12"
