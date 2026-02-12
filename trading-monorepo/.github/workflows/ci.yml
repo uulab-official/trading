@@ -1,10 +1,16 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   push:
     branches: [ main, develop ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main, develop ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   test:
@@ -78,6 +84,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    needs: [test, lint]
     steps:
     - uses: actions/checkout@v4
 
@@ -91,3 +98,99 @@ jobs:
     - name: Test Docker image
       run: |
         docker run --rm trading-bot:latest python -c "import trading_core; import trading_data; import trading_strategy; print('OK')"
+
+    - name: Test config CLI
+      run: |
+        docker run --rm trading-bot:latest python -m trading_core.config_cli --help
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: [test, lint, docker]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./infra/docker/Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          BUILD_VERSION=${{ github.ref_name }}
+          BUILD_DATE=${{ github.event.head_commit.timestamp }}
+
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        generate_release_notes: true
+        draft: false
+        prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+        files: |
+          LICENSE
+          CUSTOMER_SETUP.md
+        body: |
+          ## Trading Bot Release ${{ github.ref_name }}
+
+          ### Docker Image
+          ```bash
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          ```
+
+          ### Quick Start
+          1. Download the release
+          2. Run `python -m trading_core.config_cli init`
+          3. Configure your API keys in `config/secrets/secrets.yml`
+          4. Run `docker-compose up -d`
+
+          ### Documentation
+          - [Customer Setup Guide](CUSTOMER_SETUP.md)
+          - [Zero-Downtime Deployment](docs/ZERO_DOWNTIME_DEPLOYMENT.md)
+          - [Telegram Setup](docs/TELEGRAM_SETUP.md)
+
+          ### Verification
+          ```bash
+          # Verify image
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} python -m trading_core.config_cli validate
+          ```
