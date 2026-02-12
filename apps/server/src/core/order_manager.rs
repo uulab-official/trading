@@ -73,6 +73,13 @@ impl OrderManager {
             .collect()
     }
 
+    pub fn get_all_orders(&self) -> Vec<Order> {
+        self.orders
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect()
+    }
+
     pub fn handle_exchange_event(&self, event: &ExchangeEvent) {
         match event {
             ExchangeEvent::TradeUpdate(order) => {

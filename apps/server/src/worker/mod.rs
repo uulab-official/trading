@@ -1,27 +1,385 @@
 use anyhow::Result;
-use tracing::info;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{broadcast, RwLock};
+use tokio::time::{interval, Duration};
+use tracing::{error, info, warn};
+
+use crate::core::config::Config;
+use crate::core::database::Database;
+use crate::core::models::{Candle, Order, OrderSide, OrderStatus, OrderType, Ticker};
+use crate::core::order_manager::OrderManager;
+use crate::core::portfolio::PortfolioManager;
+use crate::core::risk_manager::{RiskConfig, RiskManager};
+use crate::exchange::{Exchange, ExchangeConfig, ExchangeEvent, ExchangeManager};
+use crate::exchange::binance::BinanceClient;
+use crate::strategy::{Signal, Strategy};
+use crate::strategy::rsi::RsiStrategy;
+use crate::strategy::ma_cross::MaCrossStrategy;
 
 pub struct WorkerProcess {
-    config_path: String,
+    config: Config,
     master_socket: String,
+    db: Arc<Database>,
+    exchange_manager: Arc<ExchangeManager>,
+    order_manager: Arc<OrderManager>,
+    portfolio_manager: Arc<PortfolioManager>,
+    risk_manager: Arc<RwLock<RiskManager>>,
+    strategies: Arc<RwLock<Vec<Box<dyn Strategy>>>>,
+    shutdown_tx: broadcast::Sender<()>,
 }
 
 impl WorkerProcess {
     pub async fn new(config_path: String, master_socket: String) -> Result<Self> {
+        let config = Config::from_file(&format!("{}/bot.yml", config_path))?;
+        
+        std::fs::create_dir_all("data")?;
+        let db = Arc::new(Database::new("sqlite://data/trading.db").await?);
+        
+        let exchange_manager = Arc::new(ExchangeManager::new());
+        let order_manager = Arc::new(OrderManager::new());
+        let portfolio_manager = Arc::new(PortfolioManager::new());
+        
+        let risk_config = RiskConfig {
+            max_daily_loss_pct: config.risk.max_daily_loss_pct,
+            max_positions: config.risk.max_positions,
+            risk_per_trade_pct: config.risk.risk_per_trade_pct,
+            max_leverage: config.risk.max_leverage,
+            circuit_breaker_threshold: config.risk.circuit_breaker_threshold,
+        };
+        let risk_manager = Arc::new(RwLock::new(RiskManager::new(risk_config)));
+        
+        let (shutdown_tx, _) = broadcast::channel(1);
+        
+        info!("Worker process initialized");
+        
         Ok(Self {
-            config_path,
+            config,
             master_socket,
+            db,
+            exchange_manager,
+            order_manager,
+            portfolio_manager,
+            risk_manager,
+            strategies: Arc::new(RwLock::new(Vec::new())),
+            shutdown_tx,
         })
     }
     
     pub async fn run(self) -> Result<()> {
-        info!(
-            master_socket = self.master_socket,
-            "Worker process running"
-        );
+        info!("Worker process starting...");
+        
+        self.init_exchanges().await?;
+        self.init_strategies().await?;
+        self.restore_state().await?;
+        
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let mut ticker_interval = interval(Duration::from_secs(60));
+        let mut health_interval = interval(Duration::from_secs(30));
+        
+        let exchange_manager = self.exchange_manager.clone();
+        let order_manager = self.order_manager.clone();
+        let portfolio_manager = self.portfolio_manager.clone();
+        let risk_manager = self.risk_manager.clone();
+        let strategies = self.strategies.clone();
+        let db = self.db.clone();
+        
+        tokio::select! {
+            _ = self.run_trading_loop(
+                exchange_manager,
+                order_manager,
+                portfolio_manager,
+                risk_manager,
+                strategies,
+                db,
+            ) => {
+                info!("Trading loop ended");
+            }
+            _ = shutdown_rx.recv() => {
+                info!("Shutdown signal received");
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("Ctrl+C received, shutting down");
+            }
+        }
+        
+        self.cleanup().await?;
+        info!("Worker process stopped");
+        
+        Ok(())
+    }
+    
+    async fn init_exchanges(&self) -> Result<()> {
+        let exchange_config = ExchangeConfig {
+            id: self.config.exchange.id.clone(),
+            api_key: self.config.exchange.api_key.clone().unwrap_or_default(),
+            api_secret: self.config.exchange.api_secret.clone().unwrap_or_default(),
+            ws_url: self.config.exchange.ws_url.clone(),
+            rest_url: self.config.exchange.rest_url.clone(),
+            testnet: self.config.exchange.testnet,
+        };
+        
+        let binance = BinanceClient::new(exchange_config);
+        
+        self.exchange_manager
+            .add_exchange("binance".to_string(), Box::new(binance))
+            .await?;
+        
+        info!("Exchanges initialized");
+        Ok(())
+    }
+    
+    async fn init_strategies(&self) -> Result<()> {
+        let mut strategies = self.strategies.write().await;
+        
+        for strategy_config in &self.config.strategies {
+            if !strategy_config.enabled {
+                continue;
+            }
+            
+            match strategy_config.strategy_type.as_str() {
+                "rsi" => {
+                    let period = strategy_config.params.get("period")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(14) as usize;
+                    let oversold = strategy_config.params.get("oversold")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(30.0);
+                    let overbought = strategy_config.params.get("overbought")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(70.0);
+                    
+                    strategies.push(Box::new(RsiStrategy::new(
+                        strategy_config.name.clone(),
+                        period,
+                        oversold,
+                        overbought,
+                    )));
+                    info!("Initialized RSI strategy: {}", strategy_config.name);
+                }
+                "ma_cross" => {
+                    let fast = strategy_config.params.get("fast_period")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(10) as usize;
+                    let slow = strategy_config.params.get("slow_period")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(20) as usize;
+                    
+                    strategies.push(Box::new(MaCrossStrategy::new(
+                        strategy_config.name.clone(),
+                        fast,
+                        slow,
+                    )));
+                    info!("Initialized MA Cross strategy: {}", strategy_config.name);
+                }
+                _ => {
+                    warn!("Unknown strategy type: {}", strategy_config.strategy_type);
+                }
+            }
+        }
+        
+        info!("Initialized {} strategies", strategies.len());
+        Ok(())
+    }
+    
+    async fn restore_state(&self) -> Result<()> {
+        let open_orders = self.db.get_open_orders().await?;
+        let order_count = open_orders.len();
+        for order in &open_orders {
+            info!("Restored open order: {}", order.id);
+        }
+
+        let positions = self.db.get_all_positions().await?;
+        let position_count = positions.len();
+        for position in &positions {
+            self.portfolio_manager.open_position(
+                &Order {
+                    id: format!("restore-{}", position.symbol),
+                    symbol: position.symbol.clone(),
+                    side: position.side.clone(),
+                    order_type: OrderType::Market,
+                    quantity: position.quantity,
+                    price: Some(position.entry_price),
+                    status: OrderStatus::Filled,
+                    created_at: position.opened_at,
+                    updated_at: position.opened_at,
+                    exchange_order_id: None,
+                    filled_quantity: position.quantity,
+                    average_price: Some(position.entry_price),
+                    commission: None,
+                    commission_asset: None,
+                },
+                position.entry_price,
+            ).ok();
+            info!("Restored position: {} {:?}", position.symbol, position.side);
+        }
+
+        info!("State restored: {} orders, {} positions", order_count, position_count);
+        Ok(())
+    }
+    
+    async fn run_trading_loop(
+        &self,
+        exchange_manager: Arc<ExchangeManager>,
+        order_manager: Arc<OrderManager>,
+        portfolio_manager: Arc<PortfolioManager>,
+        risk_manager: Arc<RwLock<RiskManager>>,
+        strategies: Arc<RwLock<Vec<Box<dyn Strategy>>>>,
+        db: Arc<Database>,
+    ) -> Result<()> {
+        let mut event_rx = exchange_manager.subscribe();
+        let mut last_candles: HashMap<String, Candle> = HashMap::new();
+        
+        info!("Trading loop started");
         
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            tokio::select! {
+                Ok(event) = event_rx.recv() => {
+                    match event {
+                        ExchangeEvent::Ticker(ticker) => {
+                            portfolio_manager.update_position_prices(&ticker.symbol, ticker.last);
+                        }
+                        ExchangeEvent::Candle(candle) => {
+                            db.save_candle(&candle).await.ok();
+                            
+                            let mut strategies = strategies.write().await;
+                            for strategy in strategies.iter_mut() {
+                                let signal = strategy.on_candle(&candle);
+                                
+                                match signal {
+                                    Signal::Buy => {
+                                        if let Err(e) = self.handle_buy_signal(
+                                            &candle.symbol,
+                                            candle.close,
+                                            &order_manager,
+                                            &portfolio_manager,
+                                            &risk_manager,
+                                            &db,
+                                        ).await {
+                                            error!("Failed to execute buy signal: {}", e);
+                                        }
+                                    }
+                                    Signal::Sell => {
+                                        if let Err(e) = self.handle_sell_signal(
+                                            &candle.symbol,
+                                            candle.close,
+                                            &order_manager,
+                                            &portfolio_manager,
+                                            &db,
+                                        ).await {
+                                            error!("Failed to execute sell signal: {}", e);
+                                        }
+                                    }
+                                    Signal::Hold => {}
+                                }
+                            }
+                            
+                            last_candles.insert(candle.symbol.clone(), candle);
+                        }
+                        ExchangeEvent::TradeUpdate(order) => {
+                            order_manager.handle_exchange_event(&ExchangeEvent::TradeUpdate(order));
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
+    }
+    
+    async fn handle_buy_signal(
+        &self,
+        symbol: &str,
+        price: f64,
+        order_manager: &Arc<OrderManager>,
+        portfolio_manager: &Arc<PortfolioManager>,
+        risk_manager: &Arc<RwLock<RiskManager>>,
+        db: &Arc<Database>,
+    ) -> Result<()> {
+        let risk = risk_manager.read().await;
+        
+        if !risk.is_trading_allowed() {
+            return Ok(());
+        }
+        
+        if portfolio_manager.get_position(symbol).is_some() {
+            return Ok(());
+        }
+        
+        let balance = 10000.0;
+        let stop_loss = risk.calculate_stop_loss(price, &OrderSide::Buy, price * 0.02);
+        let position_size = risk.calculate_position_size(balance, price, stop_loss);
+        
+        if position_size <= 0.0 {
+            return Ok(());
+        }
+        
+        drop(risk);
+        
+        let order = order_manager.create_order(
+            symbol.to_string(),
+            OrderSide::Buy,
+            OrderType::Market,
+            position_size,
+            Some(price),
+        ).await?;
+        
+        db.save_order(&order).await?;
+        
+        portfolio_manager.open_position(&order, price)?;
+        db.save_position(&portfolio_manager.get_position(symbol).unwrap()).await?;
+        
+        info!(
+            symbol = symbol,
+            price = price,
+            quantity = position_size,
+            "Buy signal executed"
+        );
+        
+        Ok(())
+    }
+    
+    async fn handle_sell_signal(
+        &self,
+        symbol: &str,
+        price: f64,
+        order_manager: &Arc<OrderManager>,
+        portfolio_manager: &Arc<PortfolioManager>,
+        db: &Arc<Database>,
+    ) -> Result<()> {
+        if let Some(position) = portfolio_manager.get_position(symbol) {
+            if position.side == OrderSide::Buy {
+                let pnl = portfolio_manager.close_position(symbol, price)?;
+                db.delete_position(symbol).await?;
+                
+                let mut risk = self.risk_manager.write().await;
+                risk.update_pnl(pnl);
+                
+                info!(
+                    symbol = symbol,
+                    price = price,
+                    pnl = pnl,
+                    "Sell signal executed - position closed"
+                );
+            }
+        }
+        
+        Ok(())
+    }
+    
+    async fn cleanup(&self) -> Result<()> {
+        info!("Cleaning up worker process...");
+        
+        let orders = self.order_manager.get_all_orders();
+        for order in orders {
+            self.db.save_order(&order).await?;
+        }
+        
+        let positions = self.portfolio_manager.get_all_positions();
+        for position in positions {
+            self.db.save_position(&position).await?;
+        }
+        
+        info!("State saved to database");
+        Ok(())
     }
 }
