@@ -2,7 +2,7 @@ use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer};
 use actix_ws::Message;
 use futures_util::StreamExt;
 use tokio::sync::broadcast;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::core::models::{Order, Position};
 
@@ -109,13 +109,17 @@ async fn websocket_handler(
     let (response, mut session, mut msg_stream) = actix_ws::handle(&req, stream)?;
 
     let mut event_rx = state.event_tx.subscribe();
+    info!("WebSocket client connected, subscribed to broadcast channel");
 
     actix_web::rt::spawn(async move {
+        let mut msg_count = 0;
         loop {
             tokio::select! {
                 Ok(event) = event_rx.recv() => {
-                    let msg = match event {
+                    msg_count += 1;
+                    let msg = match &event {
                         DashboardEvent::PriceUpdate { symbol, price } => {
+                            info!("Sending PriceUpdate to WebSocket: {} = ${:.2}", symbol, price);
                             serde_json::json!({
                                 "type": "price",
                                 "symbol": symbol,
@@ -124,6 +128,7 @@ async fn websocket_handler(
                             }).to_string()
                         }
                         DashboardEvent::TradeSignal { symbol, signal } => {
+                            info!("Sending TradeSignal to WebSocket: {} = {}", symbol, signal);
                             serde_json::json!({
                                 "type": "signal",
                                 "symbol": symbol,
@@ -134,7 +139,8 @@ async fn websocket_handler(
                         _ => continue,
                     };
 
-                    if session.text(msg).await.is_err() {
+                    if let Err(e) = session.text(msg).await {
+                        error!("Failed to send WebSocket message: {}", e);
                         break;
                     }
                 }
@@ -145,11 +151,17 @@ async fn websocket_handler(
                                 break;
                             }
                         }
-                        Message::Close(_) => break,
+                        Message::Close(_) => {
+                            info!("WebSocket client disconnected, sent {} messages", msg_count);
+                            break;
+                        }
                         _ => {}
                     }
                 }
-                else => break,
+                else => {
+                    info!("WebSocket loop ended, sent {} messages", msg_count);
+                    break;
+                }
             }
         }
     });

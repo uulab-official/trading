@@ -220,22 +220,23 @@ async fn handle_worker_connection(
         let message: WorkerMessage = serde_json::from_slice(&buffer)?;
 
         // Convert to DashboardEvent and broadcast
-        let event = match message {
+        let event = match &message {
             WorkerMessage::PriceUpdate { symbol, price } => {
-                Some(DashboardEvent::PriceUpdate { symbol, price })
+                info!("Received PriceUpdate from Worker: {} = ${:.2}", symbol, price);
+                Some(DashboardEvent::PriceUpdate { symbol: symbol.clone(), price: *price })
             }
             WorkerMessage::TradeSignal { symbol, signal } => {
-                Some(DashboardEvent::TradeSignal { symbol, signal })
+                Some(DashboardEvent::TradeSignal { symbol: symbol.clone(), signal: signal.clone() })
             }
             WorkerMessage::OrderUpdate(order) => {
-                Some(DashboardEvent::OrderUpdate(order))
+                Some(DashboardEvent::OrderUpdate(order.clone()))
             }
             WorkerMessage::PositionUpdate(position) => {
-                Some(DashboardEvent::PositionUpdate(position))
+                Some(DashboardEvent::PositionUpdate(position.clone()))
             }
             WorkerMessage::SystemStatus { status, message } => {
                 info!("Worker status: {} - {}", status, message);
-                Some(DashboardEvent::SystemStatus { status, message })
+                Some(DashboardEvent::SystemStatus { status: status.clone(), message: message.clone() })
             }
             WorkerMessage::Heartbeat => {
                 None
@@ -243,7 +244,12 @@ async fn handle_worker_connection(
         };
 
         if let Some(event) = event {
-            let _ = event_tx.send(event);
+            let receiver_count = event_tx.send(event.clone()).unwrap_or(0);
+            if receiver_count == 0 {
+                info!("No WebSocket clients connected for event: {:?}", event);
+            } else {
+                info!("Broadcasted event to {} clients: {:?}", receiver_count, event);
+            }
         }
     }
 

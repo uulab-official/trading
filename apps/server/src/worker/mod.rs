@@ -44,6 +44,15 @@ pub struct WorkerProcess {
     master_tx: RwLock<Option<UnixStream>>,
 }
 
+impl std::fmt::Debug for WorkerProcess {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkerProcess")
+            .field("config", &self.config)
+            .field("master_socket", &self.master_socket)
+            .finish_non_exhaustive()
+    }
+}
+
 impl WorkerProcess {
     pub async fn new(config_path: String, master_socket: String) -> Result<Self> {
         let config = Config::from_file(&format!("{}/bot.toml", config_path))?;
@@ -129,21 +138,122 @@ impl WorkerProcess {
         }).await.ok();
 
         let mut shutdown_rx = self.shutdown_tx.subscribe();
-        let _ticker_interval = interval(Duration::from_secs(60));
         let mut health_interval = interval(Duration::from_secs(30));
 
-        let exchange_manager = self.exchange_manager.clone();
         let order_manager = self.order_manager.clone();
         let portfolio_manager = self.portfolio_manager.clone();
         let risk_manager = self.risk_manager.clone();
         let strategies = self.strategies.clone();
         let db = self.db.clone();
 
-        let mut mock_price_interval = interval(Duration::from_secs(5));
+        let mut binance_rx = {
+            let client = self.binance_client.read().await;
+            match client.as_ref() {
+                Some(client) => client.get_event_receiver(),
+                None => {
+                    warn!("No Binance client available, running in limited mode");
+                    let (tx, rx) = broadcast::channel(1);
+                    drop(tx);
+                    rx
+                }
+            }
+        };
+
+        let worker = Arc::new(self);
+
+        let has_binance = {
+            let client = worker.binance_client.read().await;
+            client.is_some()
+        };
+
+        let binance_task = {
+            let worker = Arc::clone(&worker);
+            tokio::spawn(async move {
+                if !has_binance {
+                    futures_util::future::pending::<()>().await;
+                    return;
+                }
+                let mut client = worker.binance_client.write().await;
+                if let Some(ref mut binance) = client.as_mut() {
+                    info!("Starting Binance message loop");
+                    if let Err(e) = binance.run_message_loop().await {
+                        error!("Binance message loop error: {}", e);
+                    }
+                }
+            })
+        };
+
+        let forwarder_task = {
+            let worker = Arc::clone(&worker);
+            tokio::spawn(async move {
+                let mut rx = {
+                    let client = worker.binance_client.read().await;
+                    match client.as_ref() {
+                        Some(client) => client.get_event_receiver(),
+                        None => {
+                            let (tx, rx) = broadcast::channel(1);
+                            drop(tx);
+                            rx
+                        }
+                    }
+                };
+
+                info!("Starting price forwarder task");
+                loop {
+                    match rx.recv().await {
+                        Ok(event) => {
+                            match event {
+                                crate::exchange::ExchangeEvent::Ticker(ticker) => {
+                                    worker.send_to_master(WorkerMessage::PriceUpdate {
+                                        symbol: ticker.symbol.clone(),
+                                        price: ticker.last,
+                                    }).await.ok();
+                                }
+                                crate::exchange::ExchangeEvent::Candle(candle) => {
+                                    worker.send_to_master(WorkerMessage::SystemStatus {
+                                        status: "candle".to_string(),
+                                        message: format!("{} {} closed at {}", 
+                                            candle.symbol, candle.timestamp, candle.close),
+                                    }).await.ok();
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(_) => {
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            continue;
+                        }
+                    }
+                }
+            })
+        };
+
+        let mock_price_task = {
+            let worker = Arc::clone(&worker);
+            tokio::spawn(async move {
+                if has_binance {
+                    futures_util::future::pending::<()>().await;
+                    return;
+                }
+                
+                info!("Starting mock price generator (no Binance connection)");
+                let mut interval = interval(Duration::from_secs(5));
+                let mut price = 45000.0;
+                
+                loop {
+                    interval.tick().await;
+                    price += (rand::random::<f64>() - 0.5) * 100.0;
+                    worker.send_to_master(WorkerMessage::PriceUpdate {
+                        symbol: "BTC/USDT".to_string(),
+                        price,
+                    }).await.ok();
+                }
+            })
+        };
         
         tokio::select! {
-            _ = self.run_trading_loop(
-                exchange_manager,
+            _ = worker.run_trading_loop(
+                &mut binance_rx,
                 order_manager,
                 portfolio_manager,
                 risk_manager,
@@ -161,29 +271,29 @@ impl WorkerProcess {
             _ = async {
                 loop {
                     health_interval.tick().await;
-                    self.send_to_master(WorkerMessage::Heartbeat).await.ok();
+                    worker.send_to_master(WorkerMessage::Heartbeat).await.ok();
                 }
             } => {}
-            _ = async {
-                info!("Mock price task started");
-                loop {
-                    mock_price_interval.tick().await;
-                    let price = 45000.0 + (rand::random::<f64>() - 0.5) * 1000.0;
-                    info!("Sending mock price update: BTC/USDT = ${:.2}", price);
-                    self.send_to_master(WorkerMessage::PriceUpdate {
-                        symbol: "BTC/USDT".to_string(),
-                        price,
-                    }).await.ok();
-                }
-            } => {}
+            _ = binance_task => {
+                warn!("Binance message loop ended");
+            }
+            _ = forwarder_task => {
+                warn!("Price forwarder task ended");
+            }
+            _ = mock_price_task => {
+                warn!("Mock price task ended");
+            }
+            else => {
+                warn!("All tasks completed unexpectedly");
+            }
         }
 
-        self.send_to_master(WorkerMessage::SystemStatus {
+        worker.send_to_master(WorkerMessage::SystemStatus {
             status: "shutdown".to_string(),
             message: "Worker shutting down".to_string(),
         }).await.ok();
 
-        self.cleanup().await?;
+        worker.cleanup().await?;
         info!("Worker process stopped");
 
         Ok(())
@@ -334,14 +444,13 @@ impl WorkerProcess {
     
     async fn run_trading_loop(
         &self,
-        exchange_manager: Arc<ExchangeManager>,
+        event_rx: &mut broadcast::Receiver<ExchangeEvent>,
         order_manager: Arc<OrderManager>,
         portfolio_manager: Arc<PortfolioManager>,
         risk_manager: Arc<RwLock<RiskManager>>,
         strategies: Arc<RwLock<Vec<Box<dyn Strategy>>>>,
         db: Arc<Database>,
     ) -> Result<()> {
-        let mut event_rx = exchange_manager.subscribe();
         let mut last_candles: HashMap<String, Candle> = HashMap::new();
         
         info!("Trading loop started");
@@ -395,6 +504,9 @@ impl WorkerProcess {
                         }
                         _ => {}
                     }
+                }
+                else => {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         }
