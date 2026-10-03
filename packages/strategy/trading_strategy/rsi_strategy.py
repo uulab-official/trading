@@ -36,6 +36,10 @@ class RSIStrategy(Strategy):
         
         # 이전 상태 (크로스 감지용)
         self._prev_rsi: Decimal = Decimal("50")
+
+    def reset(self) -> None:
+        super().reset()
+        self._prev_rsi = Decimal("50")
         
     def analyze(self, candles: CandleBuffer) -> Signal:
         """RSI 분석"""

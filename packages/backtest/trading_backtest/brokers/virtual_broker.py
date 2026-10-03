@@ -1,13 +1,34 @@
 """Virtual broker for backtesting - 백테스트용 가상 브로커"""
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from decimal import Decimal
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
+from decimal import Context, Decimal, DecimalException, ROUND_HALF_EVEN, localcontext
+from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
+
+BROKER_CALCULATION_CONTEXT = Context(prec=28, rounding=ROUND_HALF_EVEN)
+
+
+def _decimal(value: Any, *, positive: bool = True) -> Decimal:
+    """Parse financial inputs without accepting NaN, infinity or invalid signs."""
+    try:
+        number = Decimal(str(value))
+    except (DecimalException, ValueError, TypeError) as exc:
+        raise ValueError("Expected a finite decimal value") from exc
+    if not number.is_finite() or (number <= 0 if positive else number < 0):
+        raise ValueError(
+            "Value must be finite and positive"
+            if positive else "Value must be finite and non-negative"
+        )
+    return number
+
+
+def _utcnow() -> datetime:
+    # Preserve the public naive-UTC datetime representation without utcnow().
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class OrderStatus(Enum):
@@ -24,7 +45,7 @@ class SimulatedOrder:
     order_id: str
     symbol: str
     side: str  # 'buy' or 'sell'
-    order_type: str  # 'market', 'limit', 'stop'
+    order_type: str  # 'market' or 'limit'; unsupported types are rejected
     amount: Decimal
     price: Optional[Decimal] = None
     
@@ -32,7 +53,7 @@ class SimulatedOrder:
     filled_amount: Decimal = field(default_factory=lambda: Decimal("0"))
     filled_price: Optional[Decimal] = None
     
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=_utcnow)
     filled_at: Optional[datetime] = None
     
     # 백테스트 메타데이터
@@ -61,12 +82,27 @@ class BrokerConfig:
 
 
 class VirtualBroker:
-    """백테스트용 가상 브로커 - 실제 거래소 동작 시뮬레이션"""
+    """Offline spot accounting with caller-supplied bars and valuation prices.
+
+    Limit triggers and optional volatility slippage approximate a completed
+    OHLCV bar; they do not model intrabar event ordering. Open-only market bars
+    work with fixed slippage. Stop and partial-fill execution are unsupported.
+    """
     
     def __init__(self, config: Optional[BrokerConfig] = None, initial_balance: Decimal = Decimal("10000")):
-        self.config = config or BrokerConfig()
-        self.balance = initial_balance
-        self.initial_balance = initial_balance
+        config = config or BrokerConfig()
+        financial_config = {}
+        for name in ("slippage_pct", "maker_fee_pct", "taker_fee_pct"):
+            value = _decimal(getattr(config, name), positive=False)
+            if value >= 100:
+                raise ValueError("Broker fee/slippage percentages must be below 100")
+            financial_config[name] = value
+        financial_config["min_volume_threshold"] = _decimal(
+            config.min_volume_threshold, positive=False
+        )
+        self.config = replace(config, **financial_config)
+        self.balance = _decimal(initial_balance, positive=False)
+        self.initial_balance = self.balance
         
         # 주문 관리
         self.orders: List[SimulatedOrder] = []
@@ -74,6 +110,7 @@ class VirtualBroker:
         
         # 포지션
         self.positions: Dict[str, Decimal] = {}  # symbol -> size
+        self._current_prices: Dict[str, Decimal] = {}
         
         # 거래 내역
         self.trades: List[Dict] = []
@@ -101,8 +138,8 @@ class VirtualBroker:
             symbol: 거래 심볼
             side: 'buy' or 'sell'
             amount: 수량
-            order_type: 'market', 'limit', 'stop'
-            price: 지정가/스탑가 (order_type이 market이면 None)
+            order_type: 'market' or 'limit'; other types are rejected
+            price: 지정가 (order_type이 market이면 None)
             current_bar: 현재 캔들 데이터 (OHLCV)
         """
         import uuid
@@ -119,16 +156,48 @@ class VirtualBroker:
             fee_pct=self.config.taker_fee_pct if order_type == "market" else self.config.maker_fee_pct
         )
         
-        # 현재 바가 제공되면 즉시 체결 시도
-        if current_bar is not None:
-            self._try_fill_order(order, current_bar)
-        else:
-            self.pending_orders[order_id] = order
-        
         self.orders.append(order)
+        try:
+            order.amount, order.price, order.fee_pct = self._validate_order(order)
+        except ValueError as exc:
+            self._reject_order(order, str(exc))
+        else:
+            # An unsuccessful immediate attempt remains queued only while pending.
+            if current_bar is not None:
+                self._try_fill_order(order, current_bar)
+            if order.status == OrderStatus.PENDING:
+                self.pending_orders[order_id] = order
         logger.debug(f"Order submitted: {order_id} {side} {amount} {symbol} @ {order_type}")
         
         return order
+
+    def _validate_order(
+        self, order: SimulatedOrder
+    ) -> Tuple[Decimal, Optional[Decimal], Decimal]:
+        if (
+            not isinstance(order.symbol, str)
+            or not order.symbol
+            or order.symbol != order.symbol.strip()
+        ):
+            raise ValueError("Order symbol must be a non-empty string")
+        if order.side not in ("buy", "sell"):
+            raise ValueError("Only spot buy and sell orders are supported")
+        if order.order_type not in ("market", "limit"):
+            raise ValueError("Only market and limit orders are supported")
+        amount = _decimal(order.amount)
+        price = _decimal(order.price) if order.price is not None else None
+        if order.order_type == "limit" and price is None:
+            raise ValueError("Limit orders require a positive price")
+        fee_pct = _decimal(order.fee_pct, positive=False)
+        if fee_pct >= 100:
+            raise ValueError("Order fee percentage must be below 100")
+        return amount, price, fee_pct
+
+    def _reject_order(self, order: SimulatedOrder, reason: str) -> None:
+        # Rejections are terminal, with all fill fields and accounting untouched.
+        order.status = OrderStatus.REJECTED
+        self.pending_orders.pop(order.order_id, None)
+        logger.debug("Order rejected: %s: %s", order.order_id, reason)
     
     def _try_fill_order(self, order: SimulatedOrder, bar: Dict) -> bool:
         """
@@ -137,103 +206,111 @@ class VirtualBroker:
         Returns:
             True if filled, False otherwise
         """
-        symbol = order.symbol
-        
-        # 거래량 체크
-        volume = Decimal(str(bar.get('volume', 0)))
-        if volume < self.config.min_volume_threshold:
-            logger.debug(f"Insufficient volume: {volume} < {self.config.min_volume_threshold}")
+        if order.status != OrderStatus.PENDING:
             return False
-        
-        # 가격 결정
-        if order.order_type == "market":
-            # 시장가: 시가 또는 현재가
-            fill_price = Decimal(str(bar.get('open', bar.get('close', 0))))
-        elif order.order_type == "limit":
-            # 지정가: 가격 도달 여부 체크
-            if order.side == "buy":
-                # 매수 지정가: 저가 <= 지정가
-                if Decimal(str(bar.get('low', 0))) > order.price:
-                    return False
-                fill_price = order.price
-            else:
-                # 매도 지정가: 고가 >= 지정가
-                if Decimal(str(bar.get('high', 0))) < order.price:
-                    return False
-                fill_price = order.price
-        else:
-            fill_price = Decimal(str(bar.get('close', 0)))
-        
-        # 슬리피지 적용
-        slippage = self._calculate_slippage(bar)
-        if order.side == "buy":
-            fill_price = fill_price * (Decimal("1") + slippage)
-        else:
-            fill_price = fill_price * (Decimal("1") - slippage)
-        
-        # 주문 체결
-        order.status = OrderStatus.FILLED
-        order.filled_amount = order.amount
-        order.filled_price = fill_price
-        order.filled_at = datetime.utcnow()
-        order.slippage_pct = slippage * 100
-        
-        # 수수료 계산
-        fee = fill_price * order.amount * (order.fee_pct / 100)
-        self.total_fees += fee
-        
-        # 잔고 업데이트
-        if order.side == "buy":
-            cost = fill_price * order.amount + fee
-            if cost > self.balance:
-                order.status = OrderStatus.REJECTED
-                logger.warning(f"Order rejected: insufficient balance {self.balance} < {cost}")
+        symbol = order.symbol
+        try:
+            amount, limit_price, fee_pct = self._validate_order(order)
+            prices = {
+                key: _decimal(bar[key])
+                for key in ("open", "high", "low", "close") if key in bar
+            }
+            if "high" in prices and "low" in prices and prices["high"] < prices["low"]:
+                raise ValueError("Candle high cannot be below low")
+            volume = _decimal(bar.get("volume", 0), positive=False)
+            volume_threshold = _decimal(self.config.min_volume_threshold, positive=False)
+            if volume < volume_threshold:
                 return False
-            self.balance -= cost
-            self.positions[symbol] = self.positions.get(symbol, Decimal("0")) + order.amount
+
+            if order.order_type == "market":
+                fill_price = prices.get("open", prices.get("close"))
+                if fill_price is None:
+                    raise ValueError("Market execution requires a positive open or close")
+            else:
+                trigger = "low" if order.side == "buy" else "high"
+                if trigger not in prices:
+                    raise ValueError("Limit execution requires its candle trigger price")
+                if (
+                    (order.side == "buy" and prices["low"] > limit_price)
+                    or (order.side == "sell" and prices["high"] < limit_price)
+                ):
+                    return False
+                fill_price = limit_price
+
+            # Compute everything before publishing a fill or changing the ledger.
+            with localcontext(BROKER_CALCULATION_CONTEXT):
+                slippage = self._calculate_slippage(bar)
+                direction = Decimal("1") if order.side == "buy" else Decimal("-1")
+                fill_price = _decimal(fill_price * (Decimal("1") + direction * slippage))
+                notional = _decimal(fill_price * amount)
+                fee = _decimal(notional * fee_pct / 100, positive=False)
+                balance = _decimal(self.balance, positive=False)
+                holding = _decimal(self.positions.get(symbol, Decimal("0")), positive=False)
+                if order.side == "buy":
+                    cost = notional + fee
+                    if cost > balance:
+                        raise ValueError("Insufficient spot cash balance")
+                    new_balance = _decimal(balance - cost, positive=False)
+                    new_holding = _decimal(holding + amount, positive=False)
+                else:
+                    if amount > holding:
+                        raise ValueError("Insufficient spot asset balance")
+                    new_balance = _decimal(balance + notional - fee, positive=False)
+                    new_holding = _decimal(holding - amount, positive=False)
+                new_fees = _decimal(self.total_fees + fee, positive=False)
+                slippage_pct = slippage * 100
+            mark = prices.get("close", prices.get("open", limit_price))
+            trade = {
+                'order_id': order.order_id,
+                'symbol': symbol,
+                'side': order.side,
+                'amount': float(amount),
+                'price': float(fill_price),
+                'fee': float(fee),
+                'timestamp': bar.get('timestamp'),
+                'bar_index': self.bar_index,
+            }
+        except (ValueError, DecimalException) as exc:
+            self._reject_order(order, str(exc))
+            return False
+
+        self.balance = new_balance
+        if new_holding:
+            self.positions[symbol] = new_holding
         else:
-            # 매도
-            revenue = fill_price * order.amount - fee
-            self.balance += revenue
-            self.positions[symbol] = self.positions.get(symbol, Decimal("0")) - order.amount
-            if self.positions[symbol] <= 0:
-                del self.positions[symbol]
-        
-        # 거래 기록
-        self.trades.append({
-            'order_id': order.order_id,
-            'symbol': symbol,
-            'side': order.side,
-            'amount': float(order.amount),
-            'price': float(fill_price),
-            'fee': float(fee),
-            'timestamp': bar.get('timestamp'),
-            'bar_index': self.bar_index
-        })
+            self.positions.pop(symbol, None)
+        self.total_fees = new_fees
+        if mark is not None:
+            self._current_prices[symbol] = mark
+        self.trades.append(trade)
+        order.status = OrderStatus.FILLED
+        order.filled_amount = amount
+        order.filled_price = fill_price
+        order.filled_at = _utcnow()
+        order.slippage_pct = slippage_pct
+        self.pending_orders.pop(order.order_id, None)
         
         logger.debug(f"Order filled: {order.order_id} @ {fill_price}")
         return True
     
     def _calculate_slippage(self, bar: Dict) -> Decimal:
         """슬리피지 계산"""
-        if not self.config.slippage_volatility_factor:
-            return self.config.slippage_pct / 100
-        
-        # 변동성 기반 슬리피지
-        high = Decimal(str(bar.get('high', 0)))
-        low = Decimal(str(bar.get('low', 0)))
-        open_price = Decimal(str(bar.get('open', 0)))
-        
-        if open_price == 0:
-            return self.config.slippage_pct / 100
-        
-        volatility = (high - low) / open_price
-        base_slippage = self.config.slippage_pct / 100
-        
-        # 변동성이 높을수록 슬리피지 증가
-        adjusted_slippage = base_slippage * (Decimal("1") + volatility * 10)
-        
-        return min(adjusted_slippage, Decimal("0.01"))  # 최대 1%로 제한
+        percentage = _decimal(self.config.slippage_pct, positive=False)
+        if percentage >= 100:
+            raise ValueError("Broker slippage percentage must be below 100")
+        with localcontext(BROKER_CALCULATION_CONTEXT):
+            base_slippage = percentage / 100
+            if (
+                not self.config.slippage_volatility_factor
+                or not all(key in bar for key in ("high", "low", "open"))
+            ):
+                return base_slippage
+            high, low, open_price = (_decimal(bar[key]) for key in ("high", "low", "open"))
+            if high < low:
+                raise ValueError("Candle high cannot be below low")
+            volatility = (high - low) / open_price
+            adjusted_slippage = base_slippage * (Decimal("1") + volatility * 10)
+            return min(adjusted_slippage, Decimal("0.01"))
     
     def process_bar(self, bar: Dict) -> None:
         """
@@ -244,8 +321,9 @@ class VirtualBroker:
         
         # 대기 중인 주문 처리
         for order_id, order in list(self.pending_orders.items()):
-            if self._try_fill_order(order, bar):
-                del self.pending_orders[order_id]
+            self._try_fill_order(order, bar)
+            if order.status != OrderStatus.PENDING:
+                self.pending_orders.pop(order_id, None)
     
     def get_position(self, symbol: str) -> Decimal:
         """포지션 조회"""
@@ -258,26 +336,40 @@ class VirtualBroker:
         Args:
             current_prices: {symbol: price} 형태의 현재가
         """
-        position_value = Decimal("0")
-        for symbol, size in self.positions.items():
-            price = current_prices.get(symbol, Decimal("0"))
-            position_value += size * price
-        
-        return self.balance + position_value
+        prices = {symbol: _decimal(price) for symbol, price in current_prices.items()}
+        marks = {**self._current_prices, **prices}
+        with localcontext(BROKER_CALCULATION_CONTEXT):
+            value = self.balance
+            for symbol, size in self.positions.items():
+                if size:
+                    if symbol not in marks:
+                        raise ValueError(f"No local valuation price supplied for {symbol}")
+                    value += _decimal(size, positive=False) * marks[symbol]
+            value = _decimal(value, positive=False)
+        # Invalid or incomplete valuation attempts cannot replace good marks.
+        self._current_prices.update(prices)
+        return value
     
-    def get_performance_summary(self) -> Dict:
-        """성과 요약"""
-        final_value = self.balance
-        for symbol in self.positions:
-            # 백테스트 종료 시 포지션은 청산 가정
-            pass
-        
-        total_return = (self.balance - self.initial_balance) / self.initial_balance * 100
+    def get_performance_summary(self, current_prices: Optional[Dict[str, Decimal]] = None) -> Dict:
+        """Report marked equity and cash using explicit or previously recorded marks.
+
+        Holdings remain open; marks do not imply liquidation or exit fees.
+        A percentage return is undefined (None) when initial cash is zero.
+        """
+        final_value = self.get_total_value(current_prices if current_prices is not None else {})
+        with localcontext(BROKER_CALCULATION_CONTEXT):
+            position_value = final_value - self.balance
+            total_return = (
+                (final_value - self.initial_balance) / self.initial_balance * 100
+                if self.initial_balance else None
+            )
         
         return {
             'initial_balance': float(self.initial_balance),
             'final_balance': float(self.balance),
-            'total_return_pct': float(total_return),
+            'final_equity': float(final_value),
+            'position_value': float(position_value),
+            'total_return_pct': float(total_return) if total_return is not None else None,
             'total_trades': len(self.trades),
             'total_fees': float(self.total_fees),
             'open_positions': len(self.positions),
@@ -289,6 +381,7 @@ class VirtualBroker:
         self.orders.clear()
         self.pending_orders.clear()
         self.positions.clear()
+        self._current_prices.clear()
         self.trades.clear()
         self.current_bar = None
         self.bar_index = 0

@@ -95,9 +95,12 @@ the restored data package deliberately raises `LiveMarketDataUnavailable` for
 live feed construction. Rust/server deployment, real exchange compatibility,
 credentials, account setup, orders, and live activation were not exercised.
 
-The old backtest engine uses a separate broker and was not repaired by this
-milestone. Its same-bar fills, open-holding return calculation, rejected-order
-fees, and oversell behavior still need separate regression fixes. The old
+The old backtest engine uses a separate broker. Its causal fill timing, marked
+equity, rejected fees, and oversells are now repaired in the separate
+[offline backtest accounting milestone](OFFLINE_BACKTEST_ACCOUNTING.md).
+Run `python tools/offline_checks.py --include-backtest` to include those checks;
+this additionally needs the existing pandas/numpy dependencies. Legacy backtest
+per-trade and risk statistics remain unverified. The old
 `TradingBot` Portfolio path also remains separate from the authoritative fixture
 runner and has not been declared accounting-complete. Full legacy pytest/CI and
 Docker builds were not validated; pytest/ccxt are absent from the local runtime.

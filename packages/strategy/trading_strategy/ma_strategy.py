@@ -123,6 +123,11 @@ class MACrossStrategy(Strategy):
         
         self._prev_fast_above_slow = False
         self._consecutive_bars = 0  # 크로스 확인용 연속 봉 카운트
+
+    def reset(self) -> None:
+        super().reset()
+        self._prev_fast_above_slow = False
+        self._consecutive_bars = 0
     
     def analyze(self, candles: CandleBuffer) -> Signal:
         """MA 교차 분석"""

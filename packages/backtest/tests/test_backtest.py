@@ -1,6 +1,6 @@
 """Tests for trading_backtest package"""
 
-import pytest
+import unittest
 import pandas as pd
 from decimal import Decimal
 
@@ -9,7 +9,7 @@ from trading_backtest.brokers.virtual_broker import BrokerConfig
 from trading_strategy import RSIStrategy, StrategyConfig
 
 
-class TestVirtualBroker:
+class TestVirtualBroker(unittest.TestCase):
     """VirtualBroker tests"""
     
     def test_initial_balance(self):
@@ -67,7 +67,7 @@ class TestVirtualBroker:
         assert position == Decimal("0.1")
 
 
-class TestBacktestEngine:
+class TestBacktestEngine(unittest.TestCase):
     """BacktestEngine tests"""
     
     def test_rsi_backtest(self):

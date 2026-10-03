@@ -1,19 +1,21 @@
 """Backtest Engine - 백테스트 엔진"""
 
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Context, Decimal, ROUND_HALF_EVEN, localcontext
 from typing import Dict, List, Optional, Callable, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import pandas as pd
 import numpy as np
 import logging
 
 from trading_strategy import Strategy, Signal, SignalType
-from trading_data import CandleBuffer
+from trading_data import Candle, CandleBuffer
+from trading_data._validation import nonnegative_decimal, positive_decimal, positive_integer
 
 from trading_backtest.brokers.virtual_broker import VirtualBroker, BrokerConfig
 
 logger = logging.getLogger(__name__)
+ACCOUNTING_CONTEXT = Context(prec=28, rounding=ROUND_HALF_EVEN)
 
 
 @dataclass
@@ -34,6 +36,18 @@ class BacktestConfig:
     timeframe: str = "1h"
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
+
+    def __post_init__(self) -> None:
+        self.initial_balance = positive_decimal(self.initial_balance, "initial_balance")
+        self.position_size_pct = positive_decimal(self.position_size_pct, "position_size_pct")
+        if self.position_size_pct > 100:
+            raise ValueError("position_size_pct must not exceed 100")
+        for field in ("commission_pct", "slippage_pct"):
+            value = nonnegative_decimal(getattr(self, field), field)
+            if value >= 100:
+                raise ValueError(f"{field} must be below 100")
+            setattr(self, field, value)
+        self.max_positions = positive_integer(self.max_positions, "max_positions")
 
 
 @dataclass
@@ -83,6 +97,9 @@ class BacktestResult:
     kurtosis: Decimal
     var_95: Decimal
     cvar_95: Decimal
+
+    # final_balance remains cash for compatibility; returns use marked equity.
+    final_equity: Optional[Decimal] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리 변환"""
@@ -92,6 +109,7 @@ class BacktestResult:
             'timeframe': self.timeframe,
             'initial_balance': float(self.initial_balance),
             'final_balance': float(self.final_balance),
+            'final_equity': float(self.final_equity if self.final_equity is not None else self.final_balance),
             'total_return_pct': float(self.total_return_pct),
             'cagr': float(self.cagr),
             'annualized_return': float(self.annualized_return),
@@ -129,8 +147,19 @@ class BacktestEngine:
         # 결과 저장
         self.equity_curve: List[Dict] = []
         self.signals: List[Signal] = []
+        self._last_prices: Dict[str, Decimal] = {}
         
     def run(
+        self,
+        strategy: Strategy,
+        data: pd.DataFrame,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> BacktestResult:
+        """Run local OHLCV data with causal next-open fills and fixed accounting."""
+        with localcontext(ACCOUNTING_CONTEXT):
+            return self._run(strategy, data, progress_callback)
+
+    def _run(
         self,
         strategy: Strategy,
         data: pd.DataFrame,
@@ -149,12 +178,19 @@ class BacktestEngine:
         """
         logger.info(f"Starting backtest for {strategy.id}")
         
+        # Validate the entire local fixture before any simulated order can fill.
+        candles = self._prepare_candles(data, strategy.timeframe)
         self.strategy = strategy
         self.data = data
+        self.equity_curve.clear()
+        self.signals.clear()
+        self._last_prices.clear()
+        strategy.reset()
         
         # 브로커 초기화
         broker_config = BrokerConfig(
             slippage_pct=self.config.slippage_pct,
+            slippage_volatility_factor=False,
             taker_fee_pct=self.config.commission_pct,
             maker_fee_pct=self.config.commission_pct
         )
@@ -163,50 +199,31 @@ class BacktestEngine:
             initial_balance=self.config.initial_balance
         )
         
-        # 데이터 준비
-        if len(data) < 50:
-            raise ValueError("Insufficient data for backtest (minimum 50 bars)")
-        
         # 백테스트 루프
-        total_bars = len(data)
-        candle_buffer = CandleBuffer(max_size=500, timeframe=strategy.timeframe)
+        total_bars = len(candles)
+        prior_volume = Decimal("0")
         
-        for i, (_, row) in enumerate(data.iterrows()):
+        for i, candle in enumerate(candles):
             # 진행률 콜백
             if progress_callback and i % 100 == 0:
                 progress_callback(i, total_bars)
             
-            # 캔들 생성
-            from trading_data import Candle
-            # timestamp 처리
-            if 'timestamp' in row:
-                ts = row['timestamp']
-                if hasattr(ts, 'timestamp'):
-                    timestamp = int(ts.timestamp() * 1000)
-                else:
-                    timestamp = int(ts)
-            else:
-                timestamp = int(row.name.timestamp() * 1000)
-            
-            candle = Candle(
-                timestamp=timestamp,
-                open=Decimal(str(row['open'])),
-                high=Decimal(str(row['high'])),
-                low=Decimal(str(row['low'])),
-                close=Decimal(str(row['close'])),
-                volume=Decimal(str(row.get('volume', 0)))
-            )
-            
-            # 브로커에 현재 바 처리
+            # Pending market orders execute at this open using only known inputs.
+            # Current high/low/close/volume are unavailable until the bar closes.
+            self.broker.process_bar({
+                'open': candle.open, 'high': candle.open, 'low': candle.open,
+                'close': candle.open, 'volume': prior_volume,
+                'timestamp': candle.timestamp,
+            })
+            prior_volume = candle.volume
             bar_dict = {
-                'open': row['open'],
-                'high': row['high'],
-                'low': row['low'],
-                'close': row['close'],
-                'volume': row.get('volume', 0),
+                'open': candle.open,
+                'high': candle.high,
+                'low': candle.low,
+                'close': candle.close,
+                'volume': candle.volume,
                 'timestamp': candle.timestamp
             }
-            self.broker.process_bar(bar_dict)
             
             # 전략에 캔들 전달
             signal = strategy.on_candle(candle)
@@ -216,12 +233,13 @@ class BacktestEngine:
                 self._execute_signal(signal, bar_dict)
             
             # 자본 기록
-            current_price = Decimal(str(row['close']))
-            total_value = self.broker.get_total_value({strategy.symbol: current_price})
+            current_price = candle.close
+            self._last_prices = {strategy.symbol: current_price}
+            total_value = self.broker.get_total_value(self._last_prices)
             
             self.equity_curve.append({
                 'timestamp': candle.timestamp,
-                'datetime': datetime.utcfromtimestamp(candle.timestamp / 1000),
+                'datetime': datetime.fromtimestamp(candle.timestamp / 1000, timezone.utc),
                 'equity': float(total_value),
                 'cash': float(self.broker.balance),
                 'position': float(self.broker.get_position(strategy.symbol)),
@@ -238,6 +256,31 @@ class BacktestEngine:
         logger.info(f"Backtest completed: Return={result.total_return_pct:.2f}%, Trades={result.total_trades}")
         
         return result
+
+    @staticmethod
+    def _prepare_candles(data: pd.DataFrame, timeframe: str) -> List[Candle]:
+        if len(data) < 50:
+            raise ValueError("Insufficient data for backtest (minimum 50 bars)")
+        duration = CandleBuffer(timeframe=timeframe).duration_ms
+        candles = []
+        for index, row in zip(data.index, data.to_dict(orient="records")):
+            ts = row.get('timestamp', index)
+            if isinstance(ts, (datetime, pd.Timestamp)):
+                ts = pd.Timestamp(ts)
+                ts = ts.tz_localize('UTC') if ts.tzinfo is None else ts.tz_convert('UTC')
+                timestamp = int(ts.value // 1000000)
+            else:
+                if isinstance(ts, (bool, str)):
+                    raise ValueError("timestamp must be Unix milliseconds or a datetime")
+                timestamp = int(ts)
+                if timestamp != ts:
+                    raise ValueError("timestamp must be whole Unix milliseconds")
+            candle = Candle(timestamp, row['open'], row['high'], row['low'],
+                            row['close'], row.get('volume', 0))
+            if candles and candle.timestamp < candles[-1].timestamp + duration:
+                raise ValueError("candles must be chronological without duplicate or overlapping bars")
+            candles.append(candle)
+        return candles
     
     def _execute_signal(self, signal: Signal, bar: Dict) -> None:
         """신호 실행"""
@@ -266,9 +309,9 @@ class BacktestEngine:
                 side='buy',
                 amount=amount,
                 order_type='market',
-                current_bar=bar
+                current_bar=None
             )
-        elif signal.type == SignalType.SELL:
+        elif signal.type in (SignalType.SELL, SignalType.CLOSE):
             # 매도
             position_size = self.broker.get_position(symbol)
             if position_size > 0:
@@ -277,7 +320,7 @@ class BacktestEngine:
                     side='sell',
                     amount=position_size,
                     order_type='market',
-                    current_bar=bar
+                    current_bar=None
                 )
     
     def _calculate_result(self) -> BacktestResult:
@@ -288,9 +331,10 @@ class BacktestEngine:
         # 기본 데이터
         initial_balance = self.config.initial_balance
         final_balance = self.broker.balance
+        final_equity = self.broker.get_total_value(self._last_prices)
         
         # 수익률 계산
-        total_return = (final_balance - initial_balance) / initial_balance
+        total_return = (final_equity - initial_balance) / initial_balance
         total_return_pct = total_return * 100
         
         # Equity curve DataFrame
@@ -392,7 +436,7 @@ class BacktestEngine:
             start_date = equity_df['datetime'].iloc[0]
             end_date = equity_df['datetime'].iloc[-1]
             years = (end_date - start_date).days / 365.25
-            cagr = Decimal(str((pow(float(final_balance / initial_balance), 1/years) - 1) * 100)) if years > 0 else Decimal("0")
+            cagr = Decimal(str((pow(float(final_equity / initial_balance), 1/years) - 1) * 100)) if years > 0 else Decimal("0")
         else:
             cagr = Decimal("0")
         
@@ -425,5 +469,6 @@ class BacktestEngine:
             skewness=skewness,
             kurtosis=kurtosis,
             var_95=var_95,
-            cvar_95=cvar_95
+            cvar_95=cvar_95,
+            final_equity=final_equity
         )

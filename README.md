@@ -9,6 +9,11 @@ See [OFFLINE_PAPER_RUNNER.md](docs/OFFLINE_PAPER_RUNNER.md) for local fixture re
 simulated fees/slippage, marked holdings, risk limits, and validated checkpoint
 resume. Run `python tools/offline_checks.py` for the targeted offline checks.
 
+The existing backtest engine now has separate
+[offline accounting regressions](docs/OFFLINE_BACKTEST_ACCOUNTING.md). Run
+`python tools/offline_checks.py --include-backtest` with pandas/numpy available
+to check causal fills, spot balances, fees, marked equity, and repeatable runs.
+
 The older quick-start, live/Rust deployment, and legacy backtest instructions below
 are not evidence of production readiness. Live market data is explicitly
 unavailable in the restored offline data package; no real trading was validated.

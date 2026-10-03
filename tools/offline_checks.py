@@ -1,6 +1,7 @@
 """Run targeted offline safety/replay checks with all socket/DNS access forbidden."""
 
 from pathlib import Path
+import argparse
 import sys
 import unittest
 from unittest.mock import patch
@@ -11,6 +12,10 @@ for source in [ROOT / "packages/core", ROOT / "packages/data", ROOT / "packages/
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--include-backtest", action="store_true",
+                        help="also run the existing offline backtest engine/broker checks (needs pandas/numpy)")
+    args = parser.parse_args()
     checks = [
         ("packages/core/tests", "*execution_safety.py"),
         ("packages/core/tests", "test_paper_ledger.py"),
@@ -18,6 +23,9 @@ def main():
         ("packages/strategy/tests", "test_complete_candles.py"),
         ("apps/server/tests", "test_paper_runner.py"),
     ]
+    if args.include_backtest:
+        sys.path.insert(0, str(ROOT / "packages/backtest"))
+        checks.append(("packages/backtest/tests", "test_*.py"))
     with patch("socket.socket.connect", side_effect=AssertionError("Offline checks forbid socket connections")), patch("socket.create_connection", side_effect=AssertionError("Offline checks forbid network clients")), patch("socket.getaddrinfo", side_effect=AssertionError("Offline checks forbid DNS")):
         suite = unittest.TestSuite()
         for directory, pattern in checks:

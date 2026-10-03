@@ -22,6 +22,20 @@ Upstream baseline: `uulab-official/trading` main
 - Add bar-close entry risk limits and reproducibility assumptions to reports
 - Preserve milestone 1's safety regressions
 
-Both milestones are local changes awaiting publication approval. No remote branch,
-push, deployment, live account connection, real credentials, or live orders were
-used. See OFFLINE_PAPER_RUNNER.md for the verified path and remaining limitations.
+Milestones 1 and 2 were published to main in
+`07442cfbd3ab36b958c1e1ce7bef47d36567bcfe`. Image publication is manual only;
+ordinary main pushes do not activate trading or publish an image.
+
+## Milestone 3: existing backtest accounting
+
+- Queue completed-bar market signals for the next available open
+- Use only then-known fill inputs and validate the full candle chronology first
+- Make spot rejection, cash/assets, successful fees, and pending order cleanup atomic
+- Report marked final equity separately from cash and calculate return from equity
+- Preserve the existing broker/engine and five original backtest assertions
+- Reset the MA-cross and RSI private crossing state for repeated experiments
+- Keep the base paper checks and offer extended offline backtest checks
+
+See OFFLINE_BACKTEST_ACCOUNTING.md for the tested accounting contracts and legacy
+statistics that remain unverified. No live account connection, credentials,
+orders, deployment, or trading activation were used for these milestones.
