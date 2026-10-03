@@ -1,11 +1,14 @@
 """Virtual broker for backtesting - 백테스트용 가상 브로커"""
 
 from dataclasses import dataclass, field, replace
+from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Context, Decimal, DecimalException, ROUND_HALF_EVEN, localcontext
 from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
 import logging
+
+from trading_backtest.trade_report import FillRecord, TradeReport, build_trade_report
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +117,8 @@ class VirtualBroker:
         
         # 거래 내역
         self.trades: List[Dict] = []
+        # Exact successful-fill inputs for reporting; raw compatibility dicts stay unchanged.
+        self._report_fills: List[FillRecord] = []
         
         # 현재 시뮬레이션 상태
         self.current_bar: Optional[Dict] = None
@@ -270,6 +275,8 @@ class VirtualBroker:
                 'timestamp': bar.get('timestamp'),
                 'bar_index': self.bar_index,
             }
+            report_fill = FillRecord(order.order_id, symbol, order.side, amount, notional,
+                                     fee, holding, new_holding, deepcopy(bar.get('timestamp')))
         except (ValueError, DecimalException) as exc:
             self._reject_order(order, str(exc))
             return False
@@ -283,6 +290,7 @@ class VirtualBroker:
         if mark is not None:
             self._current_prices[symbol] = mark
         self.trades.append(trade)
+        self._report_fills.append(report_fill)
         order.status = OrderStatus.FILLED
         order.filled_amount = amount
         order.filled_price = fill_price
@@ -374,6 +382,10 @@ class VirtualBroker:
             'total_fees': float(self.total_fees),
             'open_positions': len(self.positions),
         }
+
+    def get_trade_report(self) -> TradeReport:
+        """Return frozen financial fields and isolated timestamp metadata in quote units."""
+        return build_trade_report(tuple(self._report_fills))
     
     def reset(self) -> None:
         """브로커 초기화"""
@@ -383,6 +395,7 @@ class VirtualBroker:
         self.positions.clear()
         self._current_prices.clear()
         self.trades.clear()
+        self._report_fills.clear()
         self.current_bar = None
         self.bar_index = 0
         self.total_fees = Decimal("0")

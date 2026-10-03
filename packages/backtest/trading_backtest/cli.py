@@ -6,7 +6,6 @@ from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
-import matplotlib.pyplot as plt
 
 from trading_strategy import RSIStrategy, MACrossStrategy, StrategyConfig
 from trading_backtest.engines.backtest_engine import BacktestEngine, BacktestConfig
@@ -79,10 +78,11 @@ def run_backtest(args):
     print(f"Period:          {len(df)} candles")
     print(f"Initial Balance: ${float(result.initial_balance):,.2f}")
     print(f"Final Balance:   ${float(result.final_balance):,.2f}")
+    print(f"Marked Equity:   ${float(result.final_equity):,.2f}")
     print(f"Total Return:    {float(result.total_return_pct):+.2f}%")
     print(f"CAGR:            {float(result.cagr):.2f}%")
     print("-"*60)
-    print("RISK METRICS")
+    print("RISK METRICS (UNVERIFIED LEGACY)")
     print("-"*60)
     print(f"Volatility:      {float(result.volatility):.2f}%")
     print(f"Max Drawdown:    {float(result.max_drawdown):.2f}%")
@@ -92,9 +92,14 @@ def run_backtest(args):
     print("-"*60)
     print("TRADE STATISTICS")
     print("-"*60)
-    print(f"Total Trades:    {result.total_trades}")
+    print(f"Executed Fills:  {result.total_trades}")
+    print(f"Closed Exits:    {result.closed_trade_count}")
+    quote = result.trade_report.quote_currency or "quote units"
+    print(f"Gross Realized:  {result.gross_realized_pnl:.8f} {quote}")
+    print(f"Net Realized:    {result.realized_net_pnl:.8f} {quote}")
     print(f"Win Rate:        {float(result.win_rate):.1f}%")
-    print(f"Profit Factor:   {float(result.profit_factor):.2f}")
+    factor = f"{float(result.profit_factor):.2f}" if result.profit_factor is not None else "N/A (no realized losses)"
+    print(f"Profit Factor:   {factor}")
     print(f"Avg Win:         {float(result.avg_win):+.2f}%")
     print(f"Avg Loss:        {float(result.avg_loss):.2f}%")
     print(f"Expectancy:      {float(result.expectancy):+.2f}%")
@@ -118,6 +123,7 @@ def run_backtest(args):
     
     # 차트 생성
     if args.plot:
+        import matplotlib.pyplot as plt
         fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
         
         # Price & Equity

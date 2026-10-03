@@ -39,3 +39,15 @@ ordinary main pushes do not activate trading or publish an image.
 See OFFLINE_BACKTEST_ACCOUNTING.md for the tested accounting contracts and legacy
 statistics that remain unverified. No live account connection, credentials,
 orders, deployment, or trading activation were used for these milestones.
+
+## Milestone 4: net realized reporting
+
+- Replace latest-buy price pairing with per-symbol FIFO matching of exact fills
+- Allocate entry fees and cost across partial exits without double counting
+- Separate raw fill count, completed exit count, and unmatched open holdings
+- Distinguish gross quote-unit PnL from fee-inclusive net PnL and return percentages
+- Treat a no-loss profit factor as undefined throughout reports and consumers
+- Add a runnable network-forbidden local fixture report command
+- Preserve the existing cash/holdings ledger and all earlier offline checks
+
+See OFFLINE_REALIZED_REPORTING.md for count/unit definitions and remaining limits.

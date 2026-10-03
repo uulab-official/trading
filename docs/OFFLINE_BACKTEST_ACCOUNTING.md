@@ -58,9 +58,9 @@ unused and do not simulate those features.
 
 ## Remaining limits
 
-The legacy per-trade statistics still pair sells with a previous buy using gross
-price changes. Their win rate, matching of multiple buys, net realized PnL,
-profit factor, and expectancy are not verified accounting outputs. The risk
+The separate [realized reporting milestone](OFFLINE_REALIZED_REPORTING.md) now
+uses fee-inclusive FIFO matching, closed-exit counts, and explicit gross/net
+units. Unmatched open lots remain excluded from realized results. The risk
 metrics retain their older hourly annualization, sparse-sample behavior, and
 drawdown-duration assumptions. Use the verified cash/holdings/fees/equity ledger
 for this milestone; do not treat those legacy statistics as profitability
@@ -74,4 +74,3 @@ paper runner remains the verified runnable offline entrypoint.
 Live market data, live brokerage integration, real credentials/orders, Rust,
 deployment, and the old TradingBot Portfolio path remain outside this milestone.
 Custom strategies must reset their own private state through their reset hook.
-

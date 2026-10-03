@@ -13,6 +13,7 @@ from trading_data import Candle, CandleBuffer
 from trading_data._validation import nonnegative_decimal, positive_decimal, positive_integer
 
 from trading_backtest.brokers.virtual_broker import VirtualBroker, BrokerConfig
+from trading_backtest.trade_report import TradeReport
 
 logger = logging.getLogger(__name__)
 ACCOUNTING_CONTEXT = Context(prec=28, rounding=ROUND_HALF_EVEN)
@@ -82,7 +83,7 @@ class BacktestResult:
     win_count: int
     loss_count: int
     win_rate: Decimal
-    profit_factor: Decimal
+    profit_factor: Optional[Decimal]
     avg_win: Decimal
     avg_loss: Decimal
     avg_trade: Decimal
@@ -100,6 +101,11 @@ class BacktestResult:
 
     # final_balance remains cash for compatibility; returns use marked equity.
     final_equity: Optional[Decimal] = None
+    closed_trade_count: int = 0
+    break_even_count: int = 0
+    realized_net_pnl: Decimal = Decimal("0")
+    gross_realized_pnl: Decimal = Decimal("0")
+    trade_report: Optional[TradeReport] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리 변환"""
@@ -120,10 +126,15 @@ class BacktestResult:
             'sortino_ratio': float(self.sortino_ratio),
             'calmar_ratio': float(self.calmar_ratio),
             'total_trades': self.total_trades,
+            'closed_trade_count': self.closed_trade_count,
+            'break_even_count': self.break_even_count,
+            'realized_net_pnl': float(self.realized_net_pnl),
+            'gross_realized_pnl': float(self.gross_realized_pnl),
+            'trade_report': self.trade_report.to_dict() if self.trade_report is not None else None,
             'win_count': self.win_count,
             'loss_count': self.loss_count,
             'win_rate': float(self.win_rate),
-            'profit_factor': float(self.profit_factor),
+            'profit_factor': float(self.profit_factor) if self.profit_factor is not None else None,
             'avg_win': float(self.avg_win),
             'avg_loss': float(self.avg_loss),
             'avg_trade': float(self.avg_trade),
@@ -348,39 +359,7 @@ class BacktestEngine:
         trades = self.broker.trades
         total_trades = len(trades)
         
-        if total_trades > 0:
-            # 수익/손실 거래
-            pnl_list = []
-            for i, trade in enumerate(trades):
-                # 매도 거래만 PnL 계산
-                if trade['side'] == 'sell':
-                    # 해당 매수 찾기
-                    buy_trade = None
-                    for j in range(i-1, -1, -1):
-                        if trades[j]['side'] == 'buy' and trades[j]['symbol'] == trade['symbol']:
-                            buy_trade = trades[j]
-                            break
-                    
-                    if buy_trade:
-                        pnl = (trade['price'] - buy_trade['price']) / buy_trade['price'] * 100
-                        pnl_list.append(pnl)
-            
-            win_trades = [p for p in pnl_list if p > 0]
-            loss_trades = [p for p in pnl_list if p <= 0]
-            
-            win_count = len(win_trades)
-            loss_count = len(loss_trades)
-            win_rate = Decimal(str(win_count / total_trades * 100)) if total_trades > 0 else Decimal("0")
-            
-            avg_win = Decimal(str(np.mean(win_trades))) if win_trades else Decimal("0")
-            avg_loss = Decimal(str(np.mean(loss_trades))) if loss_trades else Decimal("0")
-            avg_trade = Decimal(str(np.mean(pnl_list))) if pnl_list else Decimal("0")
-            
-            profit_factor = abs(sum(win_trades) / sum(loss_trades)) if loss_trades and sum(loss_trades) != 0 else Decimal("0")
-            expectancy = (win_rate / 100 * avg_win) + ((Decimal("1") - win_rate / 100) * avg_loss)
-        else:
-            win_count = loss_count = 0
-            win_rate = avg_win = avg_loss = avg_trade = profit_factor = expectancy = Decimal("0")
+        trade_report = self.broker.get_trade_report()
         
         # 리스크 메트릭스
         if len(equity_df) > 1 and 'returns' in equity_df.columns:
@@ -456,19 +435,24 @@ class BacktestEngine:
             sortino_ratio=sortino_ratio,
             calmar_ratio=calmar_ratio,
             total_trades=total_trades,
-            win_count=win_count,
-            loss_count=loss_count,
-            win_rate=win_rate,
-            profit_factor=profit_factor,
-            avg_win=avg_win,
-            avg_loss=avg_loss,
-            avg_trade=avg_trade,
-            expectancy=expectancy,
+            win_count=trade_report.win_count,
+            loss_count=trade_report.loss_count,
+            win_rate=trade_report.win_rate,
+            profit_factor=trade_report.profit_factor,
+            avg_win=trade_report.avg_win,
+            avg_loss=trade_report.avg_loss,
+            avg_trade=trade_report.avg_trade,
+            expectancy=trade_report.expectancy,
             trades=trades,
             equity_curve=equity_df,
             skewness=skewness,
             kurtosis=kurtosis,
             var_95=var_95,
             cvar_95=cvar_95,
-            final_equity=final_equity
+            final_equity=final_equity,
+            closed_trade_count=trade_report.closed_trade_count,
+            break_even_count=trade_report.break_even_count,
+            realized_net_pnl=trade_report.realized_net_pnl,
+            gross_realized_pnl=trade_report.gross_realized_pnl,
+            trade_report=trade_report
         )

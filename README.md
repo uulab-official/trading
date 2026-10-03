@@ -14,6 +14,9 @@ The existing backtest engine now has separate
 `python tools/offline_checks.py --include-backtest` with pandas/numpy available
 to check causal fills, spot balances, fees, marked equity, and repeatable runs.
 
+Run `python tools/offline_trade_report.py` for a network-forbidden report of the
+local synthetic fixture using [fee-inclusive FIFO trade reporting](docs/OFFLINE_REALIZED_REPORTING.md).
+
 The older quick-start, live/Rust deployment, and legacy backtest instructions below
 are not evidence of production readiness. Live market data is explicitly
 unavailable in the restored offline data package; no real trading was validated.

@@ -99,8 +99,9 @@ The old backtest engine uses a separate broker. Its causal fill timing, marked
 equity, rejected fees, and oversells are now repaired in the separate
 [offline backtest accounting milestone](OFFLINE_BACKTEST_ACCOUNTING.md).
 Run `python tools/offline_checks.py --include-backtest` to include those checks;
-this additionally needs the existing pandas/numpy dependencies. Legacy backtest
-per-trade and risk statistics remain unverified. The old
+this additionally needs the existing pandas/numpy dependencies. Backtest
+[realized trade reporting](OFFLINE_REALIZED_REPORTING.md) now uses fee-inclusive
+FIFO matching; legacy risk statistics remain unverified. The old
 `TradingBot` Portfolio path also remains separate from the authoritative fixture
 runner and has not been declared accounting-complete. Full legacy pytest/CI and
 Docker builds were not validated; pytest/ccxt are absent from the local runtime.

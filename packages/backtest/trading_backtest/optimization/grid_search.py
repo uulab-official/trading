@@ -90,7 +90,11 @@ class GridSearchOptimizer:
         results_df = pd.DataFrame(results)
         
         # 최적 파라미터 찾기
-        best_idx = results_df[metric].idxmax()
+        scores = pd.to_numeric(results_df[metric], errors='coerce').dropna()
+        scores = scores[(scores != float('inf')) & (scores != float('-inf'))]
+        if scores.empty:
+            raise ValueError(f"No defined finite values for ranking metric {metric}")
+        best_idx = scores.idxmax()
         best_params = results_df.loc[best_idx, param_names].to_dict()
         best_score = Decimal(str(results_df.loc[best_idx, metric]))
         
@@ -126,8 +130,10 @@ class GridSearchOptimizer:
                 'sharpe_ratio': float(result.sharpe_ratio),
                 'max_drawdown': float(result.max_drawdown),
                 'win_rate': float(result.win_rate),
-                'profit_factor': float(result.profit_factor),
+                'profit_factor': float(result.profit_factor) if result.profit_factor is not None else None,
                 'total_trades': result.total_trades,
+                'closed_trade_count': result.closed_trade_count,
+                'realized_net_pnl': float(result.realized_net_pnl),
             })
             
             return row
