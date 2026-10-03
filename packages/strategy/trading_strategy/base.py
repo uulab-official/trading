@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Dict, List, Optional, Any
@@ -124,16 +124,9 @@ class Strategy(ABC):
         if not self.is_active:
             return None
         
-        # 캔들 추가
-        completed = self.candles.add_tick(
-            timestamp=candle.timestamp,
-            price=candle.close,
-            volume=candle.volume
-        )
-        
-        # 완성된 캔들이 있으면 분석
-        if completed:
-            self.candles.add_candle(completed)
+        # on_candle receives a completed OHLCV bar, not a synthetic close-only tick.
+        if not self.candles.add_candle(candle):
+            return None
         
         # 충분한 데이터가 쌓였으면 분석
         if self.candles.count >= 50:  # 최소 50개 캔들 필요
@@ -142,6 +135,7 @@ class Strategy(ABC):
             if signal and signal.type != SignalType.HOLD:
                 # 신호 필터링
                 if signal.confidence >= self.config.min_confidence:
+                    signal.timestamp = datetime.fromtimestamp(candle.timestamp / 1000, timezone.utc)
                     signal.strategy_id = self.id
                     self._record_signal(signal)
                     return signal

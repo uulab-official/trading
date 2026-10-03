@@ -1,5 +1,8 @@
 # Offline execution safety patch
 
+This records the first safety milestone. The second, working offline replay
+milestone is documented in [OFFLINE_PAPER_RUNNER.md](OFFLINE_PAPER_RUNNER.md).
+
 Source reviewed: `uulab-official/trading`, `main` commit
 `5f375046819da3441d354faae61f3a6d869ebbb7`.
 
@@ -59,3 +62,10 @@ connection, real credentials, live orders, deployment, or remote push was used.
 
 Do not describe this patch or the existing README's “Production Ready” label as
 evidence that live trading is ready or that a strategy will make money.
+
+## Container publication
+
+Container image publication is manual only. In GitHub Actions, run the existing
+workflow manually and enable `publish_image` only when you intend to publish an
+image. A normal main push does not publish an image. This does not activate
+trading. The Docker/Rust build and legacy CI remain unvalidated by offline checks.

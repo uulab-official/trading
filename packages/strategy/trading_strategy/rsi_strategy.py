@@ -41,7 +41,7 @@ class RSIStrategy(Strategy):
         """RSI 분석"""
         prices = candles.get_price_history()
         
-        if len(prices) < self.rsi.period:
+        if len(prices) < self.rsi.period + 1:
             return Signal(
                 type=SignalType.HOLD,
                 symbol=self.symbol,

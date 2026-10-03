@@ -41,6 +41,7 @@ ENV/
 
 # Data and logs
 data/
+!packages/data/
 logs/
 *.db
 *.sqlite

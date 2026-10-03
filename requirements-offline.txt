@@ -1,0 +1,3 @@
+# Minimal dependency for the validated paper runner and its targeted checks.
+# The legacy live application has separate, unvalidated dependencies.
+PyYAML>=6.0

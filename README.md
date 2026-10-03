@@ -1,6 +1,17 @@
 # Trading Bot Monorepo
 
-24/7 암호화폐 자동매매 시스템 - 프로덕션 레디 모노레포 구조
+24/7 암호화폐 자동매매 시스템 - 모의거래 우선 모노레포 구조
+
+## Verified offline paper workflow
+
+The deterministic offline paper runner is the tested entrypoint for this revision.
+See [OFFLINE_PAPER_RUNNER.md](docs/OFFLINE_PAPER_RUNNER.md) for local fixture replay,
+simulated fees/slippage, marked holdings, risk limits, and validated checkpoint
+resume. Run `python tools/offline_checks.py` for the targeted offline checks.
+
+The older quick-start, live/Rust deployment, and legacy backtest instructions below
+are not evidence of production readiness. Live market data is explicitly
+unavailable in the restored offline data package; no real trading was validated.
 
 [![CI/CD](https://github.com/uulab-official/trading/actions/workflows/ci.yml/badge.svg)](https://github.com/uulab-official/trading/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -363,6 +374,6 @@ MIT License - 자유로운 상업용 사용 가능
 
 ---
 
-**Status**: Production Ready ✅  
+**Status**: Offline paper replay verified; live/Rust/legacy backtest unverified
 **Version**: 1.0.0  
-**Last Updated**: 2026-02-12
+**Last Updated**: 2026-10-03
