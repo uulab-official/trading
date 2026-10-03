@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import argparse
 import logging
 import signal
 import sys
@@ -17,7 +18,10 @@ import os
 
 # Core imports
 from trading_core import (
-    CCXTExchange,
+    ExchangeInterface,
+    PaperExchange,
+    create_execution_exchange,
+    validate_execution_mode,
     OrderManager,
     RiskManager,
     RiskConfig as RiskManagerConfig,
@@ -60,12 +64,14 @@ logger = logging.getLogger(__name__)
 class TradingBot:
     """메인 트레이딩 봇"""
 
-    def __init__(self, config_dir: str = "config"):
+    def __init__(self, config_dir: str = "config", *, enable_live_trading: bool = False):
         self.config = load_config(config_dir)
+        self.enable_live_trading = enable_live_trading
+        validate_execution_mode(self.config, enable_live_trading=enable_live_trading)
         self.running = False
 
         # Core components
-        self.exchange: Optional[CCXTExchange] = None
+        self.exchange: Optional[ExchangeInterface] = None
         self.order_manager: Optional[OrderManager] = None
         self.risk_manager: Optional[RiskManager] = None
         self.portfolio: Optional[Portfolio] = None
@@ -87,6 +93,8 @@ class TradingBot:
 
     def _create_notifier(self):
         """텔레그램 노티파이어 생성"""
+        if self.config.mode == 'paper':
+            return NullNotifier()
         telegram_cfg = self.config.telegram
 
         if not telegram_cfg.enabled:
@@ -121,6 +129,7 @@ class TradingBot:
         """봇 초기화"""
         logger.info(f"Initializing Trading Bot: {self.config.name} v{self.config.version}")
         logger.info(f"Mode: {self.config.mode}")
+        validate_execution_mode(self.config, enable_live_trading=self.enable_live_trading)
 
         # Validate configuration
         from trading_core.config_manager import get_config_manager
@@ -132,7 +141,8 @@ class TradingBot:
             raise ValueError("Invalid configuration")
 
         # State store
-        self.state_store = SQLiteStateStore("data/bot_state.db")
+        state_path = "data/paper_bot_state.db" if self.config.mode == 'paper' else "data/bot_state.db"
+        self.state_store = SQLiteStateStore(state_path)
         self.bot_state = BotState(self.state_store, self.config.bot_id)
 
         # Restore or create portfolio
@@ -147,11 +157,11 @@ class TradingBot:
 
         # Exchange
         exchange_cfg = self.config.exchange
-        self.exchange = CCXTExchange(
-            exchange_id=exchange_cfg.id,
-            api_key=exchange_cfg.api_key,
-            api_secret=exchange_cfg.api_secret,
-            sandbox=exchange_cfg.sandbox,
+        self.exchange = create_execution_exchange(
+            self.config,
+            enable_live_trading=self.enable_live_trading,
+            initial_balance=self.portfolio.cash_balance,
+            initial_positions={position.symbol: position.size for position in self.portfolio.get_open_positions()},
         )
         await self.exchange.connect()
         logger.info(f"Connected to {exchange_cfg.id} (sandbox: {exchange_cfg.sandbox})")
@@ -179,7 +189,8 @@ class TradingBot:
         logger.info("Risk manager initialized")
 
         # WebSocket
-        self.websocket = BinanceWebSocket(testnet=exchange_cfg.testnet)
+        if self.config.mode == 'live':
+            self.websocket = BinanceWebSocket(testnet=exchange_cfg.testnet)
 
         # Setup strategies
         await self._setup_strategies()
@@ -247,15 +258,12 @@ class TradingBot:
         self.running = True
         logger.info("Starting Trading Bot...")
         
-        # Start WebSocket
-        await self.websocket.connect()
-        
-        # Subscribe to symbols
-        for symbol in self.candle_buffers.keys():
-            await self.websocket.subscribe_ticker(symbol)
-        
-        # Setup WebSocket handlers
-        self.websocket.on('ticker', self._on_price_update)
+        # Offline paper execution has no external market-data startup.
+        if self.config.mode == 'live':
+            await self.websocket.connect()
+            for symbol in self.candle_buffers.keys():
+                await self.websocket.subscribe_ticker(symbol)
+            self.websocket.on('ticker', self._on_price_update)
         
         # Start main loops
         self._tasks = [
@@ -579,7 +587,11 @@ class TradingBot:
 
 def main():
     """메인 함수"""
-    bot = TradingBot()
+    parser = argparse.ArgumentParser(description="Trading bot; paper is the default execution mode")
+    parser.add_argument('--config-dir', default='config')
+    parser.add_argument('--enable-live-trading', action='store_true', help='User-only opt-in for real exchange trading; never required for paper mode')
+    args = parser.parse_args()
+    bot = TradingBot(args.config_dir, enable_live_trading=args.enable_live_trading)
     
     def signal_handler(sig, frame):
         logger.info("Shutdown signal received")

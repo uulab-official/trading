@@ -124,13 +124,18 @@ class ConfigManager:
         if use_env_vars:
             raw_config = self._substitute_env_vars(raw_config)
         
-        # Secrets 로드
-        if secrets_path.exists():
+        # Paper never reads the secret file or enables outbound notifications.
+        mode = raw_config.get('bot', {}).get('mode', 'paper')
+        if mode not in ('paper', 'live'):
+            raise ValueError("Trading mode must be exactly 'paper' or 'live'")
+        if mode == 'live' and secrets_path.exists():
             with open(secrets_path, 'r', encoding='utf-8') as f:
                 self._secrets = yaml.safe_load(f) or {}
         else:
-            logger.warning(f"Secrets file not found: {secrets_path}")
             self._secrets = {}
+        if mode == 'paper':
+            raw_config.setdefault('exchange', {}).update(api_key='', api_secret='')
+            raw_config.setdefault('telegram', {}).update(enabled=False, bot_token='', chat_id='')
         
         # Secrets 적용
         raw_config = self._apply_secrets(raw_config)
@@ -257,12 +262,16 @@ class ConfigManager:
             return errors
         
         # Paper/Live 모드 검증
+        if self._config.mode not in ('paper', 'live'):
+            errors.append("Trading mode must be exactly 'paper' or 'live'")
         if self._config.mode == 'live':
             if not self._config.exchange.api_key or not self._config.exchange.api_secret:
                 errors.append("Live mode requires API keys")
             
             if self._config.exchange.sandbox:
                 errors.append("Live mode should not use sandbox")
+            if self._config.exchange.testnet:
+                errors.append("Live mode should not use testnet")
         
         # Telegram 설정 검증
         if self._config.telegram.enabled:

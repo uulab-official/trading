@@ -43,7 +43,7 @@ jobs:
         pip install -e packages/strategy
         pip install -e packages/backtest
         pip install -e packages/monitor
-        pip install -e apps/trading-bot
+        pip install -e apps/server
         pip install pytest pytest-asyncio pytest-cov
 
     - name: Run tests

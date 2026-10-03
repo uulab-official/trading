@@ -168,7 +168,9 @@ class OrderManager:
             
             # 응답 업데이트
             order.exchange_order_id = response.get('id')
-            order.status = OrderStatus.OPEN
+            order.status = self._map_exchange_status(response.get('status') or 'open')
+            order.filled = Decimal(str(response.get('filled') or 0))
+            order.remaining = order.amount - order.filled
             order.updated_at = datetime.utcnow()
             
             logger.info(f"Order placed: {client_order_id} -> {order.exchange_order_id}")

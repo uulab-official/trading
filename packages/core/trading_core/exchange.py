@@ -3,9 +3,11 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import asyncio
-import ccxt.async_support as ccxt
+
+if TYPE_CHECKING:
+    import ccxt.async_support as ccxt
 
 
 @dataclass
@@ -131,6 +133,8 @@ class CCXTExchange(ExchangeInterface):
         
     async def connect(self) -> None:
         """CCXT 거래소 초기화"""
+        # The live dependency is never imported by credential-free paper execution.
+        import ccxt.async_support as ccxt
         exchange_class = getattr(ccxt, self.exchange_id)
         self._exchange = exchange_class({
             'apiKey': self.api_key,
@@ -153,7 +157,7 @@ class CCXTExchange(ExchangeInterface):
             await self._exchange.close()
             self._exchange = None
             
-    def _ensure_connected(self) -> ccxt.Exchange:
+    def _ensure_connected(self) -> "ccxt.Exchange":
         if not self._exchange:
             raise RuntimeError("Exchange not connected. Call connect() first.")
         return self._exchange
