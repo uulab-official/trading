@@ -53,6 +53,11 @@ jobs:
         pip install -e apps/server
         pip install pytest pytest-asyncio pytest-cov
 
+    - name: Test Python package imports and config CLI
+      run: |
+        python -c "import trading_core; import trading_data; import trading_strategy; print('OK')"
+        python -m trading_core.config_cli --help
+
     - name: Run tests
       run: |
         pytest packages/ -v --cov=trading_core --cov=trading_data --cov=trading_strategy --cov=trading_backtest --cov-report=xml
@@ -102,13 +107,12 @@ jobs:
       run: |
         docker build -f infra/docker/Dockerfile -t trading-bot:latest .
 
-    - name: Test Docker image
+    - name: Test Rust Docker CLI without network access
       run: |
-        docker run --rm trading-bot:latest python -c "import trading_core; import trading_data; import trading_strategy; print('OK')"
-
-    - name: Test config CLI
-      run: |
-        docker run --rm trading-bot:latest python -m trading_core.config_cli --help
+        docker run --rm --network none trading-bot:latest ./trading-server --help
+        docker run --rm --network none trading-bot:latest ./trading-server master --help
+        docker run --rm --network none trading-bot:latest ./trading-server worker --help
+        docker run --rm --network none trading-bot:latest ./trading-server deploy --help
 
   build-and-push:
     runs-on: ubuntu-latest

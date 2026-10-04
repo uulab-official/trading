@@ -1,5 +1,5 @@
 # Multi-stage build for Rust trading server
-FROM rustlang/rust:nightly-slim AS builder
+FROM rust:1.99.0-slim-trixie@sha256:01dd4f9c24801cfc8ba9cf8a5dd6dcca451cd17d1ae73574edc22591de6e6816 AS builder
 
 WORKDIR /app
 
@@ -13,19 +13,20 @@ RUN apt-get update && apt-get install -y \
 COPY apps/server/Cargo.toml apps/server/Cargo.toml
 COPY apps/server/Cargo.lock apps/server/Cargo.lock
 COPY apps/server/src apps/server/src
+COPY apps/server/tests apps/server/tests
 
-# Build release binary
+# Test and build the Rust server from the committed dependency lock.
 WORKDIR /app/apps/server
-RUN cargo build --release --locked
+RUN cargo test --locked && cargo build --release --locked
 
-# Runtime stage - use testing for newer glibc
-FROM debian:testing-slim
+# Match the builder's Debian release for glibc/OpenSSL runtime compatibility.
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
 
 WORKDIR /app
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
-    libssl3 \
+    libssl3t64 \
     ca-certificates \
     sqlite3 \
     && rm -rf /var/lib/apt/lists/*

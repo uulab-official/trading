@@ -84,6 +84,7 @@ temp/
 /target/
 **/*.rs.bk
 Cargo.lock
+!apps/server/Cargo.lock
 *.rlib
 *.rmeta
 
