@@ -225,7 +225,7 @@ class RiskManager:
         
         return {
             'daily_pnl': float(self._daily_stats['total_pnl']),
-            'daily_pnl_pct': float(self.portfolio.get_daily_loss_pct()),
+            'daily_pnl_pct': float(self.portfolio.get_daily_pnl_pct()),
             'daily_trades': self._daily_stats['trade_count'],
             'daily_losses': self._daily_stats['loss_count'],
             'open_positions': len(self.portfolio.get_open_positions()),

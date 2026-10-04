@@ -18,7 +18,8 @@ class TestPortfolio:
     
     def test_open_position(self):
         """Test opening a position"""
-        portfolio = Portfolio(initial_balance=Decimal("1000"))
+        # A successful 0.1 BTC purchase at 50,000 needs 5,000 quote units.
+        portfolio = Portfolio(initial_balance=Decimal("10000"))
         
         position = portfolio.open_position(
             symbol="BTC/USDT",
@@ -33,6 +34,7 @@ class TestPortfolio:
         assert position.size == Decimal("0.1")
         assert portfolio.has_position("BTC/USDT")
         assert portfolio.get_position("BTC/USDT") == position
+        assert portfolio.cash_balance == Decimal("5000")
     
     def test_position_calculation(self):
         """Test position PnL calculation"""
@@ -88,7 +90,7 @@ class TestRiskManager:
         allowed, reason = risk_manager.check_trade_allowed(
             symbol="BTC/USDT",
             side="buy",
-            amount=Decimal("0.1"),
+            amount=Decimal("0.001"),  # 5% notional satisfies the separate size limit
             price=Decimal("50000")
         )
         

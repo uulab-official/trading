@@ -8,6 +8,7 @@ import argparse
 import logging
 import signal
 import sys
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Dict, List, Optional

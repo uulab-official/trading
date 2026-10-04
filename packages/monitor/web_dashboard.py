@@ -63,7 +63,6 @@ async def data_sync_loop():
 
 def sync_data():
     """SQLite에서 데이터 읽기"""
-    global app_state
     
     try:
         if not Path(DB_PATH).exists():

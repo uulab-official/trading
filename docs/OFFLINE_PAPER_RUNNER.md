@@ -181,5 +181,11 @@ this additionally needs the existing pandas/numpy dependencies. Backtest
 [realized trade reporting](OFFLINE_REALIZED_REPORTING.md) now uses fee-inclusive
 FIFO matching; legacy risk statistics remain unverified. The old
 `TradingBot` Portfolio path also remains separate from the authoritative fixture
-runner and has not been declared accounting-complete. Full legacy pytest/CI and
-Docker builds were not validated; pytest/ccxt are absent from the local runtime.
+runner and has not been declared accounting-complete. Its repaired realized-loss
+sign contract and unresolved safety limits are documented in
+[legacy risk limits](LEGACY_RISK_LIMITS.md). Full local Python pytest checks now
+run in an isolated environment with network/DNS forbidden; this does not establish
+live readiness. The existing GitHub test job covers `packages/` only, so the
+installed CLI and other `apps/server/tests` checks are verified by the local
+aggregate and full local pytest rather than that remote job. Rust/server service
+startup and local Docker validation remain outside this verification.

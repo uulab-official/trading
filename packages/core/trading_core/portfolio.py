@@ -239,11 +239,15 @@ class Portfolio:
         """미실현 손익"""
         return sum(p.unrealized_pnl for p in self._positions.values())
     
-    def get_daily_loss_pct(self) -> Decimal:
-        """일일 손실률"""
+    def get_daily_pnl_pct(self) -> Decimal:
+        """Signed net realized PnL percentage since the explicit daily reset."""
         if self._daily_start_value == 0:
             return Decimal("0")
         return (self._daily_pnl / self._daily_start_value) * 100
+
+    def get_daily_loss_pct(self) -> Decimal:
+        """Nonnegative realized loss magnitude for the configured loss limits."""
+        return max(Decimal("0"), -self.get_daily_pnl_pct())
     
     # ===== 리포트 =====
     
