@@ -1,8 +1,4 @@
-"""Offline method-level regressions. Do not launch the application or its adapters.
-
-The original application cannot import without its missing trading_data package.
-These tests compile the unchanged TradingBot methods with inert dependencies.
-"""
+"""Offline application-method checks with isolated config and temporary state."""
 
 import ast
 import asyncio
@@ -11,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 import sys
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -20,14 +17,17 @@ BOT_SOURCE = ROOT / "apps/server/trading_bot/main.py"
 
 def isolated_bot_class(namespace):
     tree = ast.parse(BOT_SOURCE.read_text())
-    bot = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TradingBot")
-    module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), bot], type_ignores=[])
+    classes = [node for node in tree.body if isinstance(node, ast.ClassDef)
+               and node.name in ("RecoveryRiskGate", "TradingBot")]
+    module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), *classes], type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), str(BOT_SOURCE), "exec"), namespace)
     return namespace["TradingBot"]
 
 
 class BotExecutionSafetyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="legacy-adapter-safety-")
+        self.addCleanup(self.temp.cleanup)
         self.config = SimpleNamespace(
             name="offline", version="test", mode="paper", bot_id="offline",
             exchange=SimpleNamespace(id="binance", api_key="", api_secret="", sandbox=False, testnet=False),
@@ -61,11 +61,17 @@ class BotExecutionSafetyTests(unittest.IsolatedAsyncioTestCase):
             from trading_core.execution import create_execution_exchange, validate_execution_mode
             from trading_core.paper_exchange import PaperExchange
             from trading_core.portfolio import Portfolio
+            from trading_core.legacy_checkpoint import LegacyCheckpoint, CheckpointError
+            from trading_core.risk_manager import RiskConfig
+            from trading_core.state_store import SQLiteStateStore
         except ImportError:
             pass
         else:
             self.namespace.update(create_execution_exchange=create_execution_exchange, validate_execution_mode=validate_execution_mode, PaperExchange=PaperExchange)
             self.namespace["Portfolio"] = Portfolio
+            self.namespace.update(LegacyCheckpoint=LegacyCheckpoint, CheckpointError=CheckpointError,
+                                  RiskManagerConfig=RiskConfig,
+                                  SQLiteStateStore=lambda *args, **kwargs: SQLiteStateStore(str(Path(self.temp.name) / "paper.db"), **kwargs))
         self.bot_class = isolated_bot_class(self.namespace)
 
     async def test_paper_initialization_does_not_construct_network_adapters(self):
@@ -78,6 +84,9 @@ class BotExecutionSafetyTests(unittest.IsolatedAsyncioTestCase):
         self.forbidden_ws.assert_not_called()
         self.forbidden_notifier.assert_not_called()
         self.assertIsNone(bot.websocket)
+        self.assertIsInstance(bot.exchange, self.namespace["PaperExchange"])
+        self.assertIsNone(bot.recovery_reason)
+        await bot.stop()
 
     async def test_paper_start_skips_websocket(self):
         bot = self.bot_class.__new__(self.bot_class)

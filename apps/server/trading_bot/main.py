@@ -49,6 +49,27 @@ from trading_strategy import (
     MACrossStrategy,
     RSIStrategy,
 )
+from trading_core.legacy_checkpoint import LegacyCheckpoint, CheckpointError, is_legacy_paper_symbol
+
+
+class RecoveryRiskGate:
+    """Unknown risk is a diagnostic state, never zero loss or permission to buy."""
+    def __init__(self, reason):
+        self.reason = reason
+
+    def check_trade_allowed(self, *args, **kwargs):
+        return False, self.reason
+
+    def is_trading_allowed(self):
+        return False
+
+    def reset_daily_stats(self):
+        pass
+
+    def get_risk_report(self):
+        return {"daily_pnl": None, "daily_pnl_pct": None, "daily_trades": None,
+                "daily_losses": None, "circuit_breaker": None,
+                "cooldown_active": None, "recovery_required": self.reason}
 
 # Configure logging
 logging.basicConfig(
@@ -70,6 +91,10 @@ class TradingBot:
         self.enable_live_trading = enable_live_trading
         validate_execution_mode(self.config, enable_live_trading=enable_live_trading)
         self.running = False
+        self._paper_checkpoint = None
+        self._paper_lock = asyncio.Lock()
+        self._paper_initialization_error = None
+        self._paper_mode_enabled = self.config.mode == 'paper'
 
         # Core components
         self.exchange: Optional[ExchangeInterface] = None
@@ -140,6 +165,10 @@ class TradingBot:
             for error in errors:
                 logger.error(f"Config error: {error}")
             raise ValueError("Invalid configuration")
+
+        if self.config.mode == 'paper':
+            await self._initialize_paper()
+            return
 
         # State store
         state_path = "data/paper_bot_state.db" if self.config.mode == 'paper' else "data/bot_state.db"
@@ -280,6 +309,23 @@ class TradingBot:
         """봇 중지"""
         logger.info("Stopping Trading Bot...")
         self.running = False
+
+        if self._paper_mode_enabled:
+            try:
+                current = asyncio.current_task()
+                tasks = [task for task in self._tasks if task is not current]
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                await self._save_state()
+                if self.order_manager:
+                    await self.order_manager.stop()
+                if self.exchange:
+                    await self.exchange.disconnect()
+            finally:
+                if self._paper_checkpoint:
+                    self._paper_checkpoint.release()
+            return
         
         # Cancel all tasks
         for task in self._tasks:
@@ -311,7 +357,7 @@ class TradingBot:
         while self.running:
             try:
                 # Check if trading is allowed
-                if not self.risk_manager.is_trading_allowed():
+                if not self._paper_mode_enabled and not self.risk_manager.is_trading_allowed():
                     await asyncio.sleep(60)
                     continue
                 
@@ -343,12 +389,16 @@ class TradingBot:
         """가격 업데이트 핸들러"""
         symbol = data.get('symbol')
         price = data.get('price')
-        timestamp = data.get('timestamp', 0)
+        timestamp = data.get('timestamp')
         
         if not symbol or price is None:
             return
         if not isinstance(price, Decimal) or not price.is_finite() or price < 0:
             logger.warning("Ignoring invalid price update for %s", symbol)
+            return
+
+        if getattr(self, '_paper_mode_enabled', False):
+            await self._paper_price_update(symbol, price, timestamp)
             return
         
         # Update portfolio prices
@@ -372,6 +422,10 @@ class TradingBot:
     async def _process_signal(self, signal: Signal) -> None:
         """신호 처리"""
         logger.info(f"Processing signal: {signal.type.value} {signal.symbol}")
+
+        if getattr(self, '_paper_mode_enabled', False):
+            await self._paper_process_signal(signal)
+            return
         
         # Risk check
         allowed, reason = self.risk_manager.check_trade_allowed(
@@ -396,6 +450,9 @@ class TradingBot:
     
     async def _open_long_position(self, signal: Signal) -> None:
         """롱 포지션 진입"""
+        if getattr(self, '_paper_mode_enabled', False):
+            await self._paper_process_signal(signal)
+            return
         try:
             # Calculate position size
             stop_loss = signal.stop_loss or self.risk_manager.calculate_stop_loss(
@@ -457,6 +514,10 @@ class TradingBot:
     
     async def _close_position(self, symbol: str, price: Decimal, reason: str) -> None:
         """포지션 청산"""
+        if getattr(self, '_paper_mode_enabled', False):
+            async with self._paper_lock:
+                await self._paper_close_locked(symbol, price)
+            return
         try:
             position = self.portfolio.get_position(symbol)
             if not position:
@@ -534,6 +595,12 @@ class TradingBot:
     
     async def _save_state(self) -> None:
         """상태 저장 - 웹 대시보드를 위해 추가 상태 저장"""
+        if getattr(self, '_paper_mode_enabled', False):
+            async with self._paper_lock:
+                if self._paper_checkpoint:
+                    self._paper_checkpoint.observe_period()
+                    self._paper_checkpoint.save()
+            return
         if not self.bot_state or not self.portfolio:
             return
         
@@ -579,11 +646,18 @@ class TradingBot:
         while self.running:
             try:
                 # Reset daily stats at midnight
-                self.risk_manager.reset_daily_stats()
-                
-                # Log risk status
-                report = self.risk_manager.get_risk_report()
-                if not report['circuit_breaker'] and report['daily_pnl_pct'] < -2:
+                if self._paper_mode_enabled:
+                    async with self._paper_lock:
+                        if self._paper_checkpoint:
+                            self._paper_checkpoint.observe_period()
+                            self._paper_checkpoint.save()
+                            report = self._paper_checkpoint.risk_report()
+                        else:
+                            report = self.risk_manager.get_risk_report()
+                else:
+                    self.risk_manager.reset_daily_stats()
+                    report = self.risk_manager.get_risk_report()
+                if not report['circuit_breaker'] and report['daily_pnl_pct'] is not None and report['daily_pnl_pct'] < -2:
                     logger.warning(f"Approaching daily loss limit: {report['daily_pnl_pct']:.2f}%")
                 
                 await asyncio.sleep(300)  # 5분마다 체크
@@ -592,6 +666,188 @@ class TradingBot:
             except Exception as e:
                 logger.error(f"Risk check error: {e}")
                 await asyncio.sleep(60)
+
+    @property
+    def recovery_reason(self):
+        return (self._paper_checkpoint.recovery_reason if self._paper_checkpoint
+                else self._paper_initialization_error)
+
+    def get_recovery_status(self):
+        """Read-only diagnostics remain available when execution is blocked."""
+        portfolio = self.portfolio.to_dict() if self.portfolio else None
+        if portfolio is not None and self._paper_checkpoint and self._paper_checkpoint.risk is None:
+            portfolio['daily_start_value'] = None
+        return {"mode": self.config.mode, "recovery_required": self.recovery_reason,
+                "portfolio": portfolio,
+                "risk": (self._paper_checkpoint.risk_report() if self._paper_checkpoint
+                         else self.risk_manager.get_risk_report() if self.risk_manager else None)}
+
+    async def _initialize_paper(self):
+        risk_cfg = self.config.risk
+        # Preserve the legacy effective settings; unrelated config-forwarding
+        # changes are deliberately outside this recovery patch.
+        config = RiskManagerConfig(
+            max_position_size_pct=Decimal(str(risk_cfg.max_position_size_pct)),
+            max_positions=risk_cfg.max_positions,
+            risk_per_trade_pct=Decimal(str(risk_cfg.risk_per_trade_pct)),
+            max_daily_loss_pct=Decimal(str(risk_cfg.max_daily_loss_pct)),
+            max_leverage=Decimal(str(risk_cfg.max_leverage)))
+        try:
+            if self.state_store is None:
+                self.state_store = SQLiteStateStore("data/paper_bot_state.db", initialize=False)
+            session = LegacyCheckpoint(self.state_store, self.config.bot_id, config)
+            self._paper_checkpoint = session
+            session.restore()
+            self.portfolio, self.exchange, self.order_manager = session.portfolio, session.exchange, session.manager
+            self.risk_manager = session.risk or RecoveryRiskGate(session.recovery_reason)
+            self.bot_state = BotState(self.state_store, self.config.bot_id)
+            if self.exchange is not None:
+                await self.exchange.connect()  # Purely local PaperExchange; never a live adapter.
+            if session.recovery_reason:
+                logger.error("Paper recovery required: %s", session.recovery_reason)
+        except Exception as error:
+            self._paper_initialization_error = (str(error) if isinstance(error, CheckpointError)
+                                                else "Paper state could not be opened; existing state preserved")
+            self.risk_manager = RecoveryRiskGate(self._paper_initialization_error)
+            if self._paper_checkpoint:
+                self._paper_checkpoint.recovery_reason = self._paper_initialization_error
+                self._paper_checkpoint.release()
+        try:
+            await self._setup_strategies()
+        except BaseException:
+            self._paper_initialization_error = "Paper initialization did not complete"
+            if self._paper_checkpoint:
+                self._paper_checkpoint.recovery_reason = self._paper_initialization_error
+                self._paper_checkpoint.release()
+            if self.exchange:
+                await self.exchange.disconnect()
+            raise
+
+    async def _paper_process_signal(self, signal):
+        async with self._paper_lock:
+            session = self._paper_checkpoint
+            if session is None or self.exchange is None or self.portfolio is None:
+                return
+            if not is_legacy_paper_symbol(signal.symbol):
+                return
+            if signal.type in (SignalType.SELL, SignalType.CLOSE):
+                # Entry-only limits must not reject an explicit reducing exit.
+                await self._paper_close_locked(signal.symbol, signal.price)
+                return
+            if signal.type != SignalType.BUY or not session.entry_allowed()[0]:
+                return
+            if not isinstance(signal.price, Decimal) or not signal.price.is_finite() or signal.price <= 0:
+                return
+            # A caller's valuation is not a certified execution price.
+            try:
+                quote = await self.exchange.fetch_ticker(signal.symbol)
+            except ValueError:
+                return
+            if quote.last != signal.price:
+                return
+            try:
+                session.validate_quote(signal.symbol, signal.price)
+            except CheckpointError:
+                return
+            stop = signal.stop_loss if signal.stop_loss is not None else self.risk_manager.calculate_stop_loss(signal.price, 'buy')
+            if not isinstance(stop, Decimal) or not stop.is_finite() or stop < 0 or stop >= signal.price:
+                return
+            size = self.risk_manager.calculate_position_size(signal.price, stop)
+            if size <= 0 or size * signal.price > self.portfolio.cash_balance:
+                return
+            allowed, reason = self.risk_manager.check_trade_allowed(signal.symbol, 'buy', size, signal.price)
+            # Persist a legitimate UTC rollover even when this entry is rejected.
+            session.save()
+            if not allowed:
+                logger.warning("Paper entry rejected: %s", reason)
+                return
+            target = signal.take_profit if signal.take_profit is not None else self.risk_manager.calculate_take_profit(signal.price, stop, 'buy')
+            if not isinstance(target, Decimal) or not target.is_finite() or target <= 0:
+                return
+            try:
+                key = session.begin_intent('buy', signal.symbol, amount=size, price=signal.price)
+                order = await self.order_manager.place_order(signal.symbol, OrderSide.BUY, OrderType.MARKET,
+                    size, strategy_id=signal.strategy_id, client_order_id=key)
+                if order.status.value != 'filled' or order.filled != size or order.remaining != 0:
+                    raise CheckpointError("Paper entry did not fill completely")
+                self.portfolio.open_position(signal.symbol, 'long', size, signal.price,
+                    stop_loss=stop, take_profit=target, strategy_id=signal.strategy_id, order_id=key)
+                session.finish_intent()
+            except BaseException:
+                session.fail_transition()
+                raise
+
+    async def _paper_close_locked(self, symbol, price):
+        session = self._paper_checkpoint
+        if session is None or self.portfolio is None or self.exchange is None or session.intent is not None:
+            return
+        if session.recovery_reason and not session.risk_only_recovery and not session.recovery_reason.startswith('UTC clock rollback'):
+            return
+        position = self.portfolio.get_position(symbol)
+        if position is None or not isinstance(price, Decimal) or not price.is_finite() or price <= 0:
+            return
+        try:
+            quote = await self.exchange.fetch_ticker(symbol)
+        except ValueError:
+            return
+        balances = await self.exchange.fetch_balance()
+        holding = balances.get(symbol.split('/')[0])
+        if quote.last != price or holding is None or holding.total != position.size:
+            return
+        try:
+            session.validate_quote(symbol, price)
+        except CheckpointError:
+            return
+        session.observe_period()
+        try:
+            key = session.begin_intent('sell', symbol, amount=position.size, price=price)
+            order = await self.order_manager.place_order(symbol, OrderSide.SELL, OrderType.MARKET,
+                position.size, client_order_id=key)
+            if order.status.value != 'filled' or order.filled != position.size or order.remaining != 0:
+                raise CheckpointError("Paper close did not fill completely")
+            trade = self.portfolio.close_position(symbol, price)
+            if session.risk is not None:
+                prior_cooldown = session.risk._cooldown_until
+                session.risk.on_position_closed(trade.pnl, accounting_date=trade.accounting_date)
+                if prior_cooldown is not None and session.risk._cooldown_until is not None:
+                    session.risk._cooldown_until = max(prior_cooldown, session.risk._cooldown_until)
+            session.finish_intent()
+        except BaseException:
+            session.fail_transition()
+            raise
+
+    async def _paper_price_update(self, symbol, price, timestamp=None):
+        async with self._paper_lock:
+            session = self._paper_checkpoint
+            if session is None or self.portfolio is None or self.exchange is None or session.intent:
+                return
+            if not is_legacy_paper_symbol(symbol):
+                return
+            if session.recovery_reason and not session.risk_only_recovery and not session.recovery_reason.startswith('UTC clock rollback'):
+                return
+            try:
+                previous = await self.exchange.fetch_ticker(symbol)
+            except ValueError:
+                previous = None
+            observed_timestamp = (previous.timestamp if previous else 0) if timestamp is None else timestamp
+            if type(observed_timestamp) is not int or observed_timestamp < 0:
+                return
+            if previous is not None and observed_timestamp < previous.timestamp:
+                return
+            session.observe_period()
+            self.portfolio.update_position_prices({symbol: price})
+            if price > 0:
+                self.exchange.set_price(symbol, price, timestamp=observed_timestamp)
+            # Recovery accepts observations for an explicit reducing exit, but
+            # never automatically closes or overwrites the preserved source.
+            if session.recovery_reason:
+                return
+            session.save()
+            if price == 0:
+                return
+            position = self.portfolio.get_position(symbol)
+            if position and (position.should_stop_loss() or position.should_take_profit()):
+                await self._paper_close_locked(symbol, price)
 
 
 def main():

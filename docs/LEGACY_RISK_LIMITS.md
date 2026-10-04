@@ -135,6 +135,91 @@ always run. These checks do not establish the full legacy dashboard data pipelin
 
 ## Remaining high-priority limitations
 
+## Legacy paper SQLite v1 recovery
+
+The legacy application's **paper mode only** now uses a separate, bot-scoped
+`legacy_checkpoint:v1` payload in the existing SQLite `state` table. There is no
+SQL table migration. Generic `Portfolio.to_dict/from_dict` and the fixture-based
+`PaperRunner` checkpoint keep their previous contracts. The limitations below
+still apply to the generic v0 state and the unverified live application.
+
+The v1 envelope uses an explicit allowlist: exact paper broker balances/fills/
+client IDs, matching portfolio positions and complete close records, UTC
+accounting period and baseline, signed daily PnL, risk counters, circuit latch,
+absolute cooldown deadline, effective risk settings, generation, and bounded
+pending intent. It contains no API keys, tokens, notification settings, environment
+variables, or complete application configuration. Only zero-friction USDT spot
+paper accounting is supported by this legacy integration. The independent paper
+runner continues to support its own fee/slippage settings and replay contract.
+
+Startup restores PaperExchange, Portfolio, RiskManager, and OrderManager together
+and checks their agreement. It does not recreate a funded broker for an existing
+but unreadable checkpoint. v0 records, an existing empty database, malformed or
+unsupported v1, foreign bot/currency/configuration, inconsistent economics, and
+unsupported JSON stores remain recovery-required. Their existing records/files
+are preserved by initialization and ordinary shutdown. Only a newly created,
+empty SQLite database can initialize the configured legacy synthetic 10,000 seed,
+and its first checkpoint is committed before any paper order. Deleting an old
+database is not a supported reset or migration procedure: a missing database
+with its persistent writer marker still present requires recovery and is not
+recreated. Existing zero-byte/foreign-schema files are opened read-only for
+classification; schema creation is deferred until first-start validation and
+writer ownership. This cannot detect deliberate removal of every provenance
+marker; it does enforce the distinguishable retained-workspace case.
+
+Use a new, deliberately isolated working directory for a new simulation. This
+change does not include automatic migration, inferred loss/baseline backfill, or
+a tool that certifies arbitrary old account state. There is no JSON execution
+fallback. Explicitly supplied JSONStateStore instances produce an unsupported
+SQLite-required diagnostic; they are never silently initialized as a new ledger.
+
+A local POSIX lock protects one writer per canonical database from before the
+first read through final shutdown; a generation check rejects stale writes.
+The canonical envelope and its bot-scoped dashboard projections share one SQLite
+transaction. A bounded intent (ID, side, symbol, amount, price) is durably saved
+before a paper order, and the complete resulting state afterward. Direct legacy
+paper OrderManager calls also require the current process's matching intent.
+The BASE/USDT currency boundary and a positive, chronologically valid execution
+quote are checked before intent/fill. Price callbacks retain supplied integer
+timestamps; an omitted timestamp preserves the previously known value, while
+regressing or invalid timestamps are ignored. Quotes retained from a checkpoint
+are historical paper fixtures, not certification of fresh live-market data;
+an elapsed-time quote-freshness policy remains outside this change.
+Failed or cancelled transitions remain explicitly ambiguous after restart;
+no order is automatically reissued and no checkpoint is loaded by replaying old
+close callbacks into its totals. The lock file persists and must not be deleted
+while writers might exist. Non-POSIX/network-filesystem deployment is not claimed.
+
+Same-day limits, latched circuit state and cooldown survive restart. UTC dates do
+not move backward. Clock rollback blocks new entries until it catches up, without
+clearing loss state or shortening an existing cooldown. A verified later UTC day
+rolls once using the existing first-observed valuation contract, not an invented
+midnight price. Missing, nonpositive or nonfinite baselines cannot authorize buys.
+
+`TradingBot.get_recovery_status()` is read-only and reports unknown risk with null
+values. Restoration itself never places or liquidates orders. Entry limits do
+not block an explicitly requested, verified full-position reducing paper exit.
+If only accounting/risk fields are invalid but the complete monetary ledger and
+holdings verify, an explicit close is permitted with a matching positive local
+paper quote. Valid callback observations can refresh that quote in memory without
+automatic liquidation or overwriting the invalid source. Its original v1 source
+is archived verbatim in a same-table
+`recovery_source:<generation>` row in the same transaction as the replacement
+checkpoint. Unknown prior daily risk stays unknown and subsequent buys remain
+blocked, including after another restart. Inconsistent holdings, malformed
+identity, or pending intent prohibit execution, including automatic exits.
+
+Tests use fresh processes, synthetic temporary SQLite/JSON fixtures, forbidden
+socket/DNS connections, and no credentials/services. They cover same-day risk
+limits, UTC rollback/rollover, coherent broker restoration, writer contention,
+stale generations, cancellation/failed commits, atomic source preservation,
+explicit risk-recovery exits, and no automatic replay. These checks neither
+validate real orders nor make the legacy live path production-ready.
+Bot-scoped projection rows are atomic with the checkpoint, but compatibility with
+the older global-key monitor/dashboard pipeline is not certified by these tests.
+
+### Unchanged generic/live limitations
+
 The legacy path still must not be used for live trading:
 
 - Zero baseline retains the legacy numeric result of zero, which is not an

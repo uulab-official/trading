@@ -38,10 +38,15 @@ class StateStore(ABC):
 class SQLiteStateStore(StateStore):
     """SQLite 기반 상태 저장"""
     
-    def __init__(self, db_path: str = "data/state.db"):
+    def __init__(self, db_path: str = "data/state.db", *, initialize: bool = True):
         self.db_path = Path(db_path)
+        # A new empty file is not interchangeable with an unreadable prior state.
+        self.existed_at_open = self.db_path.exists()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+        # The strict legacy paper loader defers creation until writer ownership
+        # and first-start provenance have been established.
+        if initialize:
+            self._init_db()
         
     def _init_db(self) -> None:
         """데이터베이스 초기화"""
