@@ -391,7 +391,9 @@ async def dashboard():
                         <td><span class="badge badge-${pos.side}">${pos.side.toUpperCase()}</span></td>
                         <td>${pos.size}</td>
                         <td>$${parseFloat(pos.entry_price).toFixed(2)}</td>
-                        <td>$${parseFloat(pos.current_price || pos.entry_price).toFixed(2)}</td>
+                        <td>${pos.current_price == null
+                            ? `Mark unknown (entry $${parseFloat(pos.entry_price).toFixed(2)})`
+                            : `$${parseFloat(pos.current_price).toFixed(2)}`}</td>
                         <td style="color: ${(pos.unrealized_pnl || 0) >= 0 ? '#00d4aa' : '#ff4757'}">
                             ${(pos.unrealized_pnl || 0) >= 0 ? '+' : ''}$${parseFloat(pos.unrealized_pnl || 0).toFixed(2)}
                         </td>

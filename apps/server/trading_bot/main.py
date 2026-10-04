@@ -345,11 +345,19 @@ class TradingBot:
         price = data.get('price')
         timestamp = data.get('timestamp', 0)
         
-        if not symbol or not price:
+        if not symbol or price is None:
+            return
+        if not isinstance(price, Decimal) or not price.is_finite() or price < 0:
+            logger.warning("Ignoring invalid price update for %s", symbol)
             return
         
         # Update portfolio prices
         self.portfolio.update_position_prices({symbol: price})
+
+        # A conservative valuation mark does not certify an executable quote.
+        # Zero marks must not create automatic liquidation orders.
+        if price == 0:
+            return
         
         # Check stop loss / take profit
         position = self.portfolio.get_position(symbol)

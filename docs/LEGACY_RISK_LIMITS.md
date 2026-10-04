@@ -59,7 +59,8 @@ recorded date. An explicit aware observation is converted to UTC first; naive
 observations retain the existing UTC meaning. Same-day repeated checks, a different host-local date, and a clock
 rollback followed by restoration do not clear losses or reset the baseline. The
 baseline is the existing `get_total_value()` result at the first observed rollover,
-not a reconstructed price at midnight. No valuation semantics are changed.
+not a reconstructed price at midnight. Rollover uses the mark valuation contract
+below without a separate normalization or clamp.
 
 A returned `Trade.accounting_date` tags the in-memory processing period. The
 legacy application explicitly passes it to
@@ -86,6 +87,52 @@ The date tag is not added to the existing portfolio JSON, SQLite/state-store
 payload, notification payload, or risk-report keys. It is memory-only; this does
 not repair restart recovery.
 
+## Observed zero versus unknown position marks
+
+`Position.current_price` is now optional. `None` alone means unknown; numeric
+zero is an observed price and values the position at zero. An unknown position
+retains the existing entry-price valuation estimate and zero unrealized PnL;
+neither stop-loss nor take-profit is evaluated until a mark is known. Known
+marks initialize and update unrealized PnL consistently, including zero. Finite
+negative marks retain their signed arithmetic; this change does not clamp,
+normalize, or certify them as tradable exchange prices.
+
+A zero-mark position with zero cash therefore reports zero total equity, and
+the existing new-BUY equity guard rejects both sized and amount-zero signals.
+Local closes remain callable. The legacy quote callback now distinguishes a
+missing/null price from zero. A finite Decimal zero updates valuation
+but cannot trigger an automatic stop/TP order. Missing, malformed, non-Decimal,
+negative, and nonfinite quotes do not change marks or place orders. Positive Decimal quotes
+retain the existing stop/TP path. Position's pure comparison helpers can still
+compare a known zero; quote-driven execution has the stricter positive boundary.
+
+There is no production-feed promise that zero is executable: `BinanceWebSocket`
+is currently a fail-closed offline-only stub, while the separate `PaperExchange`
+and candle inputs require positive prices. This repair does not enable a live
+feed, relax those paper input contracts, or certify an executable quote.
+
+Saved position objects add one `current_price` field: a decimal string for a
+known mark (including `"0"`), or JSON null for unknown. Old payloads that omit
+this field remain readable as unknown. Numeric zero is also read as zero.
+Malformed and nonfinite (`NaN`, `sNaN`, positive/negative infinity) marks raise
+`ValueError` during restoration rather than silently becoming an entry-price
+estimate. A nonfinite price update is rejected before replacing the previous
+mark or its PnL. This validation concerns marks only, not all legacy state fields.
+
+Restoration recomputes unrealized PnL from the saved mark, size, and entry price.
+Exact decimal strings preserve mark precision. The JSON and SQLite state stores
+continue storing the same opaque portfolio payload; no database schema or real
+stored data is migrated. Daily PnL and its UTC date are still not persisted.
+Older application versions ignore the new field, so rolling back to them loses
+this valuation correction on restoration.
+
+Position reports show unknown `current_price` as null. The dashboard explicitly
+labels its fallback as “Mark unknown (entry $…)”; an actual zero displays $0.00.
+The embedded rendering regression executes its actual update function in an
+isolated Node VM with no browser/network globals or running service. This one
+check is skipped if Node is unavailable; the Python mark/risk/state checks are
+always run. These checks do not establish the full legacy dashboard data pipeline.
+
 ## Remaining high-priority limitations
 
 The legacy path still must not be used for live trading:
@@ -97,11 +144,11 @@ The legacy path still must not be used for live trading:
   infinity, and a negative daily baseline paired with positive reported equity
   are outside this guard's contract. Broader malformed-state validation and
   recovery remain outside this repair
-- Zero price marks have an existing valuation fallback: `Position.position_value`
-  substitutes entry price when the current mark is zero. Consequently actual
-  marked equity can be zero while `get_total_value()` returns a positive value
-  and this guard cannot reject the entry. Repairing and testing that valuation
-  defect is a separate P1; this change does not alter valuation or mark handling
+- Unknown marks (`None`, including old saved positions without a mark) retain
+  the entry-price valuation fallback for compatibility. This is an estimate,
+  not a fresh market quote, and does not establish that a new entry is safe.
+  Mark staleness, exchange quote validity, and complete legacy exit routing
+  remain outside this repair
 - Legacy `Portfolio.to_dict()` / `from_dict()` does not preserve daily realized
   PnL or its UTC date. Restart recovery for this path is not validated by these
   checks and must not be confused with the separate paper runner's checkpoint
@@ -111,7 +158,9 @@ The legacy path still must not be used for live trading:
 `tools/offline_checks.py --include-backtest` includes the focused daily-loss
 contracts with socket connections and DNS forbidden. The tests cover zero,
 profit, loss, threshold boundaries, net recovery, circuit latch, explicit reset,
-the realized/unrealized distinction, UTC first-close/check ordering, tagged delayed
+zero/unknown mark valuation, quote callbacks, JSON/SQLite mark roundtrips,
+nonfinite mark rejection, dashboard labels, the realized/unrealized distinction,
+UTC first-close/check ordering, tagged delayed
 callbacks, repeated resets, local-date differences, clock rollback, unchanged
-saved/report schemas, and the actual application close method with inert local
+period metadata schemas, and the actual application close method with inert local
 order/notification collaborators.

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional
 import logging
 
@@ -18,7 +18,8 @@ class Position:
     entry_price: Decimal        # 진입 가격
     
     # 현재 상태
-    current_price: Decimal = field(default_factory=lambda: Decimal("0"))
+    # None means no observed mark; numeric zero is an actual observed price.
+    current_price: Optional[Decimal] = None
     unrealized_pnl: Decimal = field(default_factory=lambda: Decimal("0"))
     unrealized_pnl_pct: Decimal = field(default_factory=lambda: Decimal("0"))
     
@@ -31,25 +32,36 @@ class Position:
     order_id: Optional[str] = None      # 연결된 주문 ID
     strategy_id: Optional[str] = None   # 어떤 전략으로 진입
     
+    def __post_init__(self) -> None:
+        if self.current_price is not None:
+            self.update_price(self.current_price)
+
     def update_price(self, current_price: Decimal) -> None:
         """현재가 업데이트 및 미실현 손익 계산"""
-        self.current_price = current_price
+        if not isinstance(current_price, Decimal):
+            raise TypeError("Current price must be a Decimal")
+        if not current_price.is_finite():
+            raise ValueError("Current price must be finite")
         
         price_diff = current_price - self.entry_price
         if self.side == 'short':
             price_diff = -price_diff
             
-        self.unrealized_pnl = price_diff * self.size
-        self.unrealized_pnl_pct = (price_diff / self.entry_price) * 100
+        unrealized_pnl = price_diff * self.size
+        unrealized_pnl_pct = (price_diff / self.entry_price) * 100
+        self.current_price = current_price
+        self.unrealized_pnl = unrealized_pnl
+        self.unrealized_pnl_pct = unrealized_pnl_pct
     
     @property
     def position_value(self) -> Decimal:
         """포지션 가치"""
-        return self.size * self.current_price if self.current_price else self.size * self.entry_price
+        price = self.entry_price if self.current_price is None else self.current_price
+        return self.size * price
     
     def should_stop_loss(self) -> bool:
         """손절 조건 체크"""
-        if not self.stop_loss_price:
+        if self.current_price is None or not self.stop_loss_price:
             return False
         
         if self.side == 'long':
@@ -59,7 +71,7 @@ class Position:
     
     def should_take_profit(self) -> bool:
         """익절 조건 체크"""
-        if not self.take_profit_price:
+        if self.current_price is None or not self.take_profit_price:
             return False
         
         if self.side == 'long':
@@ -299,7 +311,7 @@ class Portfolio:
                 'side': p.side,
                 'size': float(p.size),
                 'entry_price': float(p.entry_price),
-                'current_price': float(p.current_price),
+                'current_price': float(p.current_price) if p.current_price is not None else None,
                 'unrealized_pnl': float(p.unrealized_pnl),
                 'unrealized_pnl_pct': float(p.unrealized_pnl_pct),
                 'stop_loss': float(p.stop_loss_price) if p.stop_loss_price else None,
@@ -347,6 +359,7 @@ class Portfolio:
                     'side': p.side,
                     'size': str(p.size),
                     'entry_price': str(p.entry_price),
+                    'current_price': str(p.current_price) if p.current_price is not None else None,
                     'stop_loss_price': str(p.stop_loss_price) if p.stop_loss_price else None,
                     'take_profit_price': str(p.take_profit_price) if p.take_profit_price else None,
                     'opened_at': p.opened_at.isoformat(),
@@ -384,11 +397,17 @@ class Portfolio:
         
         # 포지션 복원
         for symbol, p_data in data.get('positions', {}).items():
+            mark = p_data.get('current_price')
+            try:
+                current_price = Decimal(str(mark)) if mark is not None else None
+            except InvalidOperation as exc:
+                raise ValueError("Current price must be a finite decimal or null") from exc
             position = Position(
                 symbol=p_data['symbol'],
                 side=p_data['side'],
                 size=Decimal(p_data['size']),
                 entry_price=Decimal(p_data['entry_price']),
+                current_price=current_price,
                 stop_loss_price=Decimal(p_data['stop_loss_price']) if p_data.get('stop_loss_price') else None,
                 take_profit_price=Decimal(p_data['take_profit_price']) if p_data.get('take_profit_price') else None,
                 opened_at=datetime.fromisoformat(p_data['opened_at']),
