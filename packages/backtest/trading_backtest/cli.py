@@ -80,7 +80,12 @@ def run_backtest(args):
     print(f"Final Balance:   ${float(result.final_balance):,.2f}")
     print(f"Marked Equity:   ${float(result.final_equity):,.2f}")
     print(f"Total Return:    {float(result.total_return_pct):+.2f}%")
-    print(f"CAGR:            {float(result.cagr):.2f}%")
+    cagr = f"{float(result.cagr):.2f}%" if result.cagr is not None else "N/A"
+    print(f"CAGR:            {cagr}")
+    print(f"Elapsed:         {result.annualization['elapsed_ms']} ms (365.25-day year)")
+    print(f"Annualization:   {result.annualization['warning']}")
+    if result.cagr is None:
+        print(f"CAGR limitation: {result.annualization['undefined_reason']}")
     print("-"*60)
     print("RISK METRICS (UNVERIFIED LEGACY)")
     print("-"*60)

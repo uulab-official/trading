@@ -41,6 +41,8 @@ def build_fixture_report(path):
             "symbol": result.symbol, "timeframe": result.timeframe, "bars": len(data),
             "initial_balance": str(result.initial_balance), "cash": str(result.final_balance),
             "marked_equity": str(result.final_equity), "total_return_pct": str(result.total_return_pct),
+            "cagr_pct": str(result.cagr) if result.cagr is not None else None,
+            "annualization": dict(result.annualization),
             "trade_report": result.trade_report.to_dict(),
             "assumptions": {"strategy": "MA cross 3/5", "fee_pct": "0.1", "slippage_pct": "0.05",
                 "position_size_pct": "20", "fill_timing": "next available open",

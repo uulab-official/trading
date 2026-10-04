@@ -16,6 +16,8 @@ to check causal fills, spot balances, fees, marked equity, and repeatable runs.
 
 Run `python tools/offline_trade_report.py` for a network-forbidden report of the
 local synthetic fixture using [fee-inclusive FIFO trade reporting](docs/OFFLINE_REALIZED_REPORTING.md).
+It also includes [elapsed-time CAGR](docs/OFFLINE_ANNUALIZATION.md) with period,
+units, undefined-value handling, and an explicit extrapolation warning.
 
 The older quick-start, live/Rust deployment, and legacy backtest instructions below
 are not evidence of production readiness. Live market data is explicitly

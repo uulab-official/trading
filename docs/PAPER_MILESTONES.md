@@ -51,3 +51,14 @@ orders, deployment, or trading activation were used for these milestones.
 - Preserve the existing cash/holdings ledger and all earlier offline checks
 
 See OFFLINE_REALIZED_REPORTING.md for count/unit definitions and remaining limits.
+
+## Milestone 5: elapsed-time annualization
+
+- Fix sub-day zero CAGR and whole-day truncation using elapsed milliseconds
+- Use first-open capital and last-close net marked equity, including supplied gaps
+- State the strategy timeframe, fixed 365.25-day year, percent unit, and valuation basis
+- Preserve actual fees/slippage and classify invalid or unrepresentable values as undefined
+- Show an explicit mathematical extrapolation warning alongside CLI/JSON results
+- Preserve the earlier offline safety, checkpoint, ledger, and FIFO checks
+
+See OFFLINE_ANNUALIZATION.md for the tested contract and remaining risk-statistic limits.

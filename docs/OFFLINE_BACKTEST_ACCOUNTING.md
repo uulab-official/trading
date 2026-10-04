@@ -61,8 +61,10 @@ unused and do not simulate those features.
 The separate [realized reporting milestone](OFFLINE_REALIZED_REPORTING.md) now
 uses fee-inclusive FIFO matching, closed-exit counts, and explicit gross/net
 units. Unmatched open lots remain excluded from realized results. The risk
-metrics retain their older hourly annualization, sparse-sample behavior, and
-drawdown-duration assumptions. Use the verified cash/holdings/fees/equity ledger
+metrics retain their older hourly scaling, sparse-sample behavior, and
+drawdown-duration assumptions. The separate [elapsed-time annualization](OFFLINE_ANNUALIZATION.md)
+milestone corrects CAGR and its alias, with explicit duration/units and a
+mathematical extrapolation warning. Use the verified cash/holdings/fees/equity ledger
 for this milestone; do not treat those legacy statistics as profitability
 evidence.
 

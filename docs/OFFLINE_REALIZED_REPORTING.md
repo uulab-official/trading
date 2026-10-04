@@ -84,9 +84,12 @@ it rejects a ranking metric when every candidate lacks a defined finite value.
 
 ## Remaining limits
 
-The legacy hourly risk annualization, sparse-sample statistics, drawdown-duration
-assumptions, and optimization methodology remain unverified. The standalone
-report omits those risk statistics; the legacy CLI labels them as unverified.
+The legacy hourly risk scaling, sparse-sample statistics, drawdown-duration
+assumptions, and optimization methodology remain unverified. A separate
+[elapsed-time annualization milestone](OFFLINE_ANNUALIZATION.md) corrects CAGR
+and its alias with explicit period/units and warnings. The standalone report
+includes that mathematical annualization and omits the other risk statistics;
+the legacy CLI labels the other risk statistics as unverified.
 FIFO here describes simulated spot reporting and does not validate other
 accounting methods or exchange execution behavior.
 

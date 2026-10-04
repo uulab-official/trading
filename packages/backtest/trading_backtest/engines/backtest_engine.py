@@ -1,12 +1,13 @@
 """Backtest Engine - 백테스트 엔진"""
 
 from dataclasses import dataclass
-from decimal import Context, Decimal, ROUND_HALF_EVEN, localcontext
+from decimal import Context, Decimal, DecimalException, ROUND_HALF_EVEN, localcontext
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime, timezone
 import pandas as pd
 import numpy as np
 import logging
+import math
 
 from trading_strategy import Strategy, Signal, SignalType
 from trading_data import Candle, CandleBuffer
@@ -17,6 +18,7 @@ from trading_backtest.trade_report import TradeReport
 
 logger = logging.getLogger(__name__)
 ACCOUNTING_CONTEXT = Context(prec=28, rounding=ROUND_HALF_EVEN)
+ANNUALIZATION_YEAR_MS = 31557600000  # A fixed 365.25-day year, including fractional days.
 
 
 @dataclass
@@ -65,8 +67,8 @@ class BacktestResult:
     
     # 수익률
     total_return_pct: Decimal
-    cagr: Decimal  # Compound Annual Growth Rate
-    annualized_return: Decimal
+    cagr: Optional[Decimal]  # Mathematical annualization; None when undefined/unrepresentable.
+    annualized_return: Optional[Decimal]
     
     # 리스크
     volatility: Decimal  # 연환산 표준편차
@@ -106,6 +108,7 @@ class BacktestResult:
     realized_net_pnl: Decimal = Decimal("0")
     gross_realized_pnl: Decimal = Decimal("0")
     trade_report: Optional[TradeReport] = None
+    annualization: Optional[Dict[str, Any]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리 변환"""
@@ -117,8 +120,9 @@ class BacktestResult:
             'final_balance': float(self.final_balance),
             'final_equity': float(self.final_equity if self.final_equity is not None else self.final_balance),
             'total_return_pct': float(self.total_return_pct),
-            'cagr': float(self.cagr),
-            'annualized_return': float(self.annualized_return),
+            'cagr': float(self.cagr) if self.cagr is not None else None,
+            'annualized_return': float(self.annualized_return) if self.annualized_return is not None else None,
+            'annualization': dict(self.annualization) if self.annualization is not None else None,
             'volatility': float(self.volatility),
             'max_drawdown': float(self.max_drawdown),
             'max_drawdown_duration': self.max_drawdown_duration,
@@ -410,14 +414,24 @@ class BacktestEngine:
             max_duration = 0
             skewness = kurtosis = var_95 = cvar_95 = Decimal("0")
         
-        # CAGR 계산 (데이터 기간 기준)
-        if len(equity_df) > 1:
-            start_date = equity_df['datetime'].iloc[0]
-            end_date = equity_df['datetime'].iloc[-1]
-            years = (end_date - start_date).days / 365.25
-            cagr = Decimal(str((pow(float(final_equity / initial_balance), 1/years) - 1) * 100)) if years > 0 else Decimal("0")
-        else:
-            cagr = Decimal("0")
+        # Initial capital is available at the first open; final equity is marked
+        # at the last close. Candle timestamps identify opens, including gaps.
+        duration_ms = CandleBuffer(timeframe=self.strategy.timeframe).duration_ms
+        start_ms = self.equity_curve[0]['timestamp'] if self.equity_curve else None
+        end_ms = self.equity_curve[-1]['timestamp'] + duration_ms if self.equity_curve else None
+        elapsed_ms = end_ms - start_ms if start_ms is not None else 0
+        cagr, undefined_reason = self._annualized_return(initial_balance, final_equity, elapsed_ms)
+        warning = ("Mathematical extrapolation from less than one year; does not estimate future returns"
+                   if elapsed_ms < ANNUALIZATION_YEAR_MS else
+                   "Historical mathematical annualization does not estimate future returns")
+        annualization = {
+            'method': 'compound_growth_from_net_marked_equity', 'return_unit': 'percent',
+            'start_timestamp_ms': start_ms, 'end_timestamp_ms': end_ms, 'elapsed_ms': elapsed_ms,
+            'year_days': '365.25', 'year_ms': ANNUALIZATION_YEAR_MS,
+            'valuation': 'cash plus holdings at last close; actual fees and slippage included; no liquidation fees',
+            'status': 'defined' if cagr is not None else 'undefined',
+            'undefined_reason': undefined_reason, 'warning': warning,
+        }
         
         return BacktestResult(
             strategy_name=self.strategy.id,
@@ -454,5 +468,79 @@ class BacktestEngine:
             break_even_count=trade_report.break_even_count,
             realized_net_pnl=trade_report.realized_net_pnl,
             gross_realized_pnl=trade_report.gross_realized_pnl,
-            trade_report=trade_report
+            trade_report=trade_report,
+            annualization=annualization
         )
+
+    @staticmethod
+    def _annualized_return(initial: Decimal, final: Decimal, elapsed_ms: int) -> tuple[Optional[Decimal], Optional[str]]:
+        """Return percent growth and an explicit reason for an undefined result.
+
+        This is historical mathematical extrapolation, not a forecast. Output
+        must remain finite in the result's compatibility JSON numeric fields.
+        Supported inputs are the engine's ledger/finite-float reporting domain,
+        not arbitrary-scale direct Decimal calculations.
+        """
+        if isinstance(elapsed_ms, bool) or not isinstance(elapsed_ms, int) or elapsed_ms <= 0:
+            return None, 'elapsed duration must be a positive integer number of milliseconds'
+        if not initial.is_finite() or not final.is_finite() or initial <= 0 or final < 0:
+            return None, 'initial equity must be positive and final equity nonnegative and finite'
+        with localcontext(ACCOUNTING_CONTEXT):
+            if final == 0:
+                return Decimal('-100'), None
+            if final == initial:
+                return Decimal('0'), None
+            try:
+                try:
+                    difference = final - initial
+                    relative_growth = difference / initial
+                    if difference.is_subnormal() or relative_growth.is_subnormal() or relative_growth == 0:
+                        relative_growth = None
+                except DecimalException:
+                    relative_growth = None
+                try:
+                    ratio = final / initial
+                except DecimalException:
+                    ratio = None
+                if elapsed_ms == ANNUALIZATION_YEAR_MS and relative_growth is not None:
+                    value = relative_growth * 100
+                elif elapsed_ms == ANNUALIZATION_YEAR_MS and ratio is not None:
+                    value = (ratio - 1) * 100
+                else:
+                    if relative_growth is not None and abs(relative_growth) < Decimal('0.01'):
+                        # log(1+r) must not form 1+r first: that addition can
+                        # erase a tiny, representable relative equity change.
+                        log_growth = power = relative_growth
+                        divisor = 2
+                        while True:
+                            power *= -relative_growth
+                            updated = log_growth + power / divisor
+                            if updated == log_growth:
+                                break
+                            log_growth = updated
+                            divisor += 1
+                    else:
+                        # Subnormal ratios have already lost significant digits.
+                        log_growth = (ratio.ln() if ratio and not ratio.is_subnormal()
+                                      else final.ln() - initial.ln())
+                    exponent = log_growth * ANNUALIZATION_YEAR_MS / elapsed_ms
+                    if abs(exponent) < Decimal('0.01'):
+                        # exp(x)-1 cancels tiny growth at fixed precision. Its
+                        # convergent series keeps those significant digits.
+                        growth = term = exponent
+                        divisor = 2
+                        while True:
+                            term = term * exponent / divisor
+                            updated = growth + term
+                            if updated == growth:
+                                break
+                            growth = updated
+                            divisor += 1
+                        value = growth * 100
+                    else:
+                        value = (exponent.exp() - 1) * 100
+                if not value.is_finite() or not math.isfinite(float(value)):
+                    return None, 'annualized return exceeds the finite JSON numeric range'
+                return value, None
+            except (DecimalException, OverflowError, ValueError):
+                return None, 'annualized return exceeds the finite JSON numeric range'
