@@ -73,6 +73,11 @@ about an exchange's lot-size or minimum-order rules.
 - Equity/return include open holdings marked at the last supplied close
 - Fixed 28-digit Decimal precision and HALF_EVEN accounting make replay stable
 - A checkpoint is atomically written after each completed bar
+- One runner owns the checkpoint from before loading/validation through its final
+  save. A concurrent runner receives `CheckpointInUseError` before exchange
+  startup and cannot overwrite saved progress
+- Relative paths and symlink aliases resolve to the same checkpoint and lock.
+  Atomic writes update the canonical target while preserving a supplied alias
 - Resume rebuilds indicators and independently replays the verified prefix,
   then compares all economic, risk, and pending-signal state before continuing
 - Saved trade chronology is independent of JSON dictionary key order
@@ -82,12 +87,36 @@ still permit exits. Daily loss tracking resets on the fixture's UTC trading day;
 the drawdown halt stays latched for the experiment. These controls do not model
 intrabar stops, forced liquidation, latency, or guaranteed loss caps.
 
+## Checkpoint ownership and recovery
+
+Checkpointed replay requires POSIX file locking on a local filesystem, as used
+by the cloud Linux validation environment. An unsupported platform fails before
+checkpoint access or paper-exchange startup. In-memory replay needs no lock file
+or POSIX dependency. Windows and shared/distributed filesystem locking are not
+validated.
+
+The runner retains a small `.CHECKPOINT_NAME.lock` file beside the checkpoint.
+Its presence does not mean a run is active: ownership is a kernel file lock,
+released on normal completion, errors, cancellation, or process exit. Do not
+delete or replace this lock file while runners might use the checkpoint; all
+cooperating writers must lock the same inode. A symlink or non-regular lock file
+is rejected. Permissions or filesystem errors remain errors; they do not enable
+an unlocked fallback.
+
+When the checkpoint is already in use, wait for its current run to finish and
+retry the same command. After an interrupted run, rerun the command to validate
+and resume the last completed atomic checkpoint. This does not add a force-unlock
+mode or alter the existing prefix, economic-state, or pending-signal validation.
+Manual checkpoint edits or programs that ignore the lock are not protected.
+
 ## Verification and remaining limits
 
 `tools/offline_checks.py` runs the targeted safety, data, strategy, ledger, and
 runner suites while socket connections and DNS are forbidden. It includes the
 CLI entrypoint, real existing MA strategy, next-open execution, fees/slippage,
 marked holdings, corrupted checkpoint rejection, and restart before/after fills.
+It also checks competing writers, alias exclusion, failed writes, cancellation,
+and actual process-exit lock release while preserving the earlier contracts.
 
 This does not validate a live trading system. Existing live adapter code remains
 guarded by exact live configuration and an explicit runtime activation flag, but

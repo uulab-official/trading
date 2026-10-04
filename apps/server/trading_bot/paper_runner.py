@@ -20,6 +20,7 @@ from trading_core.paper_exchange import PaperExchange, PAPER_CALCULATION_CONTEXT
 from trading_core.order_manager import OrderManager, OrderSide, OrderType
 from trading_data import Candle, CandleBuffer
 from trading_strategy import MACrossStrategy, RSIStrategy, StrategyConfig
+from trading_bot.paper_checkpoint import locked_checkpoint
 
 
 @dataclass(frozen=True)
@@ -102,7 +103,8 @@ class PaperRunner:
 
     async def run(self, fixture, *, checkpoint_path: Optional[Path] = None, stop_after: Optional[int] = None):
         with localcontext(PAPER_CALCULATION_CONTEXT):
-            return await self._run(fixture, checkpoint_path=checkpoint_path, stop_after=stop_after)
+            with locked_checkpoint(checkpoint_path) as canonical_path:
+                return await self._run(fixture, checkpoint_path=canonical_path, stop_after=stop_after)
 
     async def _run(self, fixture, *, checkpoint_path=None, stop_after=None, return_state=False):
         candles = []

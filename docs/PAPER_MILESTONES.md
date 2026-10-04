@@ -62,3 +62,14 @@ See OFFLINE_REALIZED_REPORTING.md for count/unit definitions and remaining limit
 - Preserve the earlier offline safety, checkpoint, ledger, and FIFO checks
 
 See OFFLINE_ANNUALIZATION.md for the tested contract and remaining risk-statistic limits.
+
+## Milestone 6: checkpoint writer ownership
+
+- Prevent competing paper runs from rolling saved progress backward
+- Hold one-writer ownership across load, authoritative validation, replay, and save
+- Resolve aliases to one canonical checkpoint and reject unsafe lock files
+- Release ownership after completion, failed writes, cancellation, and process exit
+- Preserve atomic checkpoints, restart accounting, paper defaults, and live guards
+- Add eight network-forbidden concurrency/recovery checks to the offline aggregate
+
+See OFFLINE_PAPER_RUNNER.md for the POSIX/local-filesystem contract and retry steps.

@@ -22,6 +22,7 @@ def main():
         ("packages/data/tests", "test_offline_data.py"),
         ("packages/strategy/tests", "test_complete_candles.py"),
         ("apps/server/tests", "test_paper_runner.py"),
+        ("apps/server/tests", "test_paper_checkpoint.py"),
     ]
     if args.include_backtest:
         sys.path.insert(0, str(ROOT / "packages/backtest"))
