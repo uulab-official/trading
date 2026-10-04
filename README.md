@@ -20,6 +20,9 @@ It also includes [elapsed-time CAGR](docs/OFFLINE_ANNUALIZATION.md) with period,
 units, undefined-value handling, and an explicit extrapolation warning.
 Checkpointed paper replay now protects saved progress with one-writer ownership
 and tested interruption/retry behavior on local POSIX filesystems.
+The installed `trading-paper` command and module entrypoint share successful JSON
+output and documented failure/recovery exit codes; Python callers keep the result
+dictionary API.
 
 The older quick-start, live/Rust deployment, and legacy backtest instructions below
 are not evidence of production readiness. Live market data is explicitly

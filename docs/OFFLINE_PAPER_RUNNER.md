@@ -20,7 +20,11 @@ PYTHONPATH=packages/core:packages/data:packages/strategy:apps/server \
 ```
 
 If installed with the project's Python dependencies, the same entrypoint is
-`trading-paper`. No dependency installation was used for the recorded validation.
+`trading-paper`. Both command forms print the same result JSON to stdout and
+exit successfully with code `0`. Python callers of `main(argv)` still receive
+the result dictionary; the process entrypoint `cli(argv)` returns an integer.
+Local wheel/launcher validation builds and installs only this repository's server
+package into a temporary directory, with dependency fetching and network disabled.
 The provided 90-bar fixture is synthetic and demonstrates a simulated buy/sell
 cycle only. Its prices and returns are not market evidence.
 
@@ -109,6 +113,31 @@ and resume the last completed atomic checkpoint. This does not add a force-unloc
 mode or alter the existing prefix, economic-state, or pending-signal validation.
 Manual checkpoint edits or programs that ignore the lock are not protected.
 
+## CLI failures and retry steps
+
+Both `trading-paper` and `python -m trading_bot.paper_runner` use these exit codes:
+
+- `0`: replay completed, or `--help` was requested
+- `2`: invalid command arguments, fixture, configuration, or checkpoint
+- `3`: the checkpoint is already owned by another runner
+- `4`: local file access failed, including missing paths or permissions
+- `130`: keyboard interruption; rerun the same command to validate and resume
+
+Expected replay failures print concise guidance to stderr rather than a result
+dictionary or traceback. Input contents and saved configuration are not dumped.
+Normal argument usage errors use argparse's usage message. Unexpected errors
+retain their exception traceback instead of being treated as a successful run.
+
+For code `2`, check that the fixture is valid paper-mode JSON with six-column
+OHLCV rows, and use the original symbol, timeframe, strategy, and numeric options.
+Do not edit a saved checkpoint to bypass verification. Preserve it and use a new
+checkpoint path if you intended a different experiment. For code `3`, wait and
+retry; do not remove the lock file. For code `4`, check local paths, permissions,
+and available storage before retrying. A failure or interruption may occur after
+some bars have been saved: the last valid checkpoint is authoritative, and normal
+resume verifies it before continuing. If no checkpoint was saved, retry starts
+from the beginning. This does not add automatic retry or trading activation.
+
 ## Verification and remaining limits
 
 `tools/offline_checks.py` runs the targeted safety, data, strategy, ledger, and
@@ -117,6 +146,12 @@ CLI entrypoint, real existing MA strategy, next-open execution, fees/slippage,
 marked holdings, corrupted checkpoint rejection, and restart before/after fills.
 It also checks competing writers, alias exclusion, failed writes, cancellation,
 and actual process-exit lock release while preserving the earlier contracts.
+CLI checks run isolated subprocesses with network/DNS forbidden inside each
+child. They cover the configured console-script target, module parity, malformed
+inputs, checkpoint preservation, busy aliases, file errors, and an immediate
+SIGINT interruption after an atomic save followed by exact resume. A separate
+local wheel smoke test confirmed the generated installed launcher exits `0`,
+matches module JSON, and resumes without duplicate fills.
 
 This does not validate a live trading system. Existing live adapter code remains
 guarded by exact live configuration and an explicit runtime activation flag, but

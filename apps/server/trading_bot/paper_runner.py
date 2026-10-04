@@ -8,11 +8,12 @@ import argparse
 import asyncio
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_DOWN, localcontext
+from decimal import Decimal, DecimalException, InvalidOperation, ROUND_DOWN, localcontext
 import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 from typing import Callable, Optional
 
@@ -20,7 +21,7 @@ from trading_core.paper_exchange import PaperExchange, PAPER_CALCULATION_CONTEXT
 from trading_core.order_manager import OrderManager, OrderSide, OrderType
 from trading_data import Candle, CandleBuffer
 from trading_strategy import MACrossStrategy, RSIStrategy, StrategyConfig
-from trading_bot.paper_checkpoint import locked_checkpoint
+from trading_bot.paper_checkpoint import CheckpointInUseError, locked_checkpoint
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,8 @@ class PaperRunner:
         }
         if path is not None and path.exists():
             state = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(state, dict):
+                raise ValueError("Checkpoint must be a JSON object")
             if state.get("version") != 1 or state.get("mode") != "paper" or state.get("config") != config.identity():
                 raise ValueError("Checkpoint mode/version/configuration does not match this paper replay")
             cursor = state.get("next_index")
@@ -159,7 +162,10 @@ class PaperRunner:
                     break
                 candle = candles[index]
                 exchange.set_price(config.symbol, candle.open, timestamp=candle.timestamp)
-                day = datetime.fromtimestamp(candle.timestamp / 1000, timezone.utc).date().isoformat()
+                try:
+                    day = datetime.fromtimestamp(candle.timestamp / 1000, timezone.utc).date().isoformat()
+                except (ValueError, OSError, OverflowError) as error:
+                    raise ValueError("Fixture timestamp must be a representable UTC date") from error
                 if day != state["risk_day"]:
                     state["risk_day"] = day
                     state["daily_start_equity"] = str(exchange.get_total_value())
@@ -229,17 +235,25 @@ class PaperRunner:
                                   OrderType.MARKET, amount, client_order_id=f"fixture-{pending['source_index']}-{action}")
 
 
+def _cli_decimal(value):
+    try:
+        return Decimal(value)
+    except InvalidOperation as error:
+        raise argparse.ArgumentTypeError("must be a decimal number") from error
+
+
 def main(argv=None):
+    """Run the local CLI inputs and return the result dict to Python callers."""
     parser = argparse.ArgumentParser(description="Offline paper replay; no live mode or network supported")
     parser.add_argument("fixture", type=Path, help="Local JSON object with symbol, timeframe, and six-column candles")
     parser.add_argument("--checkpoint", type=Path, required=True, help="Local paper-only checkpoint; existing history is validated")
     parser.add_argument("--strategy", choices=("ma_cross", "rsi"), default="ma_cross")
-    parser.add_argument("--initial-balance", type=Decimal, default=Decimal("10000"))
-    parser.add_argument("--position-size-pct", type=Decimal, default=Decimal("20"))
-    parser.add_argument("--fee-pct", type=Decimal, default=Decimal("0.1"))
-    parser.add_argument("--slippage-pct", type=Decimal, default=Decimal("0.05"))
-    parser.add_argument("--max-daily-loss-pct", type=Decimal, default=Decimal("3"))
-    parser.add_argument("--max-drawdown-pct", type=Decimal, default=Decimal("10"))
+    parser.add_argument("--initial-balance", type=_cli_decimal, default=Decimal("10000"))
+    parser.add_argument("--position-size-pct", type=_cli_decimal, default=Decimal("20"))
+    parser.add_argument("--fee-pct", type=_cli_decimal, default=Decimal("0.1"))
+    parser.add_argument("--slippage-pct", type=_cli_decimal, default=Decimal("0.05"))
+    parser.add_argument("--max-daily-loss-pct", type=_cli_decimal, default=Decimal("3"))
+    parser.add_argument("--max-drawdown-pct", type=_cli_decimal, default=Decimal("10"))
     parser.add_argument("--fast-period", type=int, default=3)
     parser.add_argument("--slow-period", type=int, default=5)
     parser.add_argument("--rsi-period", type=int, default=14)
@@ -247,15 +261,48 @@ def main(argv=None):
     data = json.loads(args.fixture.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or data.get("mode", "paper") != "paper":
         raise ValueError("Fixture must be an offline paper JSON object")
+    if not isinstance(data.get("symbol", "BTC/USDT"), str):
+        raise ValueError("Fixture symbol must be a string")
+    candles = data.get("candles")
+    if not isinstance(candles, list) or any(not isinstance(row, list) or len(row) != 6 for row in candles):
+        raise ValueError("Fixture candles must be an array of six-column OHLCV rows")
     config = PaperRunConfig(symbol=data.get("symbol", "BTC/USDT"), timeframe=data.get("timeframe", "1h"),
                             strategy=args.strategy, initial_balance=args.initial_balance,
                             position_size_pct=args.position_size_pct, fee_pct=args.fee_pct, slippage_pct=args.slippage_pct,
                             max_daily_loss_pct=args.max_daily_loss_pct, max_drawdown_pct=args.max_drawdown_pct,
                             fast_period=args.fast_period, slow_period=args.slow_period, rsi_period=args.rsi_period)
-    result = asyncio.run(PaperRunner(config).run(data["candles"], checkpoint_path=args.checkpoint))
+    result = asyncio.run(PaperRunner(config).run(candles, checkpoint_path=args.checkpoint))
     print(json.dumps(result, sort_keys=True, allow_nan=False))
     return result
 
 
+def cli(argv=None):
+    """Process entry point: emit one result on success and return an exit code.
+
+    Keep exception details/configuration out of routine recovery messages.
+    Unexpected programming errors remain visible rather than looking like bad
+    user input or an automatically recoverable checkpoint failure.
+    """
+    try:
+        main(argv)
+    except CheckpointInUseError:
+        print("Checkpoint is in use. Wait for the active run to finish, then retry the same command. "
+              "Do not delete or replace the lock file.", file=sys.stderr)
+        return 3
+    except (ValueError, DecimalException):
+        print("Invalid paper input or checkpoint. Check the fixture format and original run options. "
+              "Preserve the saved checkpoint; use a new checkpoint path for a different experiment.", file=sys.stderr)
+        return 2
+    except OSError:
+        print("Local file access failed. Check the fixture/checkpoint paths and permissions, "
+              "then retry the same command; preserve the checkpoint and lock file.", file=sys.stderr)
+        return 4
+    except KeyboardInterrupt:
+        print("Paper replay interrupted. To validate and resume the last saved checkpoint, "
+              "rerun the same command; if none was saved, it starts from the beginning.", file=sys.stderr)
+        return 130
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(cli())

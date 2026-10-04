@@ -73,3 +73,16 @@ See OFFLINE_ANNUALIZATION.md for the tested contract and remaining risk-statisti
 - Add eight network-forbidden concurrency/recovery checks to the offline aggregate
 
 See OFFLINE_PAPER_RUNNER.md for the POSIX/local-filesystem contract and retry steps.
+
+## Milestone 7: reliable paper CLI completion and recovery
+
+- Give the installed `trading-paper` command an integer-returning process wrapper
+- Preserve the Python `main(argv)` result dictionary and module/console JSON parity
+- Report invalid input, checkpoint ownership, local file failures, and interruption
+  with documented nonzero exit codes and bounded recovery guidance
+- Preserve checkpoints and their authoritative resume checks on expected errors
+- Exercise real subprocess entrypoint semantics with child-level network guards
+- Verify local wheel-generated launchers and interrupted replay/resume
+
+See OFFLINE_PAPER_RUNNER.md for exit codes and manual retry steps. No accounting,
+strategy, lock algorithm, live guard, or automatic deployment behavior is changed.

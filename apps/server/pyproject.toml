@@ -18,7 +18,7 @@ dependencies = [
 
 [project.scripts]
 trading-bot = "trading_bot.main:main"
-trading-paper = "trading_bot.paper_runner:main"
+trading-paper = "trading_bot.paper_runner:cli"
 
 [tool.setuptools.packages.find]
 where = ["."]
