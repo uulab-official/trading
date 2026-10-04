@@ -31,10 +31,25 @@ The original successful-purchase test used 1,000 cash for a 5,000 purchase. Its
 fixture now supplies enough cash and asserts the deduction. The daily-loss test
 uses a 5% order notional so the separate 10% size guard cannot mask its outcome.
 
+## Nonpositive-equity entry guard
+
+`RiskManager.check_trade_allowed()` rejects `side='buy'` when
+`Portfolio.get_total_value()` returns zero or a negative value. This also covers amount-zero buy signals,
+which the application uses before calculating a final entry size. The rejection
+does not mutate the portfolio and reports that account equity must be positive.
+
+This guard does not change sell requests, reporting, status probes, or direct
+local position close operations. Existing guards still apply: the duplicate-symbol
+guard can still reject a SELL request for a held symbol, while direct local
+`Portfolio.close_position()` remains callable. This is not a general repair of
+legacy exit routing. `is_trading_allowed()` is
+an existing generic probe and remains unchanged, so it must not be treated as
+authorization for a particular new order. Each buy still needs its entry check.
+
 ## Explicit reset and remaining high-priority limitations
 
 `Portfolio.reset_daily()` retains its existing explicit contract: set the new
-baseline to current marked portfolio value and clear accumulated realized daily
+baseline to the value returned by `get_total_value()` and clear accumulated realized daily
 PnL without changing cash or positions. Tests explicitly coordinate it with a
 date change in `RiskManager.reset_daily_stats()`; no automatic connection was
 added between the two reset methods.
@@ -47,9 +62,16 @@ The legacy path still must not be used for live trading:
   a position close. This needs its own API-level regression and lifecycle fix
 - Zero baseline retains the legacy numeric result of zero, which is not an
   assertion that a funded order is safe. Negative baselines are not meaningful
-  return denominators. Existing legacy risk checks can allow positive orders
-  for nonpositive account equity; fail-closed validation is a separate pending
-  safety fix. This change does not silently normalize invalid balances
+  return denominators. The new entry guard rejects a nonpositive
+  `get_total_value()` result without changing or normalizing balances. NaN,
+  infinity, and a negative daily baseline paired with positive reported equity
+  are outside this guard's contract. Broader malformed-state validation and
+  recovery remain outside this repair
+- Zero price marks have an existing valuation fallback: `Position.position_value`
+  substitutes entry price when the current mark is zero. Consequently actual
+  marked equity can be zero while `get_total_value()` returns a positive value
+  and this guard cannot reject the entry. Repairing and testing that valuation
+  defect is a separate P1; this change does not alter valuation or mark handling
 - Legacy `Portfolio.to_dict()` / `from_dict()` does not preserve daily realized
   PnL or its UTC date. Restart recovery for this path is not validated by these
   checks and must not be confused with the separate paper runner's checkpoint

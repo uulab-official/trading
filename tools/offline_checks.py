@@ -20,6 +20,7 @@ def main():
         ("packages/core/tests", "*execution_safety.py"),
         ("packages/core/tests", "test_paper_ledger.py"),
         ("packages/core/tests", "test_daily_loss_contract.py"),
+        ("packages/core/tests", "test_entry_equity_guard.py"),
         ("packages/data/tests", "test_offline_data.py"),
         ("packages/strategy/tests", "test_complete_candles.py"),
         ("apps/server/tests", "test_paper_runner.py"),

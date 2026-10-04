@@ -86,6 +86,11 @@ class RiskManager:
             (allowed: bool, reason: str)
         """
         self.reset_daily_stats()
+
+        # Unsized buy signals are still entry requests. Keep this guard local
+        # to entries so status probes and position-reducing paths are unchanged.
+        if side == 'buy' and self.portfolio.get_total_value() <= 0:
+            return False, "Account equity must be positive for new positions"
         
         # 1. 서킷브레이커 체크
         if self._circuit_breaker_triggered:
