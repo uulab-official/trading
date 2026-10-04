@@ -86,3 +86,15 @@ See OFFLINE_PAPER_RUNNER.md for the POSIX/local-filesystem contract and retry st
 
 See OFFLINE_PAPER_RUNNER.md for exit codes and manual retry steps. No accounting,
 strategy, lock algorithm, live guard, or automatic deployment behavior is changed.
+
+## Milestone 8: first-interrupt checkpoint boundary
+
+- Yield only after a completed bar and atomic checkpoint so the first SIGINT
+  cancellation is delivered before the next bar can mutate the paper ledger
+- Reproduce the former run-to-end behavior through a locally installed launcher
+- Check early/buy/sell/final boundaries, interruption before any checkpoint, and
+  one/two SIGINTs during atomic replacement using real subprocesses
+- Verify exit `130`, exact restart, stable fixture timestamps despite a changed
+  Python `time.time()` value, no duplicate fills, and lock release with network/DNS forbidden
+
+See OFFLINE_PAPER_RUNNER.md for the safe-boundary contract and latency limits.

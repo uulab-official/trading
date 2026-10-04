@@ -10,7 +10,10 @@ From the repository root:
 
 The offline runtime needs Python 3.10+ and PyYAML 6+. The minimal dependency is
 listed in `requirements-offline.txt`; this excludes live broker/data clients.
-The validation runtime already supplied PyYAML, so no installation was performed.
+The validation runtime already supplied PyYAML. The targeted checks additionally
+need pip, setuptools (61+), and wheel for the installed-CLI regression: only the
+local server package is built into a temporary directory, with dependency fetching
+and network/DNS disabled. Nothing is installed into the user's environment.
 
 ```sh
 python tools/offline_checks.py
@@ -77,6 +80,11 @@ about an exchange's lot-size or minimum-order rules.
 - Equity/return include open holdings marked at the last supplied close
 - Fixed 28-digit Decimal precision and HALF_EVEN accounting make replay stable
 - A checkpoint is atomically written after each completed bar
+- After each completed bar and atomic save, replay yields to deliver pending
+  cancellation before starting another bar. On Python 3.11+, a first SIGINT
+  requests cancellation: an in-progress synchronous bar/save can finish, then the
+  CLI exits `130` without processing another bar. Python 3.10 and a second SIGINT
+  can interrupt immediately; restart still uses the last complete atomic save
 - One runner owns the checkpoint from before loading/validation through its final
   save. A concurrent runner receives `CheckpointInUseError` before exchange
   startup and cannot overwrite saved progress
@@ -148,10 +156,16 @@ It also checks competing writers, alias exclusion, failed writes, cancellation,
 and actual process-exit lock release while preserving the earlier contracts.
 CLI checks run isolated subprocesses with network/DNS forbidden inside each
 child. They cover the configured console-script target, module parity, malformed
-inputs, checkpoint preservation, busy aliases, file errors, and an immediate
-SIGINT interruption after an atomic save followed by exact resume. A separate
-local wheel smoke test confirmed the generated installed launcher exits `0`,
-matches module JSON, and resumes without duplicate fills.
+inputs, checkpoint preservation, busy aliases, file errors, and two-SIGINT
+interruption after an atomic save followed by exact resume. Installed-launcher
+checks also send one real SIGINT before replay, at early/buy/sell/final save
+boundaries, and during atomic replacement. They assert the committed cursor,
+exit `130` with no success JSON, released lock, and byte-identical checkpoint
+after restart, with no duplicate fills. A second SIGINT before replacement
+preserves the prior checkpoint. Changing Python `time.time()` between interruption
+and restart does not change fixture-based results; the system clock and other
+clock APIs are not mocked by this check. These checks do not establish
+a fixed shutdown latency during fixture parsing or a single synchronous bar.
 
 This does not validate a live trading system. Existing live adapter code remains
 guarded by exact live configuration and an explicit runtime activation flag, but

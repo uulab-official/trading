@@ -193,6 +193,10 @@ class PaperRunner:
                 if path is not None:
                     _atomic_checkpoint(path, state)
                 consumed += 1
+                # Paper exchange awaits complete synchronously. Deliver pending
+                # cancellation only after this bar and its atomic save finish,
+                # before another bar can mutate the ledger.
+                await asyncio.sleep(0)
             balances = await exchange.fetch_balance()
             equity = exchange.get_total_value()
             if return_state:
