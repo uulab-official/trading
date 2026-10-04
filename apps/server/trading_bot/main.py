@@ -466,7 +466,7 @@ class TradingBot:
             trade = self.portfolio.close_position(symbol, price)
 
             # Update risk manager
-            self.risk_manager.on_position_closed(trade.pnl)
+            self.risk_manager.on_position_closed(trade.pnl, accounting_date=trade.accounting_date)
 
             logger.info(
                 f"Position closed: {symbol} @ {price} (PnL: {trade.pnl:.2f}, Reason: {reason})"

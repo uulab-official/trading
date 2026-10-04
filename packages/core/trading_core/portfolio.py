@@ -1,7 +1,7 @@
 """Portfolio tracking - 포트폴리오 및 포지션 관리"""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional
 import logging
@@ -81,6 +81,8 @@ class Trade:
     opened_at: datetime
     closed_at: datetime
     strategy_id: Optional[str] = None
+    # In-memory processing period; deliberately excluded from state serialization.
+    accounting_date: Optional[date] = None
 
 
 class Portfolio:
@@ -98,6 +100,7 @@ class Portfolio:
         self._trades: List[Trade] = []
         
         # 일일 추적
+        self._daily_date = datetime.utcnow().date()
         self._daily_start_value = initial_balance
         self._daily_pnl = Decimal("0")
         
@@ -160,6 +163,9 @@ class Portfolio:
         if symbol not in self._positions:
             raise ValueError(f"No position found for {symbol}")
         
+        # Establish the UTC period before this close changes cash or realized PnL.
+        processed_at = datetime.utcnow()
+        self.ensure_daily_period(processed_at)
         position = self._positions[symbol]
         
         # 손익 계산
@@ -181,8 +187,9 @@ class Portfolio:
             pnl=pnl,
             pnl_pct=pnl_pct,
             opened_at=position.opened_at,
-            closed_at=exit_time or datetime.utcnow(),
-            strategy_id=position.strategy_id
+            closed_at=exit_time or processed_at,
+            strategy_id=position.strategy_id,
+            accounting_date=self._daily_date
         )
         
         self._trades.append(trade)
@@ -240,7 +247,7 @@ class Portfolio:
         return sum(p.unrealized_pnl for p in self._positions.values())
     
     def get_daily_pnl_pct(self) -> Decimal:
-        """Signed net realized PnL percentage since the explicit daily reset."""
+        """Signed net realized PnL percentage in the current accounting period."""
         if self._daily_start_value == 0:
             return Decimal("0")
         return (self._daily_pnl / self._daily_start_value) * 100
@@ -302,8 +309,29 @@ class Portfolio:
             for p in self._positions.values()
         ]
     
+    @property
+    def daily_date(self) -> date:
+        """Nondecreasing in-memory UTC accounting date."""
+        return self._daily_date
+
+    def ensure_daily_period(self, observed_at: Optional[datetime] = None) -> date:
+        """Roll forward once, using processing UTC rather than trade metadata."""
+        observed = observed_at if observed_at is not None else datetime.utcnow()
+        # Naive observations are UTC, matching utcnow(); aware ones name an instant.
+        if observed.utcoffset() is not None:
+            observed = observed.astimezone(timezone.utc)
+        today = observed.date()
+        if today > self._daily_date:
+            self._daily_date = today
+            self._reset_daily_values()
+        return self._daily_date
+
     def reset_daily(self) -> None:
-        """일일 리셋"""
+        """Explicitly rebase and clear realized PnL, even within the same day."""
+        self._daily_date = max(self._daily_date, datetime.utcnow().date())
+        self._reset_daily_values()
+
+    def _reset_daily_values(self) -> None:
         self._daily_start_value = self.get_total_value()
         self._daily_pnl = Decimal("0")
         logger.info(f"Daily portfolio reset. Start value: {self._daily_start_value}")

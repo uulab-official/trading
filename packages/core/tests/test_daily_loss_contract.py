@@ -72,13 +72,12 @@ class DailyLossContractTests(unittest.TestCase):
             @classmethod
             def utcnow(cls):
                 return now
-        with patch("trading_core.risk_manager.datetime", Clock):
+        with patch("trading_core.risk_manager.datetime", Clock), patch("trading_core.portfolio.datetime", Clock):
             portfolio, manager = self.realize("-50", circuit_limit="5")
             manager.reset_daily_stats()
             self.assertEqual(portfolio.get_daily_loss_pct(), Decimal("5"))
             now += timedelta(days=1)
-            # Legacy callers must explicitly reset the portfolio. Automatic
-            # midnight coordination is a separate, unresolved lifecycle issue.
+            # The explicit reset still works before the coordinated risk reset.
             portfolio.reset_daily()
             manager.reset_daily_stats()
             self.assertEqual(portfolio.cash_balance, Decimal("950"))

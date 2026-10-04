@@ -1,7 +1,7 @@
 """Risk management - 리스크 관리 (자동매매 생존의 핵심)"""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional
 import logging
@@ -46,7 +46,7 @@ class RiskManager:
         
         # 일일 추적
         self._daily_stats = {
-            'date': datetime.utcnow().date(),
+            'date': portfolio.daily_date,
             'total_pnl': Decimal("0"),
             'trade_count': 0,
             'loss_count': 0,
@@ -59,8 +59,13 @@ class RiskManager:
         self._circuit_breaker_triggered = False
         
     def reset_daily_stats(self) -> None:
-        """일일 통계 초기화 (자정마다 호출)"""
-        today = datetime.utcnow().date()
+        """Coordinate rollover through the portfolio's single UTC period owner."""
+        self.portfolio.ensure_daily_period()
+        self._sync_daily_stats()
+
+    def _sync_daily_stats(self) -> None:
+        """Align risk counters without resetting already-recorded portfolio PnL."""
+        today = self.portfolio.daily_date
         if today != self._daily_stats['date']:
             self._daily_stats = {
                 'date': today,
@@ -204,8 +209,16 @@ class RiskManager:
         else:
             return entry_price - reward_distance
     
-    def on_position_closed(self, pnl: Decimal) -> None:
-        """포지션 종료 시 호출 - 리스크 업데이트"""
+    def on_position_closed(self, pnl: Decimal, *, accounting_date: Optional[date] = None) -> None:
+        """Record a close in its period; untagged calls require immediate ordering."""
+        if accounting_date is not None:
+            if type(accounting_date) is not date:
+                raise TypeError("accounting_date must be a UTC accounting date")
+            if accounting_date > self.portfolio.daily_date:
+                raise ValueError("accounting_date cannot be ahead of the portfolio period")
+        self._sync_daily_stats()
+        if accounting_date is not None and accounting_date < self.portfolio.daily_date:
+            return  # A delayed old-period close must not affect today's risk state.
         self._daily_stats['trade_count'] += 1
         self._daily_stats['total_pnl'] += pnl
         

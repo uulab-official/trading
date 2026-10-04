@@ -10,7 +10,7 @@ that the legacy application is safe for live operation.
 For a positive daily starting value:
 
 - `Portfolio.get_daily_pnl_pct()` is signed net realized PnL divided by the
-  explicitly recorded daily starting value, times 100. Losses are negative;
+  recorded daily starting value, times 100. Losses are negative;
   gains are positive
 - `Portfolio.get_daily_loss_pct()` is the nonnegative loss magnitude:
   `max(0, -daily_pnl_pct)`. Profits and break-even therefore produce zero loss
@@ -46,20 +46,50 @@ legacy exit routing. `is_trading_allowed()` is
 an existing generic probe and remains unchanged, so it must not be treated as
 authorization for a particular new order. Each buy still needs its entry check.
 
-## Explicit reset and remaining high-priority limitations
+## UTC daily coordination and explicit reset
 
-`Portfolio.reset_daily()` retains its existing explicit contract: set the new
-baseline to the value returned by `get_total_value()` and clear accumulated realized daily
-PnL without changing cash or positions. Tests explicitly coordinate it with a
-date change in `RiskManager.reset_daily_stats()`; no automatic connection was
-added between the two reset methods.
+Portfolio owns a nondecreasing, in-memory UTC processing date. A valid local
+`close_position()` establishes the current period before changing cash or
+recording realized PnL. `RiskManager.reset_daily_stats()` delegates to that same
+period owner and then aligns its counters, circuit latch, and cooldown. Its
+existing check/report paths still perform that coordinated reset.
+
+Automatic rollover occurs only when the observed UTC date is later than the
+recorded date. An explicit aware observation is converted to UTC first; naive
+observations retain the existing UTC meaning. Same-day repeated checks, a different host-local date, and a clock
+rollback followed by restoration do not clear losses or reset the baseline. The
+baseline is the existing `get_total_value()` result at the first observed rollover,
+not a reconstructed price at midnight. No valuation semantics are changed.
+
+A returned `Trade.accounting_date` tags the in-memory processing period. The
+legacy application explicitly passes it to
+`on_position_closed(pnl, accounting_date=trade.accounting_date)`. The callback
+aligns risk counters to the portfolio's already-established period without
+resetting portfolio PnL. If another check or close has advanced the period, a
+callback tagged with an older date leaves the current counters, latch, and
+cooldown alone. Malformed or future callback dates are rejected without advancing
+the period. A supplied `exit_time` remains display/history metadata and does not
+select the accounting period.
+
+The one-argument callback remains compatible for immediate, sequential callers.
+It cannot identify a delayed old close once another operation advances the
+portfolio. Tagged dates address cross-period callbacks, not duplicate-event
+idempotency, arbitrary same-day reordering, or concurrent portfolio writers.
+
+`Portfolio.reset_daily()` still explicitly rebases to `get_total_value()` and
+clears accumulated realized PnL even within the same day, without changing cash
+or positions. It does not move the date backwards. As before, a same-day explicit
+portfolio reset does not clear RiskManager's trade counters or circuit latch.
+Signed report values and nonnegative loss magnitude retain their separate roles.
+
+The date tag is not added to the existing portfolio JSON, SQLite/state-store
+payload, notification payload, or risk-report keys. It is memory-only; this does
+not repair restart recovery.
+
+## Remaining high-priority limitations
 
 The legacy path still must not be used for live trading:
 
-- Automatic UTC-day coordination is unresolved. `RiskManager.reset_daily_stats()`
-  resets its own counters and latch but does not reset the portfolio. Connecting
-  those calls naively can erase a loss when the first action after midnight is
-  a position close. This needs its own API-level regression and lifecycle fix
 - Zero baseline retains the legacy numeric result of zero, which is not an
   assertion that a funded order is safe. Negative baselines are not meaningful
   return denominators. The new entry guard rejects a nonpositive
@@ -81,4 +111,7 @@ The legacy path still must not be used for live trading:
 `tools/offline_checks.py --include-backtest` includes the focused daily-loss
 contracts with socket connections and DNS forbidden. The tests cover zero,
 profit, loss, threshold boundaries, net recovery, circuit latch, explicit reset,
-and the realized/unrealized distinction.
+the realized/unrealized distinction, UTC first-close/check ordering, tagged delayed
+callbacks, repeated resets, local-date differences, clock rollback, unchanged
+saved/report schemas, and the actual application close method with inert local
+order/notification collaborators.
