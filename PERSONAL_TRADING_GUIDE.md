@@ -1,390 +1,138 @@
-# 나만을 위한 실전 트레이딩 가이드
+# 개인용 오프라인 모의거래 체험 가이드
 
-> ⚠️ **경고**: 이 문서는 개인 사용 목적으로 작성되었습니다. 상업적 배포를 위해서는 추가적인 테스트와 검증이 필요합니다.
+현재 직접 실행해 확인할 수 있는 경로는 **합성 캔들 파일을 재생하는 Python CLI**입니다.
+거래소 시세에 연결해 계속 작동하는 Paper Trading 서비스나 실거래 프로그램이 아닙니다.
+API 키, 거래소 계정, Telegram, Docker 없이 실행합니다. 체험의 목적은
+체결 기록과 저장·재시작 동작을 확인하는 것이며, 수익성을 판단하는 것이 아닙니다.
 
----
+## 1. 준비
 
-## 🎯 목표
+Python 3.10 이상, PyYAML 6 이상이 필요합니다. 체크포인트 저장은 로컬 POSIX
+파일 잠금을 지원하는 Linux/macOS 경로에서 사용하세요. 검증 환경은 Linux입니다.
+Windows와 공유·분산 파일시스템의 잠금 동작은 검증하지 않았습니다.
 
-**2주 Paper Trading → 소액 Live Trading → 자본 확대**
+처음 받는 경우:
 
----
-
-## Phase 1: Paper Trading (2주)
-
-### 1.1 준비사항
-
-```bash
-# 1. 저장소 클론
+```sh
 git clone https://github.com/uulab-official/trading.git
-cd trading/trading-monorepo
-
-# 2. 설정 초기화
-python -m trading_core.config_cli init
-
-# 3. Paper Trading 설정 확인
-nano config/active/bot_config.yml
+cd trading
 ```
 
-### 1.2 Paper Trading 설정
+이하 명령은 `README.md`, `packages/`, `apps/`가 있는 저장소 루트에서 실행합니다.
+이미 받은 저장소에서는 그 루트로 이동하세요. `trading/trading-monorepo`라는
+추가 하위 폴더로 들어가지 않습니다.
 
-```yaml
-bot:
-  id: "my-test-bot"
-  name: "Test Bot"
-  mode: paper              # ← 반드시 paper
-  timezone: "Asia/Seoul"
+의존성이 없다면 별도 가상환경에 준비합니다. 설치 단계에는 패키지 다운로드가
+필요할 수 있지만, 아래 재생은 공급된 파일만 사용합니다.
 
-exchange:
-  id: binance
-  sandbox: true            # ← 테스트넷 사용
-  testnet: true
-  api_key: "YOUR_TESTNET_API_KEY"
-  api_secret: "YOUR_TESTNET_SECRET"
-  default_type: spot
-
-risk:
-  max_daily_loss_pct: 5.0  # 테스트용으로 넉넉하게
-  max_daily_trades: 20
-  max_position_size_pct: 50.0
-  max_positions: 3
-  risk_per_trade_pct: 5.0
-  max_leverage: 1.0
-  default_stop_loss_pct: 3.0
-  default_take_profit_pct: 6.0
-  circuit_breaker_loss_pct: 10.0
-
-telegram:
-  enabled: true            # 알림 받기 위해 활성화
-  bot_token: "YOUR_BOT_TOKEN"
-  chat_id: "YOUR_CHAT_ID"
-  notifications:
-    trade: true
-    error: true
-    daily_report: true
-    position: true
-
-strategies:
-  # 테스트용으로 1-2개만 활성화
-  - name: "BTC_RSI_Test"
-    enabled: true
-    type: rsi
-    symbol: "BTC/USDT"
-    timeframe: "1h"
-    params:
-      period: 14
-      oversold: 30
-      overbought: 70
+```sh
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-offline.txt
 ```
 
-### 1.3 테스트넷 API 키 발급
+## 2. 첫 재생과 결과 확인
 
-1. [Binance Testnet](https://testnet.binance.vision/) 접속
-2. GitHub로 로그인
-3. "Generate API Key" 클릭
-4. `config/secrets/secrets.yml`에 저장
-
-### 1.4 Paper Trading 실행
-
-```bash
-# 자동 테스트 스크립트 실행
-./test-trading.sh
-
-# 또는 수동으로
-docker-compose -f infra/docker/docker-compose.yml up -d
-
-# 로그 모니터링
-docker-compose -f infra/docker/docker-compose.yml logs -f
+```sh
+export PYTHONPATH=packages/core:packages/data:packages/strategy:apps/server
+mkdir -p data/owner-trial
+python -m trading_bot.paper_runner config/examples/offline_fixture.json \
+  --checkpoint data/owner-trial/checkpoint.json \
+  > data/owner-trial/result.json
+python -m json.tool data/owner-trial/result.json
 ```
 
-### 1.5 확인사항 (2주간)
+제공된 파일과 기본 옵션에서 확인할 값:
 
-**매일 확인:**
-- [ ] 봇이 24시간 중단 없이 실행 중
-- [ ] 에러 로그 없음
-- [ ] 전략이 신호를 생성함
-- [ ] 주문이 정상적으로 체결됨 (Paper mode)
-- [ ] Telegram 알림 수신
+- `mode`: `paper`
+- `status`: `fixture_complete`
+- `bars_processed`: `90`
+- `trades`: 모의 매수 1건과 모의 매도 1건, 합계 2건
+- `holdings`: `{}` (이 합성 예제는 마지막에 보유 수량이 없음)
+- `pending_signal`: `null`
 
-**매주 확인:**
-- [ ] 수익률 추이 분석
-- [ ] 리스크 관리 작동 확인 (손절/익절)
-- [ ] 전략 파라미터 조정 필요성 검토
+`fixture_complete`는 파일 재생이 끝났다는 뜻입니다. 이후 시세를 기다리는
+상시 프로세스가 아닙니다. `cash`, `equity`, `total_fees`, `total_return_pct`는
+합성 가격과 설정된 수수료·슬리피지에서 계산한 값이며, 실제 잔고나 예상 수익률이 아닙니다.
+`python-telegram-bot not installed` 안내가 보이더라도 이 경로에는 Telegram이
+필요하지 않습니다. 성공 여부는 종료 코드 `0`과 결과 JSON으로 확인합니다.
 
-**2주 후 결정:**
-- 수익률 > 0% → Live Trading 진행
-- 수익률 < 0% → 전략 수정 또는 파라미터 조정
-- 버그 발생 → 수정 후 재테스트
+## 3. 같은 체크포인트로 재실행
 
----
+첫 결과를 남겨 두고 **같은 파일·옵션·체크포인트**로 다시 실행합니다.
 
-## Phase 2: 소액 Live Trading (1-2주)
-
-### 2.1 준비사항
-
-**필요한 것:**
-- Binance 실제 계정 (Verified)
-- 테스트 완료된 전략
-- **잃어도 되는 돈** (최소 $100-$500)
-
-**절대 하지 말 것:**
-- ❌ 생활비 투자
-- ❌ 대출금 투자
-- ❌ 전재산 투자
-- ❌ 레버리지 사용
-
-### 2.2 Live Trading 설정
-
-```yaml
-bot:
-  mode: live               # ← paper에서 live로 변경
-  
-exchange:
-  sandbox: false           # ← 테스트넷 비활성화
-  testnet: false
-  api_key: "YOUR_LIVE_API_KEY"
-  api_secret: "YOUR_LIVE_SECRET"
-
-risk:
-  max_daily_loss_pct: 2.0  # ← 보수적으로 조정
-  max_daily_trades: 5      # ← 처음에는 적게
-  max_position_size_pct: 20.0  # ← 포지션도 작게
-  max_positions: 1         # ← 하나만
-  risk_per_trade_pct: 1.0  # ← 1% 리스크
-  default_stop_loss_pct: 2.0
-  default_take_profit_pct: 4.0
-  circuit_breaker_loss_pct: 5.0
-
-strategies:
-  # Paper Trading에서 검증된 전략만 1개
-  - name: "BTC_RSI_Live"
-    enabled: true
-    type: rsi
-    symbol: "BTC/USDT"
-    timeframe: "1h"
-    params:
-      period: 14
-      oversold: 30
-      overbought: 70
+```sh
+python -m trading_bot.paper_runner config/examples/offline_fixture.json \
+  --checkpoint data/owner-trial/checkpoint.json \
+  > data/owner-trial/resumed.json
+python - <<'PYCODE'
+import json
+from pathlib import Path
+first = json.loads(Path("data/owner-trial/result.json").read_text())
+resumed = json.loads(Path("data/owner-trial/resumed.json").read_text())
+assert first == resumed, "첫 실행과 재실행 결과가 다릅니다"
+assert resumed["bars_processed"] == 90
+assert len(resumed["trades"]) == 2
+print("재실행 일치: 90개 봉, 중복 없는 모의 체결 2건")
+PYCODE
 ```
 
-### 2.3 Live Trading 실행
+완료된 체결이 추가되지 않고 같은 결과가 나와야 합니다. 중단된 재생도 같은 명령으로
+마지막에 저장된 봉부터 검증·재개합니다. 원본 캔들, 전략, 수수료 또는 위험 설정을
+바꾼 실험에는 **새 체크포인트 경로**를 사용하세요. 기존 체크포인트를 직접 고치거나
+잠금 파일을 삭제해 검증을 우회하지 마세요.
 
-```bash
-# 설정 검증
-python -m trading_core.config_cli validate
+이 예제는 빠르게 끝나므로 Ctrl+C 중단을 체험자가 맞춰 누를 필요는 없습니다.
+실제 신호 중단·원자적 저장·경쟁 실행은 아래 자동 검사에 포함됩니다.
 
-# 백업 생성
-cp config/active/bot_config.yml config/active/bot_config.yml.paper
-cp -r data data.paper.backup
+## 4. 자동 검사
 
-# 새로 시작
-docker-compose -f infra/docker/docker-compose.yml down
-docker-compose -f infra/docker/docker-compose.yml up -d
+설치된 CLI 검사는 로컬 서버 패키지를 임시 디렉터리에 빌드하므로 pip,
+setuptools 61 이상, wheel도 필요합니다. 필요하면 가상환경에서 준비합니다.
 
-# 로그 모니터링 (첫 1시간 집중)
-docker-compose -f infra/docker/docker-compose.yml logs -f
+```sh
+python -m pip install 'setuptools>=61' wheel
+python tools/offline_checks.py
 ```
 
-### 2.4 1주일간 모니터링
+이 검사는 네트워크 연결과 DNS를 금지한 채 실행되며, 원장·위험 제한·체크포인트·
+CLI·중단 후 재시작 등을 확인합니다. 선택적으로 pandas/numpy가 준비된 환경에서는
+`python tools/offline_checks.py --include-backtest`로 별도 백테스트 회귀 검사도 실행할 수 있습니다.
+통과해도 실거래나 거래소 연결이 검증되었다는 뜻은 아닙니다.
 
-**처음 24시간:**
-- 30분마다 로그 확인
-- 첫 거래가 정상적으로 체결되는지 확인
-- 손절/익절 주문이 걸리는지 확인
+## 5. 결과를 어디서 보나요?
 
-**일일 체크리스트:**
-- [ ] 봇 상태 확인
-- [ ] 거래 내역 확인 (Binance 거래소에서)
-- [ ] 손익 계산
-- [ ] 리스크 한도 준수
+이번 체험의 결과는 `data/owner-trial/result.json`과 `resumed.json`입니다.
+저장 상태는 `checkpoint.json`이며, 모두 이 CLI의 JSON 데이터입니다.
 
-**1주일 후 평가:**
-- 총 거래 횟수: ___
-- 승률: ___%
-- 총 수익률: ___%
-- 최대 낙폭: ___%
+- 현재 `infra/docker/docker-compose.yml`은 Rust `trading-server`를 실행합니다.
+  Python 재생 CLI를 실행하거나 JSON 체크포인트를 가져오지 않습니다
+- Rust 웹의 `/api/positions`, `/api/orders`는 현재 빈 배열을 반환합니다.
+  화면의 빈 목록이나 `running` 상태로 이 체험의 체결 여부를 판단하지 마세요
+- 별도 Python 대시보드 `packages/monitor/web_dashboard.py`는
+  `/app/data/trading.db`의 `bot:main:*` 상태를 읽습니다.
+  이 JSON 체크포인트를 읽지 않으며, 현재 Compose에 별도 서비스로 연결되어 있지 않습니다
+- 레거시 Python 봇의 버전 관리 SQLite 체크포인트도 별도 경로입니다.
+  이 체험의 JSON이나 Rust DB와 서로 바꾸어 사용할 수 없습니다
 
----
+대시보드 통합을 위해 파일 확장자만 바꾸거나 JSON을 SQLite 경로에 복사하지 마세요.
+[현재 대시보드 경계](docs/WEB_DASHBOARD.md)와
+[레거시 상태 복구 범위](docs/LEGACY_RISK_LIMITS.md)를 참고하세요.
 
-## Phase 3: 자본 확대 (2-4주 후)
+## 6. 실패했을 때
 
-### 3.1 확대 기준
+- 종료 코드 `2`: 입력·옵션·체크포인트 검증 실패. 원래 설정을 확인하고 저장본을 보존하세요
+- 종료 코드 `3`: 같은 체크포인트를 다른 실행이 사용 중. 해당 실행이 끝난 뒤 다시 시도하세요
+- 종료 코드 `4`: 경로·권한 등 로컬 파일 오류. 경로와 저장 공간을 확인하세요
+- 종료 코드 `130`: 사용자 중단. 같은 명령으로 검증·재개하세요
 
-**모두 만족 시 자본 확대:**
-- [ ] 2주 연속 수익
-- [ ] 승률 50% 이상
-- [ ] 최대 낙폭 10% 미만
-- [ ] 리스크 관리 정상 작동
-- [ ] 정신적 스트레스 없음
+오류 보고에는 종료 코드와 민감정보를 제거한 오류 문구만 우선 공유하세요.
+키·토큰·계정 비밀번호를 설정 파일이나 이 체험 결과에 넣지 마세요.
+[상세 CLI·복구 문서](docs/OFFLINE_PAPER_RUNNER.md)에 옵션과 제한이 정리되어 있습니다.
 
-### 3.2 단계별 확대
+## 다음 단계의 경계
 
-```
-Week 1-2:  $100  (현재)
-Week 3-4:  $300  (x3)
-Week 5-6:  $500  (x5)
-Week 7-8:  $1000 (x10)
-Month 3+:  자본의 10-20%만 투자
-```
-
-### 3.3 추가 전략 고려
-
-**첫 전략이 안정화된 후:**
-```yaml
-strategies:
-  # 기존 전략
-  - name: "BTC_RSI"
-    enabled: true
-    type: rsi
-    symbol: "BTC/USDT"
-    timeframe: "1h"
-  
-  # 추가 전략 1
-  - name: "ETH_MA"
-    enabled: true
-    type: ma_cross
-    symbol: "ETH/USDT"
-    timeframe: "4h"
-    params:
-      fast_period: 50
-      slow_period: 200
-  
-  # 추가 전략 2
-  - name: "SOL_Breakout"
-    enabled: false  # 처음엔 비활성화, 검증 후 활성화
-    type: breakout
-    symbol: "SOL/USDT"
-    timeframe: "2h"
-```
-
----
-
-## 🚨 위급 상황 대처
-
-### 봇 중지가 필요한 경우
-
-```bash
-# 정상 중지 (권장)
-docker-compose -f infra/docker/docker-compose.yml down
-
-# 강제 중지 (비상시)
-docker-compose -f infra/docker/docker-compose.yml kill
-```
-
-### 롤백이 필요한 경우
-
-```bash
-# Paper Trading 설정으로 복구
-cp config/active/bot_config.yml.paper config/active/bot_config.yml
-
-# 이전 데이터로 복구
-rm -rf data
-cp -r data.paper.backup data
-
-# 재시작
-docker-compose -f infra/docker/docker-compose.yml up -d
-```
-
----
-
-## 📊 성공 기준
-
-### 최소 성공 기준 (3개월)
-
-- [ ] 봇이 90% 이상 가동 시간 유지
-- [ ] 월간 수익률 +5% 이상
-- [ ] 최대 낙폭 -10% 미만
-- [ ] 리스크 관리 100% 작동
-- [ ] 스트레스 없는 자동화
-
-### 이정표
-
-| 기간 | 목표 | 확인사항 |
-|------|------|----------|
-| Week 1 | Paper Trading | 신호 생성, 오류 없음 |
-| Week 2 | Paper 결과 분석 | 수익률 확인 |
-| Week 3 | $100 Live | 첫 실전 거래 |
-| Week 4 | $100 결과 | 수익/손실 분석 |
-| Month 2 | $300 확대 | 안정성 확인 |
-| Month 3 | $500 확대 | 복리 효과 시작 |
-| Month 6 | 자본 10% | 본격 자동화 |
-
----
-
-## 💡 팁
-
-### 전략 최적화
-
-```bash
-# 백테스팅으로 파라미터 최적화
-python -m trading_backtest optimize \
-  --symbol BTC/USDT \
-  --strategy rsi \
-  --param-grid '{"period": [10, 14, 20], "oversold": [25, 30, 35]}'
-```
-
-### 로그 분석
-
-```bash
-# 에러만 보기
-docker-compose logs | grep ERROR
-
-# 거래 내역 보기
-docker-compose logs | grep "Position\|Trade"
-
-# 일일 리포트
-docker-compose logs | grep "Daily Report"
-```
-
-### 성능 모니터링
-
-```bash
-# Docker 리소스 사용량
-docker stats
-
-# 디스크 사용량
-du -sh data/
-du -sh logs/
-```
-
----
-
-## 📝 일지 작성
-
-**매일 기록:**
-```
-Date: 2026-02-12
-Mode: Paper
-Trades: 3
-Win/Loss: 2/1
-PnL: +$12.50
-Notes: RSI 신호 잘 작동, 손절이 아쉬움
-```
-
-**주간 회고:**
-```
-Week: 1
-Total PnL: +$45.30
-Win Rate: 60%
-Max Drawdown: -3%
-Improvements: 손절을 2%에서 1.5%로 조정
-```
-
----
-
-## 🔗 관련 문서
-
-- [CUSTOMER_SETUP.md](CUSTOMER_SETUP.md) - 상세 설치 가이드
-- [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) - 실전 체크리스트
-- [ZERO_DOWNTIME_DEPLOYMENT.md](docs/ZERO_DOWNTIME_DEPLOYMENT.md) - 배포 가이드
-
----
-
-**시작일:** _______________
-
-**초기 자본:** $____________
-
-**목표:** 월 ___% 수익
-
-**각오:** ________________________________
+이 체험은 기간이나 수익률에 따라 실거래로 넘어가는 절차가 아닙니다.
+현재 복원된 데이터 패키지의 실시간 피드는 `LiveMarketDataUnavailable`로 차단됩니다.
+시장 연결 모의운영, 대시보드 통합, 실제 거래소 호환성, 실거래 활성화는 각각 별도 구현과
+검증이 필요합니다. 이 안내에는 API 키 발급, 외부 배포, 실제 주문 실행 단계가 없습니다.

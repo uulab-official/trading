@@ -1,10 +1,14 @@
 # Trading Bot Monorepo
 
-24/7 암호화폐 자동매매 시스템 - 모의거래 우선 모노레포 구조
+암호화폐 자동매매 개발 모노레포 · 현재 검증된 개인 체험은 오프라인 합성 데이터 재생
 
 ## Verified offline paper workflow
 
 The deterministic offline paper runner is the tested entrypoint for this revision.
+Start with the [personal offline trial guide](PERSONAL_TRADING_GUIDE.md) for exact
+commands, expected output, and duplicate-free resume. It uses supplied synthetic
+candles, not an ongoing market-connected paper service. The existing Rust and
+Python dashboards do not consume this runner’s JSON checkpoint.
 See [OFFLINE_PAPER_RUNNER.md](docs/OFFLINE_PAPER_RUNNER.md) for local fixture replay,
 simulated fees/slippage, marked holdings, risk limits, and validated checkpoint
 resume. Run `python tools/offline_checks.py` for the targeted offline checks.
@@ -46,9 +50,9 @@ unavailable in the restored offline data package; no real trading was validated.
 ## 📁 프로젝트 구조
 
 ```
-trading-monorepo/
+trading/
 ├── apps/
-│   └── trading-bot/           # 메인 트레이딩 봇
+│   └── server/                # Python paper CLI/레거시 봇 및 Rust 서버
 ├── packages/
 │   ├── core/                  # 거래소, 주문, 리스크, 포트폴리오
 │   ├── data/                  # WebSocket, 캔들, 인디케이터
@@ -68,42 +72,18 @@ trading-monorepo/
 
 ---
 
-## 🚀 빠른 시작 (5분)
+## 🚀 개인 체험 시작
 
-### 1. 설치
+[개인용 오프라인 모의거래 가이드](PERSONAL_TRADING_GUIDE.md)를 따라
+저장소 루트에서 Python CLI를 실행하세요. 합성 캔들 90개를 재생하고
+모의 체결 2건과 체크포인트 재실행을 확인합니다. 거래소 계정·API 키·Docker는 필요 없습니다.
 
-```bash
-# 저장소 클론
-git clone https://github.com/uulab-official/trading.git
-cd trading/trading-monorepo
+`infra/docker/docker-compose.yml`은 별도의 Rust 서버를 띄웁니다.
+이 명령으로 Python 체험 결과가 대시보드에 연결되지 않습니다.
+[현재 대시보드 경계](docs/WEB_DASHBOARD.md)를 먼저 확인하세요.
 
-# 설정 초기화
-python -m trading_core.config_cli init
-
-# 설정 파일 편집
-nano config/secrets/secrets.yml    # API 키 설정
-nano config/active/bot_config.yml  # 봇 설정
-```
-
-### 2. 설정 검증
-
-```bash
-# 설정 검증
-python -m trading_core.config_cli validate
-
-# 텔레그램 테스트 (선택)
-python -m trading_core.config_cli test-telegram
-```
-
-### 3. Docker 실행
-
-```bash
-# Docker로 실행
-docker-compose -f infra/docker/docker-compose.yml up -d
-
-# 로그 확인
-docker-compose -f infra/docker/docker-compose.yml logs -f
-```
+이하 설정·배포·실거래 관련 내용은 기존 구성 참고 자료이며,
+이 체험의 다음 단계나 운영 준비 완료를 뜻하지 않습니다.
 
 ---
 
@@ -111,7 +91,8 @@ docker-compose -f infra/docker/docker-compose.yml logs -f
 
 | 문서 | 설명 |
 |------|------|
-| [CUSTOMER_SETUP.md](CUSTOMER_SETUP.md) | 상세 설치 가이드 |
+| [PERSONAL_TRADING_GUIDE.md](PERSONAL_TRADING_GUIDE.md) | 현재 검증된 개인용 오프라인 체험 |
+| [CUSTOMER_SETUP.md](CUSTOMER_SETUP.md) | 기존 서비스 설치 참고 (현재 체험 경로 아님) |
 | [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) | 실전 전환 체크리스트 |
 | [ZERO_DOWNTIME_DEPLOYMENT.md](docs/ZERO_DOWNTIME_DEPLOYMENT.md) | 무중단 배포 가이드 |
 | [TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md) | 텔레그램 설정 |

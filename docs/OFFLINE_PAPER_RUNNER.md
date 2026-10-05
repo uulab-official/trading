@@ -37,6 +37,23 @@ checkpoint path. Changing previously processed candles, strategy parameters,
 fees, or risk settings is rejected without overwriting the saved checkpoint.
 Appending valid future candles is supported.
 
+## Reading results and dashboard boundaries
+
+The JSON printed to stdout is the replay result; `--checkpoint` saves a separate
+JSON resume checkpoint. The bundled default fixture completes 90 bars with two
+simulated fills (one buy, one sell), empty final holdings, and no pending signal.
+A completed run exits; it does not wait for market data or publish a dashboard.
+The [personal trial guide](../PERSONAL_TRADING_GUIDE.md) includes exact first-run
+and resume commands with assertions.
+
+The current Docker Compose file launches the Rust server, whose positions and
+orders endpoints return empty arrays. The separate Python web dashboard expects
+SQLite `bot:main:*` records at `/app/data/trading.db`; it does not read this JSON
+checkpoint and is not a separate service in the current Compose file. The legacy
+Python bot’s versioned SQLite paper checkpoint is another state path, not a
+replacement format for this runner. See [dashboard scope](WEB_DASHBOARD.md).
+Do not infer fills, account safety, or replay status from those dashboard pages.
+
 ## Inputs and options
 
 The fixture is a JSON object:

@@ -1,4 +1,31 @@
-# Web Dashboard 사용 가이드
+# Web Dashboard 구현 범위
+
+## 현재 개인 체험과 대시보드의 경계
+
+현재 검증된 [개인 체험](../PERSONAL_TRADING_GUIDE.md)은 Python CLI의 합성 데이터 재생입니다.
+결과는 표준 출력 JSON, 재시작 상태는 `--checkpoint`로 지정한 JSON 파일입니다.
+다음 웹 화면에 자동으로 연결되지 않습니다.
+
+- `infra/docker/docker-compose.yml`에는 Rust `trading-server` 서비스만 있습니다
+- `infra/docker/Dockerfile`은 Rust 바이너리를 빌드하고 `master` 모드로 시작합니다
+- Rust `apps/server/src/master/web.rs`의 `/api/positions`와 `/api/orders`는
+  현재 빈 배열을 반환합니다. `/api/status`의 `running`은 모의 체결 증거가 아닙니다
+- Python `packages/monitor/web_dashboard.py`는 `/app/data/trading.db`에서
+  `bot:main:portfolio`, `bot:main:positions`, `bot:main:status`를 읽습니다.
+  재생 CLI의 JSON 체크포인트나 임의 봇 ID의 SQLite 체크포인트를 읽는 통합은 없습니다
+- 레거시 Python 봇의 버전 관리 SQLite 상태, Python 대시보드의 고정 키 조회,
+  Rust 상태 저장소는 같은 데이터 계약으로 검증되지 않았습니다
+
+따라서 화면의 빈 목록이나 연결 상태 대신 CLI 결과와 재실행 검사를 확인하세요.
+저장 파일을 서로 복사하거나 이름만 바꾸어 연결하지 마세요.
+
+## 과거 대시보드 설계 참고
+
+아래의 독립 `trading-bot`/`web-dashboard` Compose 구성, 무중단 배포,
+실시간 포트폴리오 화면은 과거 설계·예시입니다. 현재 Compose에 해당 두 서비스가
+구성되어 있지 않으므로 아래 실행 예시만으로 재현되지 않습니다.
+개인 체험 절차나 운영 검증 결과로 사용하지 마세요.
+
 
 ## 🌐 개요
 
@@ -273,4 +300,4 @@ ws.onmessage = (event) => {
 | **API** | REST + WebSocket 제공 |
 
 **다음 단계:**
-- [PERSONAL_TRADING_GUIDE.md](PERSONAL_TRADING_GUIDE.md) - 실제 트레이딩 시작하기
+- [PERSONAL_TRADING_GUIDE.md](../PERSONAL_TRADING_GUIDE.md) - 현재 검증된 오프라인 체험
