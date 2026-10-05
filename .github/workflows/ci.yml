@@ -63,10 +63,17 @@ jobs:
         pytest packages/ -v --cov=trading_core --cov=trading_data --cov=trading_strategy --cov=trading_backtest --cov-report=xml
 
     - name: Upload coverage
+      id: coverage_upload
+      # Also handle uploader startup/download failures outside fail_ci_if_error.
+      continue-on-error: true
       uses: codecov/codecov-action@v3
       with:
         file: ./coverage.xml
         fail_ci_if_error: false
+
+    - name: Warn when coverage upload fails
+      if: steps.coverage_upload.outcome == 'failure'
+      run: echo "::warning::Codecov upload failed; required tests and coverage generation already passed."
 
   lint:
     runs-on: ubuntu-latest
