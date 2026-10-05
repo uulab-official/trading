@@ -98,3 +98,14 @@ strategy, lock algorithm, live guard, or automatic deployment behavior is change
   Python `time.time()` value, no duplicate fills, and lock release with network/DNS forbidden
 
 See OFFLINE_PAPER_RUNNER.md for the safe-boundary contract and latency limits.
+
+## Milestone 9: explicit KRW paper capital
+
+- Support one explicit USDT or KRW quote book without implicit currency conversion
+- Retain valid legacy USDT snapshot/result compatibility and reject cross-quote spending
+- Add KRW version-2 currency metadata and won-denominated fees/holdings valuation
+- Verify the requested KRW1,000,000 through fixed public historical-price replay
+- Report net PnL, modeled friction, observed bar-close drawdown and exact restart consistency
+
+See KRW_PAPER_VALIDATION.md for source provenance, actual observed losses, assumptions,
+the completed checklist and limits. This is not a profitability or live-readiness claim.

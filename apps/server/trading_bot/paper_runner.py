@@ -43,8 +43,8 @@ class PaperRunConfig:
     def __post_init__(self):
         if self.mode != "paper":
             raise ValueError("This fixture runner accepts paper mode only")
-        if _assets(self.symbol)[1] != "USDT":
-            raise ValueError("The offline runner supports one USDT-quoted spot symbol")
+        if _assets(self.symbol)[1] not in ("USDT", "KRW"):
+            raise ValueError("The offline runner supports one USDT- or KRW-quoted spot symbol")
         if self.strategy not in ("ma_cross", "rsi"):
             raise ValueError("Offline strategy must be ma_cross or rsi")
         for name in ("initial_balance", "position_size_pct", "max_daily_loss_pct", "max_drawdown_pct"):
@@ -120,6 +120,7 @@ class PaperRunner:
         if stop_after is not None and (type(stop_after) is not int or stop_after < 1):
             raise ValueError("stop_after must be a positive bar count")
         config = self.config
+        quote_currency = _assets(config.symbol)[1]
         strategy = self._strategy()
         path = Path(checkpoint_path) if checkpoint_path is not None else None
         state = {
@@ -147,7 +148,7 @@ class PaperRunner:
             state = expected
             exchange = PaperExchange.from_snapshot(expected["exchange"])
         else:
-            exchange = PaperExchange(initial_balance=config.initial_balance, fee_pct=config.fee_pct, slippage_pct=config.slippage_pct)
+            exchange = PaperExchange(initial_balance=config.initial_balance, fee_pct=config.fee_pct, slippage_pct=config.slippage_pct, quote_currency=quote_currency)
         cursor = state["next_index"]
         # Rebuild indicator/cross state from the verified historical prefix.
         # Replayed historical signals are not submitted again.
@@ -201,16 +202,19 @@ class PaperRunner:
             equity = exchange.get_total_value()
             if return_state:
                 return state
-            return {
+            result = {
                 "mode": "paper", "status": "fixture_complete" if state["next_index"] == len(candles) else "paused",
                 "assumptions": config.identity(),
-                "bars_processed": state["next_index"], "cash": str(balances["USDT"].free),
-                "holdings": {asset: str(balance.free) for asset, balance in balances.items() if asset != "USDT" and balance.free},
+                "bars_processed": state["next_index"], "cash": str(balances[quote_currency].free),
+                "holdings": {asset: str(balance.free) for asset, balance in balances.items() if asset != quote_currency and balance.free},
                 "equity": str(equity), "total_fees": str(exchange.total_fees),
                 "total_return_pct": str((equity - config.initial_balance) / config.initial_balance * 100),
                 "pending_signal": state["pending_signal"], "trades": exchange.snapshot()["trades"],
                 "daily_loss_halted": state["daily_loss_halted"], "drawdown_halted": state["drawdown_halted"],
             }
+            if quote_currency != "USDT":
+                result["quote_currency"] = quote_currency
+            return result
         finally:
             await exchange.disconnect()
 

@@ -38,17 +38,18 @@ def _serialize(value):
 
 
 class PaperExchange(ExchangeInterface):
-    def __init__(self, initial_balance: Decimal = Decimal("10000"), initial_positions: Optional[Mapping[str, Decimal]] = None, *, fee_pct: Decimal = Decimal("0"), slippage_pct: Decimal = Decimal("0")):
+    def __init__(self, initial_balance: Decimal = Decimal("10000"), initial_positions: Optional[Mapping[str, Decimal]] = None, *, fee_pct: Decimal = Decimal("0"), slippage_pct: Decimal = Decimal("0"), quote_currency: str = "USDT"):
+        if not isinstance(quote_currency, str) or quote_currency not in ("USDT", "KRW"):
+            raise ValueError("Offline paper quote currency must be USDT or KRW")
+        self._quote_currency = quote_currency
         self.fee_pct = _decimal(fee_pct, positive=False)
         self.slippage_pct = _decimal(slippage_pct, positive=False)
         if self.fee_pct >= 100 or self.slippage_pct >= 100:
             raise ValueError("Paper fee/slippage percentages must be below 100")
         self.total_fees = Decimal("0")
-        self._balances = {"USDT": _decimal(initial_balance, positive=False)}
+        self._balances = {quote_currency: _decimal(initial_balance, positive=False)}
         for symbol, amount in (initial_positions or {}).items():
-            base, quote = _assets(symbol)
-            if quote != "USDT":
-                raise ValueError("The offline initial balance is denominated in USDT")
+            base, quote = self._market_assets(symbol)
             self._balances[base] = _decimal(amount, positive=False)
         self._tickers: Dict[str, Ticker] = {}
         self._candles = {}
@@ -57,6 +58,16 @@ class PaperExchange(ExchangeInterface):
         self._trades = []
         self._next_order_id = 1
         self._connected = False
+
+    @property
+    def quote_currency(self) -> str:
+        return self._quote_currency
+
+    def _market_assets(self, symbol):
+        base, quote = _assets(symbol)
+        if quote != self.quote_currency:
+            raise ValueError("A paper book cannot mix quote currencies or infer an FX conversion")
+        return base, quote
 
     async def connect(self) -> None:
         self._connected = True
@@ -69,12 +80,14 @@ class PaperExchange(ExchangeInterface):
             raise RuntimeError("Paper exchange is disconnected")
 
     def set_price(self, symbol: str, price: Decimal, *, timestamp: int = 0) -> None:
-        _assets(symbol)
+        # Retain legacy USDT metadata caches; only same-quote holdings/orders
+        # affect the ledger. New KRW books keep all supplied marks explicit.
+        self._market_assets(symbol) if self.quote_currency == "KRW" else _assets(symbol)
         price = _decimal(price)
         self._tickers[symbol] = Ticker(symbol, price, price, price, Decimal("0"), timestamp)
 
     def set_ohlcv(self, symbol: str, timeframe: str, candles: List[List[Any]]) -> None:
-        _assets(symbol)
+        self._market_assets(symbol) if self.quote_currency == "KRW" else _assets(symbol)
         copied = [list(candle) for candle in candles]
         for candle in copied:
             if len(candle) != 6:
@@ -109,7 +122,7 @@ class PaperExchange(ExchangeInterface):
 
     async def create_order(self, symbol: str, order_type: str, side: str, amount: Decimal, price: Optional[Decimal] = None, params: Optional[Dict] = None) -> Dict[str, Any]:
         self._ensure_connected()
-        base, quote = _assets(symbol)
+        base, quote = self._market_assets(symbol)
         amount = _decimal(amount)
         if order_type != "market" or side not in ("buy", "sell"):
             raise ValueError("Offline paper execution supports market buys and sells only")
@@ -174,12 +187,12 @@ class PaperExchange(ExchangeInterface):
         return trades[-limit:] if limit is not None and limit > 0 else trades
 
     def get_total_value(self) -> Decimal:
-        """Mark USDT and spot holdings at supplied close prices, including open holdings."""
+        """Mark quote cash and spot holdings in the book's explicit quote currency."""
         with localcontext(PAPER_CALCULATION_CONTEXT):
-            total = self._balances.get("USDT", Decimal("0"))
+            total = self._balances.get(self.quote_currency, Decimal("0"))
             for asset, amount in self._balances.items():
-                if asset != "USDT" and amount:
-                    symbol = f"{asset}/USDT"
+                if asset != self.quote_currency and amount:
+                    symbol = f"{asset}/{self.quote_currency}"
                     if symbol not in self._tickers:
                         raise ValueError(f"No local valuation price supplied for {symbol}")
                     total += amount * self._tickers[symbol].last
@@ -187,26 +200,37 @@ class PaperExchange(ExchangeInterface):
 
     def snapshot(self) -> Dict[str, Any]:
         """Plain JSON-compatible paper state; never credentials or executable objects."""
-        return _serialize({
-            "version": 1, "mode": "paper", "fee_pct": self.fee_pct,
+        state = {
+            "version": 1 if self.quote_currency == "USDT" else 2, "mode": "paper", "fee_pct": self.fee_pct,
             "slippage_pct": self.slippage_pct, "total_fees": self.total_fees,
             "balances": self._balances,
             "tickers": {symbol: vars(ticker) for symbol, ticker in self._tickers.items()},
             "orders": self._orders, "requests": self._requests, "trades": self._trades,
             "next_order_id": self._next_order_id,
-        })
+        }
+        # Keep the existing USDT schema byte-compatible; new KRW books state
+        # their units in a separate version instead of relabeling old balances.
+        if self.quote_currency != "USDT":
+            state["quote_currency"] = self.quote_currency
+        return _serialize(state)
 
     @classmethod
     def from_snapshot(cls, state: Mapping[str, Any]):
-        if state.get("version") != 1 or state.get("mode") != "paper":
-            raise ValueError("Only version-1 offline paper snapshots can be restored")
-        exchange = cls(initial_balance=Decimal("0"), fee_pct=state["fee_pct"], slippage_pct=state["slippage_pct"])
+        version = state.get("version")
+        if type(version) is not int or state.get("mode") != "paper":
+            raise ValueError("Only explicit-currency offline paper snapshots can be restored")
+        if version == 1 and "quote_currency" not in state:
+            quote_currency = "USDT"
+        elif version == 2 and state.get("quote_currency") == "KRW":
+            quote_currency = "KRW"
+        else:
+            raise ValueError("Paper snapshot version and quote currency do not match")
+        exchange = cls(initial_balance=Decimal("0"), fee_pct=state["fee_pct"], slippage_pct=state["slippage_pct"], quote_currency=quote_currency)
         balances = state["balances"]
-        if "USDT" not in balances or any(not isinstance(asset, str) or not asset or "/" in asset for asset in balances):
+        if quote_currency not in balances or any(not isinstance(asset, str) or not asset or "/" in asset for asset in balances):
             raise ValueError("Invalid paper balances")
         exchange._balances = {asset: _decimal(amount, positive=False) for asset, amount in balances.items()}
         for symbol, ticker in state["tickers"].items():
-            _assets(symbol)
             exchange.set_price(symbol, _decimal(ticker["last"]), timestamp=int(ticker["timestamp"]))
         exchange.total_fees = _decimal(state["total_fees"], positive=False)
         next_id = state["next_order_id"]
@@ -215,7 +239,7 @@ class PaperExchange(ExchangeInterface):
         exchange._next_order_id = next_id
         for key, raw in state["orders"].items():
             order = deepcopy(raw)
-            _, quote = _assets(order["symbol"])
+            _, quote = exchange._market_assets(order["symbol"])
             expected_fields = {"id", "clientOrderId", "symbol", "type", "side", "amount", "filled", "remaining", "average", "price", "status", "timestamp", "fee"}
             if set(order) != expected_fields or not isinstance(key, str) or not key or order["clientOrderId"] != key or order["id"] != f"paper-{key}" or order["type"] != "market" or order["status"] != "closed" or order["side"] not in ("buy", "sell"):
                 raise ValueError("Invalid paper order snapshot")
