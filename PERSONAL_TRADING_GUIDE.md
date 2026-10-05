@@ -33,6 +33,38 @@ python -m pip install -r requirements-offline.txt
 
 ## 2. 첫 재생과 결과 확인
 
+가장 짧은 실행 경로는 저장소의 오프라인 체험 실행기입니다.
+
+```sh
+./test-trading.sh
+```
+
+결과 JSON은 표준 출력, 합성 데이터 안내는 표준 오류로 나옵니다. 기본 체크포인트
+폴더는 검증된 재생이 생성합니다. 이 실행기는 Python/PyYAML을 확인하고 기존 CLI를
+실행합니다. 자동 설치나 컨테이너·서비스 시작, 인증정보 설정은 하지 않습니다.
+
+위 명령은 화면에 출력하고 `result.json`은 만들지 않습니다. 아래 재실행 비교까지
+확인하려면 첫 실행이 만든 폴더에 결과를 저장하세요. 같은 체크포인트의 완료된
+재생을 확인하는 것이므로 모의 체결이 추가되지 않습니다.
+
+```sh
+./test-trading.sh > data/owner-trial/result.json
+```
+
+다른 폴더에서 실행해도 기본 파일·저장 위치는 저장소 기준입니다.
+`--fixture`와 `--checkpoint`로 지정한 상대 경로는 명령을 입력한 폴더 기준이고,
+공백이 있는 경로는 따옴표로 감싸세요. `--fixture=PATH`, `--checkpoint=PATH` 형식도
+같은 경로 기준을 사용합니다.
+
+```sh
+/path/to/trading/test-trading.sh \
+  --fixture "local data.json" --checkpoint "trial output/checkpoint.json"
+```
+
+공급 파일을 바꿔도 로컬 파일 재생입니다. 외부 파일이 실제 시장의 과거 데이터인지
+이 실행기가 검증하거나 시세를 다운로드하지 않습니다. 다음의 직접 CLI 명령도
+계속 사용할 수 있습니다.
+
 ```sh
 export PYTHONPATH=packages/core:packages/data:packages/strategy:apps/server
 mkdir -p data/owner-trial
@@ -62,10 +94,8 @@ python -m json.tool data/owner-trial/result.json
 첫 결과를 남겨 두고 **같은 파일·옵션·체크포인트**로 다시 실행합니다.
 
 ```sh
-python -m trading_bot.paper_runner config/examples/offline_fixture.json \
-  --checkpoint data/owner-trial/checkpoint.json \
-  > data/owner-trial/resumed.json
-python - <<'PYCODE'
+./test-trading.sh > data/owner-trial/resumed.json
+python3 - <<'PYCODE'
 import json
 from pathlib import Path
 first = json.loads(Path("data/owner-trial/result.json").read_text())
@@ -102,7 +132,8 @@ CLI·중단 후 재시작 등을 확인합니다. 선택적으로 pandas/numpy�
 
 ## 5. 결과를 어디서 보나요?
 
-이번 체험의 결과는 `data/owner-trial/result.json`과 `resumed.json`입니다.
+2절의 결과 저장과 3절의 비교를 따라간 결과는 `data/owner-trial/result.json`과
+`resumed.json`입니다. 빠른 실행기만 이용했다면 결과는 터미널의 표준 출력입니다.
 저장 상태는 `checkpoint.json`이며, 모두 이 CLI의 JSON 데이터입니다.
 
 - 현재 `infra/docker/docker-compose.yml`은 Rust `trading-server`를 실행합니다.

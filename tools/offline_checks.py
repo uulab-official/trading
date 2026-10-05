@@ -34,6 +34,7 @@ def main():
         ("apps/server/tests", "test_paper_runner.py"),
         ("apps/server/tests", "test_paper_checkpoint.py"),
         ("apps/server/tests", "test_paper_cli.py"),
+        ("apps/server/tests", "test_offline_trial_launcher.py"),
         ("apps/server/tests", "test_paper_shutdown.py"),
     ]
     if args.include_backtest:
