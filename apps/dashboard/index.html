@@ -32,7 +32,58 @@ footer{margin:24px 0;color:#728094;font-size:12px}
 <section class="panel"><small>시장 데이터</small><p class="value">미연결</p><small>마지막 수신: 없음</small></section>
 <section class="panel span2" id="strategies"><h2>전략 현황</h2><div class="empty">연결된 전략 실행기가 없습니다.<br>실행기 상태 API 연결 후 실제 전략이 표시됩니다.</div></section>
 <section class="panel" id="risk"><h2>위험 관리</h2><table><tr><th>항목</th><th>상태</th></tr><tr><td>실거래</td><td>비활성</td></tr><tr><td>브로커 연결</td><td>없음</td></tr><tr><td>킬 스위치</td><td>실행기 미연결</td></tr></table></section>
-<section class="panel span2" id="orders"><h2>주문 및 체결</h2><div class="empty">표시할 주문 데이터가 없습니다.</div></section>
+<section class="panel span2" id="orders"><h2>주문 및 체결</h2><div id="orders-status" class="muted" role="status">주문 원장 연결 확인 중...</div><div id="orders-content"></div></section>
 <section class="panel"><h2>환경 정보</h2><table><tr><td>운영 모드</td><td>Read-only</td></tr><tr><td>API 연결</td><td>미구현</td></tr><tr><td>데이터 출처</td><td>없음</td></tr></table></section>
 </main><footer>UULAB Trading · 주문/성과 데이터를 생성하지 않는 정적 운영 UI · 실거래 활성화 불가</footer>
-</div></body></html>
+</div>
+<script>
+(() => {
+  "use strict";
+  const status = document.getElementById("orders-status");
+  const content = document.getElementById("orders-content");
+  const allowed = new Set(["reserved","submitting","unknown","accepted","partially_filled","cancel_pending","cancelled","rejected","filled"]);
+  async function refresh() {
+    try {
+      const response = await fetch("/api/orders", {cache:"no-store"});
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const payload = await response.json();
+      if (payload.mode !== "paper" || !Array.isArray(payload.orders)) throw new Error("invalid response");
+      content.replaceChildren();
+      if (!payload.orders.length) {
+        status.textContent = "저장된 모의 주문이 없습니다.";
+        return;
+      }
+      status.textContent = "로컬 모의 주문 원장 · 최근 " + payload.orders.length + "건";
+      const table = document.createElement("table");
+      const head = document.createElement("tr");
+      ["주문 ID","상태","예약 금액","수정 시각"].forEach(label => {
+        const th = document.createElement("th");
+        th.textContent = label;
+        head.appendChild(th);
+      });
+      table.appendChild(head);
+      for (const order of payload.orders) {
+        const tr = document.createElement("tr");
+        const cells = [
+          String(order.client_id ?? ""),
+          allowed.has(order.status) ? order.status : "unknown",
+          String(order.reserved ?? ""),
+          String(order.updated_at ?? "")
+        ];
+        for (const value of cells) {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.appendChild(td);
+        }
+        table.appendChild(tr);
+      }
+      content.appendChild(table);
+    } catch {
+      content.replaceChildren();
+      status.textContent = "주문 API 미연결 · 로컬 서버에서 실행하면 주문 내역을 조회할 수 있습니다.";
+    }
+  }
+  refresh();
+  window.setInterval(() => { if (!document.hidden) refresh(); }, 15000);
+})();
+</script></body></html>
