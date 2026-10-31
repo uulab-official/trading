@@ -40,6 +40,9 @@ class PaperOrderAdmission:
         if previous is not None:
             if previous[0] != order:
                 raise ValueError("client_order_id reused with different order")
+            receipt = self.broker.get_order(previous[1].venue_order_id)
+            if receipt.status == "cancelled":
+                return Admission(RiskDecision(False, "previously_cancelled"), receipt.venue_order_id)
             return previous[1]
         if order.side != Side.BUY:
             return Admission(RiskDecision(False, "sell_not_implemented"))
