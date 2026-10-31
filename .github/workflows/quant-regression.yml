@@ -24,7 +24,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Compile new modules
         run: |
-          python -m py_compile packages/strategy/smc_structure.py packages/strategy/quant_metrics.py packages/strategy/walk_forward.py packages/core/broker_interface.py packages/core/paper_broker.py packages/core/risk_gate.py packages/core/paper_execution.py
+          python -m py_compile packages/strategy/smc_structure.py packages/strategy/quant_metrics.py packages/strategy/walk_forward.py packages/core/broker_interface.py packages/core/paper_broker.py packages/core/risk_gate.py packages/core/paper_execution.py packages/core/order_lifecycle.py
       - name: Run isolated regression suite
         run: |
           python -m unittest discover -s tests -p 'test_smc_structure.py' -v
@@ -33,3 +33,4 @@ jobs:
           python -m unittest discover -s tests -p 'test_walk_forward.py' -v
           python -m unittest discover -s tests -p 'test_risk_gate.py' -v
           python -m unittest discover -s tests -p 'test_paper_execution.py' -v
+          python -m unittest discover -s tests -p 'test_order_lifecycle.py' -v
