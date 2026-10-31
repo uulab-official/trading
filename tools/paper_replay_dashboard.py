@@ -43,6 +43,21 @@ def validate_paths(fixture, checkpoint, report):
     return fixture, checkpoint, report
 
 
+
+def load_fixture(raw):
+    """Preserve legacy float semantics; strictly revalidate annotated market files."""
+    from trading_data.upbit_history import decode_json, validate_market_fixture
+    data = decode_json(raw, decimal_numbers=False)
+    if not isinstance(data, dict) or data.get('mode', 'paper') != 'paper':
+        raise ValueError('paper fixture required')
+    candles = data.get('candles')
+    if (not isinstance(candles, list) or not 1 <= len(candles) <= 10000
+            or any(not isinstance(row, list) or len(row) != 6 for row in candles)):
+        raise ValueError('one to 10000 six-column OHLCV rows required')
+    if 'data_provenance' in data:
+        validate_market_fixture(data)
+    return data
+
 def export_replay(fixture, checkpoint, report, **options):
     fixture, checkpoint, report = validate_paths(fixture, checkpoint, report)
     # Delayed import keeps path validation available without engine dependencies.
@@ -56,13 +71,8 @@ def export_replay(fixture, checkpoint, report, **options):
             raw = stream.read(MAX_FIXTURE_BYTES + 1)
         if len(raw) > MAX_FIXTURE_BYTES:
             raise ValueError('fixture exceeds the export size limit')
-        data = json.loads(raw)
-        if not isinstance(data, dict) or data.get('mode', 'paper') != 'paper':
-            raise ValueError('paper fixture required')
-        candles = data.get('candles')
-        if (not isinstance(candles, list) or not 1 <= len(candles) <= 10000
-                or any(not isinstance(row, list) or len(row) != 6 for row in candles)):
-            raise ValueError('one to 10000 six-column OHLCV rows required')
+        data = load_fixture(raw)
+        candles = data['candles']
         config = PaperRunConfig(symbol=data.get('symbol', 'BTC/USDT'),
                                timeframe=data.get('timeframe', '1h'), **options)
         digest = hashlib.sha256(raw).hexdigest()
@@ -74,7 +84,8 @@ def export_replay(fixture, checkpoint, report, **options):
         # checkpoint validation. The dashboard never imports unvalidated checkpoints.
         result = asyncio.run(PaperRunner(config).run(candles, checkpoint_path=checkpoint))
         projected = build_report(result, fixture_sha256=digest, first_bar_ms=candles[0][0],
-                                 last_bar_ms=candles[-1][0], mark_price=str(candles[-1][4]))
+                                 last_bar_ms=candles[-1][0], mark_price=str(candles[-1][4]),
+                                 data_provenance=data.get('data_provenance'))
         return write_report(report, projected)
 
 

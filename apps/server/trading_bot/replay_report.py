@@ -135,7 +135,49 @@ def _compose(configuration, fills, *, fixture_sha256, first_bar_ms, last_bar_ms,
                 daily_loss_halted=daily_loss_halted, drawdown_halted=drawdown_halted)
 
 
-def build_report(result, *, fixture_sha256, first_bar_ms, last_bar_ms, mark_price):
+
+def _market_provenance(value, report):
+    """Validate bounded source annotations without importing a network client.
+
+    The exporter checks the candles/hash before running. This projection checks
+    shape and consistency, not authenticity of an exchange or a local file.
+    """
+    fields = {'schema_version', 'provider', 'market', 'unit_minutes',
+              'end_exclusive_ms', 'retrieved_at', 'bar_count', 'candles_sha256',
+              'gap_policy', 'missing_intervals', 'authenticated'}
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError('invalid market provenance fields')
+    if (type(value['schema_version']) is not int or value['schema_version'] != 1
+            or value['provider'] != 'upbit_public_rest' or value['authenticated'] is not False
+            or value['gap_policy'] != 'reject' or type(value['missing_intervals']) is not int
+            or value['missing_intervals'] != 0):
+        raise ValueError('unsupported market provenance')
+    unit = value['unit_minutes']
+    if type(unit) is not int or unit not in (1, 3, 5, 10, 15, 30, 60, 240):
+        raise ValueError('invalid market interval')
+    market = _text(value['market'])
+    if not re.fullmatch(r'KRW-[A-Z0-9]{1,20}', market) or market == 'KRW-KRW':
+        raise ValueError('invalid market')
+    count = _integer(value['bar_count'], 1, 10000)
+    end = _integer(value['end_exclusive_ms'], 1, 253402300799999)
+    duration = unit * 60000
+    config = report['configuration']
+    if (config['symbol'] != market[4:] + '/KRW'
+            or config['timeframe'] != {60: '1h', 240: '4h'}.get(unit, str(unit)+'m')
+            or count != report['bars_processed'] or report['first_bar_ms'] % duration
+            or report['last_bar_ms'] != report['first_bar_ms'] + (count-1)*duration
+            or end != report['last_bar_ms'] + duration):
+        raise ValueError('market provenance does not match replay')
+    date = datetime.fromisoformat(_text(value['retrieved_at']).replace('Z', '+00:00'))
+    if date.tzinfo is None or date.utcoffset() is None:
+        raise ValueError('retrieval time requires timezone')
+    delta = date.astimezone(timezone.utc) - datetime(1970, 1, 1, tzinfo=timezone.utc)
+    received = delta.days*86400000 + delta.seconds*1000 + delta.microseconds//1000
+    if end > received - 5000 or not re.fullmatch('[0-9a-f]{64}', _text(value['candles_sha256'])):
+        raise ValueError('invalid closed boundary or data hash')
+    return dict(value)
+
+def build_report(result, *, fixture_sha256, first_bar_ms, last_bar_ms, mark_price, data_provenance=None):
     """Project an actual completed runner result; independently check its totals."""
     try:
         if result['mode'] != 'paper' or result['status'] != 'fixture_complete':
@@ -172,6 +214,8 @@ def build_report(result, *, fixture_sha256, first_bar_ms, last_bar_ms, mark_pric
         holdings = {p['asset']: Decimal(p['quantity']) for p in report['positions']}
         if not isinstance(result['holdings'], dict) or holdings != {k: _amount(v, positive=True) for k, v in result['holdings'].items()}:
             raise ValueError('runner holdings do not reconcile')
+        if data_provenance is not None:
+            report['data_provenance'] = _market_provenance(data_provenance, report)
         return report
     except (KeyError, TypeError, DecimalException, OverflowError) as error:
         raise ValueError('invalid replay result') from error
@@ -188,6 +232,8 @@ def validate_report(report):
         fields = ('fixture_sha256', 'first_bar_ms', 'last_bar_ms', 'bars_processed',
                   'mark_price', 'generated_at', 'daily_loss_halted', 'drawdown_halted')
         expected = _compose(report['configuration'], report['fills'], **{k: report[k] for k in fields})
+        if 'data_provenance' in report:
+            expected['data_provenance'] = _market_provenance(report['data_provenance'], expected)
         if any(report[k] != expected[k] for k in ('run_id', 'account', 'positions', 'fill_count')):
             raise ValueError('report totals do not reconcile')
         return expected

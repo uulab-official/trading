@@ -7,6 +7,31 @@ const stamp=v=>integer(v) && v<=253402300799999;
 const text=v=>typeof v==='string' && v.length>0 && v.length<=128;
 const digest=v=>typeof v==='string' && /^[0-9a-f]{64}$/.test(v);
 
+function validateMarketProvenance(p,v){
+  const fields=['schema_version','provider','market','unit_minutes','end_exclusive_ms',
+    'retrieved_at','bar_count','candles_sha256','gap_policy','missing_intervals','authenticated'];
+  if(!p || typeof p!=='object' || Array.isArray(p) || Object.keys(p).length!==fields.length ||
+     !fields.every(k=>Object.hasOwn(p,k)) || p.schema_version!==1 || p.provider!=='upbit_public_rest' ||
+     p.authenticated!==false || p.gap_policy!=='reject' || p.missing_intervals!==0 ||
+     ![1,3,5,10,15,30,60,240].includes(p.unit_minutes) || !integer(p.bar_count) ||
+     p.bar_count<1 || p.bar_count>10000 || p.bar_count!==v.bars_processed ||
+     typeof p.market!=='string' || !/^KRW-[A-Z0-9]{1,20}$/.test(p.market) || p.market==='KRW-KRW' ||
+     v.configuration.symbol!==p.market.slice(4)+'/KRW' || !digest(p.candles_sha256) ||
+     !stamp(p.end_exclusive_ms) || typeof p.retrieved_at!=='string' ||
+     !/(Z|[+-]\d\d:\d\d)$/.test(p.retrieved_at) || !Number.isFinite(Date.parse(p.retrieved_at)))
+    throw new Error('invalid market provenance');
+  const duration=p.unit_minutes*60000,frame=({60:'1h',240:'4h'})[p.unit_minutes] || p.unit_minutes+'m';
+  if(v.configuration.timeframe!==frame || v.first_bar_ms%duration ||
+     v.last_bar_ms!==v.first_bar_ms+(p.bar_count-1)*duration ||
+     p.end_exclusive_ms!==v.last_bar_ms+duration || p.end_exclusive_ms>Date.parse(p.retrieved_at)-5000)
+    throw new Error('market provenance does not match replay');
+}
+export function marketDataLabel(v){
+  return v.data_provenance
+    ? `출처 기록 · 업비트 ${v.data_provenance.market} · 서명 인증 아님`
+    : '로컬 입력 · 출처 미확인';
+}
+
 export function formatDecimal(value){
   if(!amount(value,true)) return '—';
   if(/[eE]/.test(value)) return value;
@@ -41,6 +66,7 @@ export function validateReplay(v){
        f.timestamp_ms<previous || f.timestamp_ms>v.last_bar_ms) throw new Error('invalid replay fill');
     ids.add(f.id);keys.add(f.client_id);previous=f.timestamp_ms;
   }
+  if(Object.hasOwn(v,'data_provenance')) validateMarketProvenance(v.data_provenance,v);
   return v;
 }
 export function createReplayController({request,onData,onError}){
@@ -74,7 +100,7 @@ function boot(){
     $('replay-details').textContent=`${c.symbol} · ${c.timeframe} · ${c.strategy} · ${data.bars_processed}개 봉 · 초기 자금 ${money(a.initial_balance,a.currency)} · 수수료 ${c.fee_pct}% / 슬리피지 ${c.slippage_pct}%`;
     $('replay-time').textContent=`최종 평가 봉의 시작 ${time(data.last_bar_ms)} KST · 보고서 생성 ${time(data.generated_at)} KST`;
     $('replay-risk').textContent=`재생 종료 시 위험 차단: 일일 손실 ${data.daily_loss_halted?'발동':'미발동'} / 낙폭 ${data.drawdown_halted?'발동':'미발동'} · 현재 실거래 상태와 무관`;
-    $('replay-provenance').textContent='입력 SHA-256 '+data.fixture_sha256+' · 실행 ID '+data.run_id;
+    $('replay-provenance').textContent=marketDataLabel(data)+(data.data_provenance ? ' · 수집 '+time(data.data_provenance.retrieved_at)+' KST · 연속된 종료 봉 '+data.data_provenance.bar_count+'개' : '')+' · 입력 SHA-256 '+data.fixture_sha256+' · 실행 ID '+data.run_id;
     $('replay-positions').textContent=data.positions.length
       ? data.positions.map(p=>`${p.asset} ${formatDecimal(p.quantity)} · 종가 평가 ${money(p.market_value,p.currency)}`).join(' / ')
       : '재생 종료 시 보유 자산 없음';
