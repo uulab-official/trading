@@ -1,0 +1,33 @@
+name: Quant Regression
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quant-regression:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile new modules
+        run: |
+          python -m py_compile packages/strategy/smc_structure.py packages/strategy/quant_metrics.py packages/strategy/walk_forward.py packages/core/broker_interface.py packages/core/paper_broker.py
+      - name: Run isolated regression suite
+        run: |
+          python -m unittest discover -s tests -p 'test_smc_structure.py' -v
+          python -m unittest discover -s tests -p 'test_broker_interface.py' -v
+          python -m unittest discover -s tests -p 'test_quant_metrics.py' -v
+          python -m unittest discover -s tests -p 'test_walk_forward.py' -v
