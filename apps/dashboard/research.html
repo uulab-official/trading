@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>UULAB Trading · 전략 검증</title><link rel="stylesheet" href="/research.css"><script type="module" src="/research.mjs"></script></head>
+<body><a class="skip" href="#research-root">본문으로 이동</a><div class="shell">
+<header><a class="brand" href="/"><span aria-hidden="true">U</span><div><strong>UULAB Trading</strong><small>QUANT RESEARCH</small></div></a><span class="badge">LOCAL · READ ONLY</span></header>
+<nav aria-label="화면 탐색"><a href="/">주문·재생 현황</a><a href="/research.html" aria-current="page">전략 검증</a></nav>
+<main id="research-root"><div class="heading"><div><p class="eyebrow">WALK-FORWARD VALIDATION</p><h1>전략의 다음 구간을 검증합니다.</h1><p id="research-status" role="status">연결 확인 중</p></div><button id="research-refresh" type="button">새로고침</button></div>
+<p id="research-notice" class="notice" role="status" hidden></p><noscript><p class="notice">JavaScript가 꺼져 있어 검증 결과를 표시할 수 없습니다.</p></noscript>
+<section class="principle"><strong>학습에서 선택하고, 이후 구간에서 평가합니다.</strong><p>각 구간의 자금·포지션은 초기화됩니다. 평균은 독립 구간의 단순 평균이며 연속 운용·복리 수익률이 아닙니다. 표본 부족 구간은 현금 대기(0%)로 평균에 포함합니다.</p></section>
+<div id="research-data" hidden><section class="metrics" aria-label="검증 요약">
+<article><h2>검증 구간 평균</h2><p id="mean">—</p><small>선택 없음은 현금 0% 포함</small></article>
+<article><h2>가장 낮은 구간</h2><p id="worst">—</p><small>손실 결과도 그대로 표시</small></article>
+<article><h2>평가한 구간</h2><p id="evaluated">—</p><small>평가 / 전체 구간</small></article>
+<article><h2>표본 부족으로 건너뜀</h2><p id="skipped">—</p><small>전략을 억지로 선택하지 않음</small></article></section>
+<section class="panel"><div class="section-head"><h2>구간별 선택과 검증</h2><p id="context"></p><p id="assumptions"></p></div><div class="scroll" tabindex="0" role="region" aria-label="시간순 검증 결과"><table><thead><tr><th scope="col">학습 / 검증 기간 · KST</th><th scope="col">학습에서 선택한 전략</th><th scope="col">이후 구간 결과 · 비용 반영</th></tr></thead><tbody id="folds"></tbody></table></div></section>
+<section class="provenance"><p id="generated"></p><p id="source"></p><p id="last-fetch"></p></section></div>
+<section class="limits"><h2>결과를 해석할 때</h2><p>준비 구간은 지표 계산에만 사용하며 주문을 넘기지 않습니다. 종료 시 보유 자산은 종가 평가이고 강제 매도하지 않아 향후 청산 비용은 포함되지 않습니다. Sharpe·최대낙폭·연율 수익률은 이 요약에서 추정하지 않습니다.</p><p>이 화면은 데이터를 수집하거나 전략을 실행하지 않습니다. 테스트 결과를 반복해서 보며 후보를 바꾸면 과최적화될 수 있습니다. 수익성이나 실거래 안전성을 보증하지 않습니다.</p></section>
+</main><footer><strong>UULAB</strong> · 오프라인 연구 / 실거래 비활성 · 숨긴 탭은 조회를 멈춥니다.</footer></div></body></html>

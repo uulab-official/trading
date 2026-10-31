@@ -24,12 +24,20 @@ _replay_spec = importlib.util.spec_from_file_location(
 _replay = importlib.util.module_from_spec(_replay_spec)
 _replay_spec.loader.exec_module(_replay)
 
+_research_spec = importlib.util.spec_from_file_location(
+    "uulab_research_report", Path(__file__).resolve().parents[1] / "server/trading_bot/research_report.py")
+_research = importlib.util.module_from_spec(_research_spec)
+_research_spec.loader.exec_module(_research)
+
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/index.html": ("index.html", "text/html; charset=utf-8"),
           "/styles.css": ("styles.css", "text/css; charset=utf-8"),
           "/app.mjs": ("app.mjs", "text/javascript; charset=utf-8"),
           "/replay.mjs": ("replay.mjs", "text/javascript; charset=utf-8"),
-          "/replay.css": ("replay.css", "text/css; charset=utf-8")}
+          "/replay.css": ("replay.css", "text/css; charset=utf-8"),
+          "/research.html": ("research.html", "text/html; charset=utf-8"),
+          "/research.mjs": ("research.mjs", "text/javascript; charset=utf-8"),
+          "/research.css": ("research.css", "text/css; charset=utf-8")}
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
        "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'")
 
@@ -37,6 +45,7 @@ CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'se
 class Handler(BaseHTTPRequestHandler):
     journal_path = None
     replay_path = None
+    research_path = None
     server_version = "UULABLocal"
     sys_version = ""
 
@@ -97,6 +106,15 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     return self.respond(503, {"error": "asset_unavailable"})
                 return self._send(200, body, content_type)
+            if route == "/api/research":
+                if query:
+                    raise ValueError("research parameters are not supported")
+                try:
+                    report = _research.read_report(self.research_path)
+                except (ValueError, OSError):
+                    return self.respond(503, {"error": "research_unavailable", "mode": "paper",
+                                              "live_enabled": False, "read_only": True})
+                return self.respond(200, report)
             if route == "/api/replay":
                 if query:
                     raise ValueError("replay parameters are not supported")
@@ -149,18 +167,19 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def create_server(journal_path=None, port=8765, *, replay_path=None):
+def create_server(journal_path=None, port=8765, *, replay_path=None, research_path=None):
     if type(port) is not int or not 0 <= port <= 65535:
         raise ValueError("invalid port")
     class ConfiguredHandler(Handler):
         pass
     ConfiguredHandler.journal_path = journal_path
     ConfiguredHandler.replay_path = replay_path
+    ConfiguredHandler.research_path = research_path
     return ThreadingHTTPServer(("127.0.0.1", port), ConfiguredHandler)
 
 
-def serve(journal_path=None, port=8765, *, replay_path=None):
-    with create_server(journal_path, port, replay_path=replay_path) as server:
+def serve(journal_path=None, port=8765, *, replay_path=None, research_path=None):
+    with create_server(journal_path, port, replay_path=replay_path, research_path=research_path) as server:
         print(f"Read-only paper dashboard: http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()
@@ -173,5 +192,6 @@ if __name__ == "__main__":
     parser.add_argument("--journal", default=None, help="Existing local paper SQLite journal")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--replay-report", default=None, help="Existing offline replay result, not a checkpoint")
+    parser.add_argument("--research-report", default=None, help="Existing offline walk-forward research report")
     args = parser.parse_args()
-    serve(args.journal, args.port, replay_path=args.replay_report)
+    serve(args.journal, args.port, replay_path=args.replay_report, research_path=args.research_report)
