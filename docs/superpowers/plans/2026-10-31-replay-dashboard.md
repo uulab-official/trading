@@ -23,15 +23,25 @@ POSIX checkpoint locking, no journal schema changes, preserve existing behavior.
 - [x] Test then implement wrapper using the existing PaperRunner and writer locks.
 - [x] Test then extend loopback server with independently configured replay read API.
 - [x] Test then add separate replay UI panel, source/timestamp labels and stale states.
-- [ ] Run local Python/Node checks and actual-engine integration in GitHub CI.
-- [ ] Record exact verification boundaries and commit to the existing draft PR.
+- [x] Run local Python/Node checks and actual-engine integration in GitHub CI.
+- [x] Record exact verification boundaries and commit to the existing draft PR.
 
 ## Execution ledger
 Baseline: 10bcf106577e2523ba26ee5579eb958c2a6617e3; prior full CI succeeded.
-Container git clone failed because github.com DNS is unavailable. Read-only source
-is retrieved via connected GitHub; local changes use an isolated reconstruction.
-Actual-engine tests must run against the complete repository in CI, not mocks.
+Container git clone failed because github.com DNS is unavailable. Sources were
+retrieved via connected GitHub; local changes use an isolated reconstruction.
+Actual-engine tests run against the complete repository in CI, not mocks.
 
-Local red/green checks: 21 Python report/export/API tests and 7 Node client tests
-passed. Actual PaperRunner integration is defined as seven network-forbidden CI
-cases against the complete repository; it has not run in this sparse container.
+Local verification: 21 Python report/export/API tests and 7 Node client tests
+passed. Original-engine integration: seven network-forbidden replay cases passed
+in GitHub on Python 3.10 and 3.12, including a separate real loopback HTTP check.
+For code commit 2d88101623b8cb13016ddd0c4c5ca51c836ab060, both Quant Regression
+41196787271 and CI/CD Pipeline 41196787258 completed successfully.
+
+Offline Chromium render checks passed at 1440px light/dark and 390px mobile:
+no page errors or page-level horizontal overflow; failed refresh retained the last
+good data, reconnect restored it, and markup-shaped fill identifiers remained text.
+A reproduced 1px card-edge inset was fixed with 22px/16px content gutters. These
+checks exercise local assets and synthetic read-model data, not browser HTTP/CSP.
+The last styling/documentation commit does not change Python or JavaScript behavior;
+consult its own CI checks for the final branch-head status.
