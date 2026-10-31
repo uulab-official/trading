@@ -1,0 +1,13 @@
+.replay-panel{margin-top:24px;min-width:0}
+.replay-panel h4{margin:0;font-size:13px;font-weight:600}
+.replay-panel .replay-metrics{gap:18px;padding:20px 0;border-bottom:1px solid #e5eaf0}
+.replay-metrics .metric{min-width:0;padding:0}
+.replay-metrics .metric-value{font-size:19px;line-height:1.45;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.replay-panel p,.replay-panel small,.replay-provenance code{overflow-wrap:anywhere}
+.replay-panel table{min-width:850px}
+.replay-provenance{margin:16px 0;font-size:12px}
+.replay-provenance summary{cursor:pointer;font-weight:600;margin-bottom:8px}
+.replay-provenance code{display:block;white-space:normal;line-height:1.7}
+.replay-panel button{flex-shrink:0}
+@media(max-width:600px){.replay-panel .section-heading{align-items:flex-start;gap:12px;flex-wrap:wrap}.replay-panel .replay-metrics{grid-template-columns:1fr 1fr}.replay-metrics .metric-value{font-size:16px}}
+@media(prefers-color-scheme:dark){.replay-panel .replay-metrics{border-color:#314051}}

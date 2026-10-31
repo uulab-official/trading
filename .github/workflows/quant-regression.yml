@@ -24,7 +24,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Compile new modules
         run: |
-          python -m py_compile packages/strategy/smc_structure.py packages/strategy/quant_metrics.py packages/strategy/walk_forward.py packages/core/broker_interface.py packages/core/paper_broker.py packages/core/risk_gate.py packages/core/paper_execution.py packages/core/order_lifecycle.py packages/core/order_journal.py apps/dashboard/server.py apps/dashboard/store.py tools/paper_operations_demo.py
+          python -m py_compile packages/strategy/smc_structure.py packages/strategy/quant_metrics.py packages/strategy/walk_forward.py packages/core/broker_interface.py packages/core/paper_broker.py packages/core/risk_gate.py packages/core/paper_execution.py packages/core/order_lifecycle.py packages/core/order_journal.py apps/dashboard/server.py apps/dashboard/store.py tools/paper_operations_demo.py apps/server/trading_bot/replay_report.py tools/paper_replay_dashboard.py
       - name: Run isolated regression suite
         run: |
           python -m unittest discover -s tests -p 'test_smc_structure.py' -v
@@ -39,6 +39,9 @@ jobs:
           python -m unittest discover -s tests -p 'test_paper_operations.py' -v
           python -m unittest discover -s tests -p 'test_paper_operations_integration.py' -v
           python -m unittest discover -s tests -p 'test_dashboard_operations.py' -v
+          python -m unittest discover -s tests -p 'test_replay_report.py' -v
+          python -m unittest discover -s tests -p 'test_replay_export.py' -v
+          python -m unittest discover -s tests -p 'test_replay_dashboard_api.py' -v
 
   dashboard-client:
     runs-on: ubuntu-latest
@@ -48,4 +51,20 @@ jobs:
         with:
           node-version: '22'
       - name: Verify dependency-free dashboard logic
-        run: node --test tests/dashboard_client.test.mjs
+        run: node --test tests/dashboard_client.test.mjs tests/replay_client.test.mjs
+
+  replay-integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install existing engine packages
+        run: python -m pip install -e packages/core -e packages/data -e packages/strategy -e apps/server
+      - name: Verify original runner, restart and read-only account API
+        run: python -m unittest discover -s tests -p 'test_replay_runner_integration.py' -v

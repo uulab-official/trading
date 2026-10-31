@@ -7,6 +7,8 @@
   <title>UULAB Trading · Paper Operations</title>
   <link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.mjs"></script>
+  <link rel="stylesheet" href="/replay.css">
+  <script type="module" src="/replay.mjs"></script>
 </head>
 <body>
 <a class="skip-link" href="#main">본문으로 이동</a>
@@ -15,7 +17,7 @@
     <div class="brand"><span class="brand-mark" aria-hidden="true">U</span><div><h1>UULAB Trading</h1><p>Paper Operations</p></div></div>
     <div class="header-status"><span class="tag">LOCAL · READ ONLY</span><span id="connection" class="connection" data-state="disconnected" role="status">연결 확인 중</span></div>
   </header>
-  <nav class="nav" aria-label="화면 탐색"><a href="#overview" aria-current="page">운영 현황</a><a href="#orders-panel">주문 원장</a><a href="#audit">감사 기록</a></nav>
+  <nav class="nav" aria-label="화면 탐색"><a href="#overview" aria-current="page">운영 현황</a><a href="#orders-panel">주문 원장</a><a href="#audit">감사 기록</a><a href="#replay-panel">재생 결과</a></nav>
   <main id="main">
     <div class="page-heading"><div><p class="eyebrow">ORDER OBSERVABILITY</p><h2>모의 주문 운영 현황</h2><p id="source" class="source">데이터 출처 확인 중</p></div><div class="refresh-group"><button type="button" id="refresh">새로고침</button><small id="freshness">성공한 조회 없음</small></div></div>
     <div id="connection-notice" class="notice" role="status" hidden></div>
@@ -36,13 +38,31 @@
         </section>
         <aside class="sidebar">
           <section id="recovery" class="panel recovery"><p class="eyebrow">RECONCILIATION</p><h3>주문 상태 확인</h3><p id="reconcile-message">원장 연결 후 확인 대기 상태를 표시합니다.</p><p class="rule">응답이 없다고 주문 실패로 처리하지 않습니다.</p></section>
-          <section class="panel environment"><h3>실행 경계</h3><dl><dt>이 서버의 주문 전송</dt><dd>지원하지 않음</dd><dt>증권사 / 시세 연결</dt><dd>미연결</dd><dt>체결·잔고 회계</dt><dd>미연결</dd><dt>원장 형식</dt><dd id="journal-version">—</dd><dt>마지막 주문 변경</dt><dd id="last-order-update">—</dd></dl><p>다른 실행기의 실거래 여부를 이 화면이 보증하지 않습니다.</p></section>
+          <section class="panel environment"><h3>실행 경계</h3><dl><dt>이 서버의 주문 전송</dt><dd>지원하지 않음</dd><dt>증권사 / 시세 연결</dt><dd>미연결</dd><dt>체결·잔고 회계</dt><dd>별도 오프라인 보고서</dd><dt>원장 형식</dt><dd id="journal-version">—</dd><dt>마지막 주문 변경</dt><dd id="last-order-update">—</dd></dl><p>다른 실행기의 실거래 여부를 이 화면이 보증하지 않습니다.</p></section>
         </aside>
       </div>
       <section class="panel audit" id="audit"><div class="section-heading"><div><h3>주문 상태 변경 기록</h3><p>상태와 함께 저장된 감사 이벤트 · 최근 50건 · 시각은 한국 표준시(KST)</p></div><span class="tag">AUDIT TRAIL</span></div><p class="table-hint">표를 좌우로 밀어 전체 내용을 확인하세요.</p><div class="table-scroll" tabindex="0" role="region" aria-label="감사 이벤트"><table><thead><tr><th scope="col">이벤트</th><th scope="col">주문 ID</th><th scope="col">상태 변경</th><th scope="col">기록 시각 · KST</th></tr></thead><tbody id="audit-rows"></tbody></table></div><p id="audit-empty" class="empty">감사 기록을 확인하고 있습니다.</p></section>
     </div>
+    <section id="replay-panel" class="panel replay-panel" aria-labelledby="replay-heading">
+      <div class="section-heading"><div><p class="eyebrow">OFFLINE REPLAY · NOT A LIVE ACCOUNT</p><h3 id="replay-heading">전략 재생 결과</h3><p id="replay-status" role="status">재생 보고서 연결 확인 중</p></div><button id="replay-refresh" type="button">보고서 새로고침</button></div>
+      <p id="replay-notice" class="notice">원장 예약액과 별도로, 기존 모의매매 실행기가 계산한 체결 결과를 조회합니다.</p>
+      <div id="replay-data" hidden>
+        <div class="metrics replay-metrics">
+          <article class="metric"><h4>종가 평가자산</h4><p id="replay-equity" class="metric-value">—</p><small>현금 + 보유 자산의 종가 평가액</small></article>
+          <article class="metric"><h4>모의 현금 잔고</h4><p id="replay-cash" class="metric-value">—</p><small>체결 비용과 수수료 반영</small></article>
+          <article class="metric"><h4>총 평가손익</h4><p id="replay-pnl" class="metric-value">—</p><small id="replay-return">—</small></article>
+          <article class="metric"><h4>누적 수수료</h4><p id="replay-fees" class="metric-value">—</p><small>이미 현금에 반영 · 추가 차감하지 않음</small></article>
+        </div>
+        <p id="replay-details"></p><p id="replay-time" class="secondary"></p><p id="replay-positions"></p><p id="replay-risk" class="secondary"></p>
+        <div class="section-heading"><h4>모의 체결 내역</h4><span id="replay-fill-count" class="secondary"></span></div>
+        <p class="table-hint">표를 좌우로 밀어 전체 내용을 확인하세요.</p><div class="table-scroll" tabindex="0" role="region" aria-label="모의 재생 체결 내역"><table><thead><tr><th scope="col">주문 ID</th><th scope="col">방향</th><th scope="col">수량</th><th scope="col">체결가</th><th scope="col">수수료</th><th scope="col">체결 봉 시작 · KST</th></tr></thead><tbody id="replay-fills"></tbody></table></div>
+        <p id="replay-no-fills" class="empty">이 재생 실행에는 체결이 없습니다.</p>
+        <details class="replay-provenance"><summary>데이터 출처와 실행 식별자</summary><code id="replay-provenance"></code><p>입력 파일의 해시는 출처 추적용입니다. 실제 시장 데이터 여부나 전략 수익성을 인증하지 않습니다.</p></details>
+        <small id="replay-last-fetch" class="secondary"></small>
+      </div>
+    </section>
   </main>
-  <footer><strong>UULAB</strong><span>로컬 모의 주문 관찰 전용 · 시세·수익률·잔고를 생성하지 않습니다.</span><span>15초 주기 조회 / 숨긴 탭 일시 정지</span></footer>
+  <footer><strong>UULAB</strong><span>로컬 모의 주문·재생 결과 관찰 전용 · 실거래 주문을 전송하지 않습니다.</span><span>15초 주기 조회 / 숨긴 탭 일시 정지</span></footer>
 </div>
 </body>
 </html>

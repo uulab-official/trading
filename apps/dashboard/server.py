@@ -18,16 +18,25 @@ else:  # Keep direct script execution and the repository's file-loader tests wor
     _spec.loader.exec_module(_store)
     JournalUnavailable, STATUSES, read_snapshot = _store.JournalUnavailable, _store.STATUSES, _store.read_snapshot
 
+# Load the dependency-free report reader, not the trading engine or credentials.
+_replay_spec = importlib.util.spec_from_file_location(
+    "uulab_replay_report", Path(__file__).resolve().parents[1] / "server/trading_bot/replay_report.py")
+_replay = importlib.util.module_from_spec(_replay_spec)
+_replay_spec.loader.exec_module(_replay)
+
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/index.html": ("index.html", "text/html; charset=utf-8"),
           "/styles.css": ("styles.css", "text/css; charset=utf-8"),
-          "/app.mjs": ("app.mjs", "text/javascript; charset=utf-8")}
+          "/app.mjs": ("app.mjs", "text/javascript; charset=utf-8"),
+          "/replay.mjs": ("replay.mjs", "text/javascript; charset=utf-8"),
+          "/replay.css": ("replay.css", "text/css; charset=utf-8")}
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
        "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'")
 
 
 class Handler(BaseHTTPRequestHandler):
     journal_path = None
+    replay_path = None
     server_version = "UULABLocal"
     sys_version = ""
 
@@ -88,6 +97,17 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     return self.respond(503, {"error": "asset_unavailable"})
                 return self._send(200, body, content_type)
+            if route == "/api/replay":
+                if query:
+                    raise ValueError("replay parameters are not supported")
+                try:
+                    report = _replay.read_report(self.replay_path)
+                except (ValueError, OSError):
+                    return self.respond(503, {"error": "replay_unavailable", "mode": "paper",
+                                              "live_enabled": False, "read_only": True})
+                # Verify totals against all fills, but bound the public response.
+                report["fills"] = report["fills"][-100:]
+                return self.respond(200, report)
             if route not in {"/api/health", "/api/orders", "/api/snapshot", "/api/events"}:
                 return self.respond(404, {"error": "not_found"})
             allowed_query = {"client_id"} if route == "/api/events" else ({"limit", "offset", "status"} if route != "/api/health" else set())
@@ -129,17 +149,18 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def create_server(journal_path=None, port=8765):
+def create_server(journal_path=None, port=8765, *, replay_path=None):
     if type(port) is not int or not 0 <= port <= 65535:
         raise ValueError("invalid port")
     class ConfiguredHandler(Handler):
         pass
     ConfiguredHandler.journal_path = journal_path
+    ConfiguredHandler.replay_path = replay_path
     return ThreadingHTTPServer(("127.0.0.1", port), ConfiguredHandler)
 
 
-def serve(journal_path=None, port=8765):
-    with create_server(journal_path, port) as server:
+def serve(journal_path=None, port=8765, *, replay_path=None):
+    with create_server(journal_path, port, replay_path=replay_path) as server:
         print(f"Read-only paper dashboard: http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()
@@ -151,5 +172,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--journal", default=None, help="Existing local paper SQLite journal")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--replay-report", default=None, help="Existing offline replay result, not a checkpoint")
     args = parser.parse_args()
-    serve(args.journal, args.port)
+    serve(args.journal, args.port, replay_path=args.replay_report)
