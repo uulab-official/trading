@@ -1,5 +1,12 @@
-# Local read-only paper dashboard
+# Local dashboard API
 
-Run `python apps/dashboard/server.py --journal /path/to/paper.sqlite --port 8765` then visit `http://127.0.0.1:8765`. Endpoints: `GET /api/health` and `GET /api/orders`. No write endpoints. API binds to 127.0.0.1 only and reads SQLite in read-only mode.
+The current implementation is described in [apps/dashboard/README.md](../apps/dashboard/README.md). The HTML **does** fetch `/api/snapshot`; the previous static-skeleton description is obsolete.
 
-The current HTML is a static skeleton and does not yet fetch these endpoints. The API does not expose balances, fills or performance because those data are not recorded by the journal. Do not expose this service publicly; loopback binding is not authentication. Real user accounts, authorization and TLS are required for any remote deployment.
+- The entire snapshot (summary, filtered page, recent audit) is read inside one read-only SQLite transaction.
+- Health checks validate the real schema and rows, not mere file existence. Corrupt/unsupported data returns 503 with no private path or SQL details.
+- URI filenames are encoded with `Path.as_uri()` before adding `mode=ro`; `?`, `#` and Unicode filenames cannot alter connection options.
+- Connections are explicitly closed after every request. The service never creates/migrates a journal.
+- No account payload, token or secret field is returned. Amounts stay decimal strings; currencies are never added together.
+- Local Host / Origin checks are browser-origin safeguards, **not authentication**. Remote hosting remains unsupported.
+
+No market-data freshness, portfolio equity or trading readiness is inferred from a successful journal read. API retrieval time and the last stored order timestamp are different signals.

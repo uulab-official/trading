@@ -1,89 +1,48 @@
 <!doctype html>
 <html lang="ko">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>UULAB Trading | Operations</title>
-<style>
-:root{font-family:Inter,system-ui,-apple-system,"Noto Sans KR",sans-serif;color:#1c2937;background:#f6f8fb}
-*{box-sizing:border-box}body{margin:0}.shell{max-width:1250px;margin:auto;padding:24px}
-header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:30px}
-h1{font-size:22px;letter-spacing:-.7px;margin:0}h2{font-size:15px;margin:0 0 16px}
-small,.muted{color:#728094}.tag{background:#edf2fa;color:#345b87;padding:7px 12px;border-radius:24px;font-size:12px;font-weight:700}
-.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
-.panel{background:white;border:1px solid #e5eaf0;border-radius:16px;padding:20px;box-shadow:0 5px 18px #18253a06}
-.value{font-size:24px;font-weight:750;margin:12px 0 0}.span2{grid-column:span 2}
-.empty{padding:48px 12px;text-align:center;color:#728094;border:1px dashed #d4dce7;border-radius:12px}
-.nav{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 20px}.nav a{color:#46576b;text-decoration:none;background:white;border:1px solid #e5eaf0;border-radius:9px;padding:9px 12px;font-size:13px}
-.notice{border-left:4px solid #d18b27;background:#fff9eb;padding:14px 18px;border-radius:8px;margin-bottom:20px;font-size:13px}
-table{width:100%;border-collapse:collapse;text-align:left;font-size:13px}td,th{padding:12px;border-bottom:1px solid #eef1f4}th{color:#718095}
-footer{margin:24px 0;color:#728094;font-size:12px}
-@media(max-width:720px){.shell{padding:16px}.grid{grid-template-columns:1fr}.span2{grid-column:span 1}header{align-items:start}.value{font-size:20px}}
-@media(prefers-color-scheme:dark){:root{background:#101820;color:#e8eef6}.panel,.nav a{background:#18242f;border-color:#314051}.empty{border-color:#405366}.notice{background:#342b1c}.tag{background:#273d51;color:#b6d5f3}td,th{border-color:#314051}}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>UULAB Trading · Paper Operations</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.mjs"></script>
 </head>
-<body><div class="shell">
-<header><div><h1>UULAB Trading</h1><small>Quant Operations Console</small></div><span class="tag">LIVE DISABLED</span></header>
-<div class="notice"><strong>연결되지 않음</strong> — 현재 화면은 읽기 전용 UI 골격입니다. 브로커 계정, 시세 피드, 실행 엔진과 연결되어 있지 않으며 주문을 전송하지 않습니다.</div>
-<nav class="nav"><a href="#overview">개요</a><a href="#strategies">전략</a><a href="#orders">주문</a><a href="#risk">위험 관리</a></nav>
-<main class="grid" id="overview">
-<section class="panel"><small>총 평가자산</small><p class="value">—</p><small>데이터 미연결</small></section>
-<section class="panel"><small>당일 손익</small><p class="value">—</p><small>데이터 미연결</small></section>
-<section class="panel"><small>시장 데이터</small><p class="value">미연결</p><small>마지막 수신: 없음</small></section>
-<section class="panel span2" id="strategies"><h2>전략 현황</h2><div class="empty">연결된 전략 실행기가 없습니다.<br>실행기 상태 API 연결 후 실제 전략이 표시됩니다.</div></section>
-<section class="panel" id="risk"><h2>위험 관리</h2><table><tr><th>항목</th><th>상태</th></tr><tr><td>실거래</td><td>비활성</td></tr><tr><td>브로커 연결</td><td>없음</td></tr><tr><td>킬 스위치</td><td>실행기 미연결</td></tr></table></section>
-<section class="panel span2" id="orders"><h2>주문 및 체결</h2><div id="orders-status" class="muted" role="status">주문 원장 연결 확인 중...</div><div id="orders-content"></div></section>
-<section class="panel"><h2>환경 정보</h2><table><tr><td>운영 모드</td><td>Read-only</td></tr><tr><td>API 연결</td><td>미구현</td></tr><tr><td>데이터 출처</td><td>없음</td></tr></table></section>
-</main><footer>UULAB Trading · 주문/성과 데이터를 생성하지 않는 정적 운영 UI · 실거래 활성화 불가</footer>
+<body>
+<a class="skip-link" href="#main">본문으로 이동</a>
+<div class="shell">
+  <header class="header">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">U</span><div><h1>UULAB Trading</h1><p>Paper Operations</p></div></div>
+    <div class="header-status"><span class="tag">LOCAL · READ ONLY</span><span id="connection" class="connection" data-state="disconnected" role="status">연결 확인 중</span></div>
+  </header>
+  <nav class="nav" aria-label="화면 탐색"><a href="#overview" aria-current="page">운영 현황</a><a href="#orders-panel">주문 원장</a><a href="#audit">감사 기록</a></nav>
+  <main id="main">
+    <div class="page-heading"><div><p class="eyebrow">ORDER OBSERVABILITY</p><h2>모의 주문 운영 현황</h2><p id="source" class="source">데이터 출처 확인 중</p></div><div class="refresh-group"><button type="button" id="refresh">새로고침</button><small id="freshness">성공한 조회 없음</small></div></div>
+    <div id="connection-notice" class="notice" role="status" hidden></div>
+    <noscript><p class="notice">JavaScript가 꺼져 있어 실시간 원장 상태를 표시할 수 없습니다.</p></noscript>
+    <div id="data-region">
+      <section class="metrics" id="overview" aria-label="원장 요약">
+        <article class="panel metric"><h3>전체 주문</h3><p id="total-orders" class="metric-value">—</p><small>원장에 저장된 주문 ID 수</small></article>
+        <article class="panel metric"><h3>활성 주문</h3><p id="active-orders" class="metric-value">—</p><small>아직 종료되지 않은 주문</small></article>
+        <article class="panel metric"><h3>결과 확인 대기</h3><p id="reconcile-count" class="metric-value">—</p><small>전송·취소 결과가 불명확한 주문</small></article>
+        <article class="panel metric"><h3>현재 예약 금액</h3><div id="reservation-values" class="metric-amount">—</div><small>현금·평가자산이 아닌 주문 예약액</small></article>
+      </section>
+      <div class="workspace">
+        <section class="panel orders" id="orders-panel" aria-busy="true">
+          <div class="section-heading"><div><h3>주문 원장</h3><p>저장된 상태를 읽기 전용으로 조회합니다.</p></div><label for="status-filter">상태 <select id="status-filter"><option value="">전체</option><option value="reserved">자금 예약</option><option value="submitting">전송 확인 중</option><option value="unknown">결과 불명</option><option value="accepted">접수 확인</option><option value="partially_filled">부분 체결</option><option value="cancel_pending">취소 확인 중</option><option value="cancelled">취소 확정</option><option value="rejected">거절 확정</option><option value="filled">체결 완료</option></select></label></div>
+          <p class="table-hint">표를 좌우로 밀어 전체 내용을 확인하세요.</p><div class="table-scroll" tabindex="0" role="region" aria-label="주문 목록"><table><thead><tr><th scope="col">주문 ID / 종목</th><th scope="col">상태</th><th scope="col" class="numeric">예약 금액</th><th scope="col">수정 시각 · KST</th></tr></thead><tbody id="order-rows"></tbody></table></div>
+          <p id="orders-empty" class="empty">원장 데이터를 확인하고 있습니다.</p>
+          <div class="pagination"><span id="page-status">—</span><div><button id="previous" type="button" disabled>이전</button><button id="next" type="button" disabled>다음</button></div></div>
+        </section>
+        <aside class="sidebar">
+          <section id="recovery" class="panel recovery"><p class="eyebrow">RECONCILIATION</p><h3>주문 상태 확인</h3><p id="reconcile-message">원장 연결 후 확인 대기 상태를 표시합니다.</p><p class="rule">응답이 없다고 주문 실패로 처리하지 않습니다.</p></section>
+          <section class="panel environment"><h3>실행 경계</h3><dl><dt>이 서버의 주문 전송</dt><dd>지원하지 않음</dd><dt>증권사 / 시세 연결</dt><dd>미연결</dd><dt>체결·잔고 회계</dt><dd>미연결</dd><dt>원장 형식</dt><dd id="journal-version">—</dd><dt>마지막 주문 변경</dt><dd id="last-order-update">—</dd></dl><p>다른 실행기의 실거래 여부를 이 화면이 보증하지 않습니다.</p></section>
+        </aside>
+      </div>
+      <section class="panel audit" id="audit"><div class="section-heading"><div><h3>주문 상태 변경 기록</h3><p>상태와 함께 저장된 감사 이벤트 · 최근 50건 · 시각은 한국 표준시(KST)</p></div><span class="tag">AUDIT TRAIL</span></div><p class="table-hint">표를 좌우로 밀어 전체 내용을 확인하세요.</p><div class="table-scroll" tabindex="0" role="region" aria-label="감사 이벤트"><table><thead><tr><th scope="col">이벤트</th><th scope="col">주문 ID</th><th scope="col">상태 변경</th><th scope="col">기록 시각 · KST</th></tr></thead><tbody id="audit-rows"></tbody></table></div><p id="audit-empty" class="empty">감사 기록을 확인하고 있습니다.</p></section>
+    </div>
+  </main>
+  <footer><strong>UULAB</strong><span>로컬 모의 주문 관찰 전용 · 시세·수익률·잔고를 생성하지 않습니다.</span><span>15초 주기 조회 / 숨긴 탭 일시 정지</span></footer>
 </div>
-<script>
-(() => {
-  "use strict";
-  const status = document.getElementById("orders-status");
-  const content = document.getElementById("orders-content");
-  const allowed = new Set(["reserved","submitting","unknown","accepted","partially_filled","cancel_pending","cancelled","rejected","filled"]);
-  async function refresh() {
-    try {
-      const response = await fetch("/api/orders", {cache:"no-store"});
-      if (!response.ok) throw new Error("HTTP " + response.status);
-      const payload = await response.json();
-      if (payload.mode !== "paper" || !Array.isArray(payload.orders)) throw new Error("invalid response");
-      content.replaceChildren();
-      if (!payload.orders.length) {
-        status.textContent = "저장된 모의 주문이 없습니다.";
-        return;
-      }
-      status.textContent = "로컬 모의 주문 원장 · 최근 " + payload.orders.length + "건";
-      const table = document.createElement("table");
-      const head = document.createElement("tr");
-      ["주문 ID","상태","예약 금액","수정 시각"].forEach(label => {
-        const th = document.createElement("th");
-        th.textContent = label;
-        head.appendChild(th);
-      });
-      table.appendChild(head);
-      for (const order of payload.orders) {
-        const tr = document.createElement("tr");
-        const cells = [
-          String(order.client_id ?? ""),
-          allowed.has(order.status) ? order.status : "unknown",
-          String(order.reserved ?? ""),
-          String(order.updated_at ?? "")
-        ];
-        for (const value of cells) {
-          const td = document.createElement("td");
-          td.textContent = value;
-          tr.appendChild(td);
-        }
-        table.appendChild(tr);
-      }
-      content.appendChild(table);
-    } catch {
-      content.replaceChildren();
-      status.textContent = "주문 API 미연결 · 로컬 서버에서 실행하면 주문 내역을 조회할 수 있습니다.";
-    }
-  }
-  refresh();
-  window.setInterval(() => { if (!document.hidden) refresh(); }, 15000);
-})();
-</script></body></html>
+</body>
+</html>

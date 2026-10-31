@@ -1,64 +1,153 @@
-"""Local-only read-only dashboard API backed by the paper SQLite journal.
+"""Local read-only paper operations server. Never expose this service publicly.
 
-No trading endpoints, no broker credentials, and no network listener beyond loopback.
+Host/Origin checks mitigate browser-origin attacks; they are not authentication.
+No credential handling, broker connection, order submission or fill simulation.
 """
+import argparse
+import importlib.util
 import json
-import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlsplit
+
+if __package__:
+    from .store import JournalUnavailable, STATUSES, read_snapshot
+else:  # Keep direct script execution and the repository's file-loader tests working.
+    _spec = importlib.util.spec_from_file_location("uulab_dashboard_store", Path(__file__).with_name("store.py"))
+    _store = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_store)
+    JournalUnavailable, STATUSES, read_snapshot = _store.JournalUnavailable, _store.STATUSES, _store.read_snapshot
+
+ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
+          "/index.html": ("index.html", "text/html; charset=utf-8"),
+          "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+          "/app.mjs": ("app.mjs", "text/javascript; charset=utf-8")}
+CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+       "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'")
 
 
 class Handler(BaseHTTPRequestHandler):
     journal_path = None
+    server_version = "UULABLocal"
+    sys_version = ""
+
+    def _allowed_request(self):
+        port = self.server.server_port
+        allowed = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        if port == 80:
+            allowed |= {"127.0.0.1", "localhost"}
+        hosts = self.headers.get_all("Host", [])
+        if len(hosts) != 1 or hosts[0].lower() not in allowed:
+            return False
+        origins = self.headers.get_all("Origin", [])
+        if len(origins) > 1 or (origins and origins[0] != "http://" + hosts[0].lower()):
+            return False
+        sites = self.headers.get_all("Sec-Fetch-Site", [])
+        return len(sites) <= 1 and (not sites or sites[0] in {"same-origin", "none"})
+
+    def _send(self, status, body, content_type, *, allow=None):
+        self.send_response(status)
+        for key, value in {"Content-Type": content_type, "Content-Length": str(len(body)),
+                           "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+                           "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
+                           "Content-Security-Policy": CSP,
+                           "Cross-Origin-Resource-Policy": "same-origin"}.items():
+            self.send_header(key, value)
+        if allow:
+            self.send_header("Allow", allow)
+        self.end_headers()
+        if self.command != "HEAD":
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # Client left; do not turn this into a server-wide failure.
+
+    def respond(self, status, data, *, allow=None):
+        self._send(status, json.dumps(data, ensure_ascii=False, allow_nan=False).encode("utf-8"),
+                   "application/json; charset=utf-8", allow=allow)
 
     def do_GET(self):
-        route = urlparse(self.path).path
-        if route == "/api/health":
-            return self.respond(200, {"mode": "paper", "live_enabled": False, "journal_connected": self.journal_path is not None and Path(self.journal_path).is_file()})
-        if route == "/api/orders":
-            if self.journal_path is None or not Path(self.journal_path).is_file():
-                return self.respond(503, {"error": "journal_unavailable"})
-            try:
-                with sqlite3.connect(f"file:{Path(self.journal_path).resolve()}?mode=ro", uri=True) as db:
-                    db.execute("PRAGMA query_only=ON")
-                    rows = db.execute("SELECT client_id,status,reserved,updated_at FROM orders ORDER BY updated_at DESC,client_id LIMIT 100").fetchall()
-            except (sqlite3.Error, OSError):
-                return self.respond(503, {"error": "journal_unavailable"})
-            return self.respond(200, {"mode": "paper", "orders": [{"client_id": row[0], "status": row[1], "reserved": row[2], "updated_at": row[3]} for row in rows]})
-        if route == "/" or route == "/index.html":
-            body = (Path(__file__).parent / "index.html").read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        return self.respond(404, {"error": "not_found"})
+        if not self._allowed_request():
+            return self.respond(403, {"error": "local_same_origin_required"})
+        try:
+            parsed = urlsplit(self.path)
+            if parsed.scheme or parsed.netloc or len(self.path) > 2048:
+                raise ValueError("invalid target")
+            query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
+            if any(len(values) != 1 for values in query.values()):
+                raise ValueError("duplicate query")
+            route = parsed.path
+            if route in ASSETS:
+                if query:
+                    raise ValueError("asset parameters not supported")
+                filename, content_type = ASSETS[route]
+                try:
+                    body = Path(__file__).with_name(filename).read_bytes()
+                except OSError:
+                    return self.respond(503, {"error": "asset_unavailable"})
+                return self._send(200, body, content_type)
+            if route not in {"/api/health", "/api/orders", "/api/snapshot", "/api/events"}:
+                return self.respond(404, {"error": "not_found"})
+            allowed_query = {"client_id"} if route == "/api/events" else ({"limit", "offset", "status"} if route != "/api/health" else set())
+            if set(query) - allowed_query:
+                raise ValueError("unsupported parameter")
+            limit = int(query.get("limit", ["100"])[0])
+            offset = int(query.get("offset", ["0"])[0])
+            status = query.get("status", [None])[0]
+            if not 1 <= limit <= 100 or not 0 <= offset <= 1_000_000 or (status is not None and status not in STATUSES):
+                raise ValueError("invalid parameters")
+            client_id = query.get("client_id", [None])[0]
+            if client_id is not None and (not client_id.strip() or len(client_id) > 128):
+                raise ValueError("invalid identifier")
+            snapshot = read_snapshot(self.journal_path, limit=limit, offset=offset, status=status, event_client_id=client_id)
+            if route == "/api/health":
+                return self.respond(200, {k: snapshot[k] for k in ("mode", "read_only", "live_enabled", "journal_connected", "source", "schema_version", "as_of")})
+            if route == "/api/events":
+                return self.respond(200, {k: snapshot[k] for k in ("mode", "source", "as_of", "audit_available", "events")})
+            return self.respond(200, snapshot)
+        except JournalUnavailable:
+            return self.respond(503, {"error": "journal_unavailable", "journal_connected": False,
+                                      "mode": "paper", "live_enabled": False, "read_only": True})
+        except ValueError:
+            return self.respond(400, {"error": "invalid_request"})
 
-    def respond(self, status, data):
-        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        self.wfile.write(body)
+    def do_HEAD(self):
+        self.do_GET()
+
+    def _deny_write(self):
+        if not self._allowed_request():
+            return self.respond(403, {"error": "local_same_origin_required"})
+        self.close_connection = True
+        self.respond(405, {"error": "read_only"}, allow="GET, HEAD")
+
+    do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_TRACE = _deny_write
+
+    def log_message(self, *_):
+        # Do not place request/query content (possibly identifiers) in shared logs.
+        pass
+
+
+def create_server(journal_path=None, port=8765):
+    if type(port) is not int or not 0 <= port <= 65535:
+        raise ValueError("invalid port")
+    class ConfiguredHandler(Handler):
+        pass
+    ConfiguredHandler.journal_path = journal_path
+    return ThreadingHTTPServer(("127.0.0.1", port), ConfiguredHandler)
 
 
 def serve(journal_path=None, port=8765):
-    Handler.journal_path = journal_path
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"Read-only paper dashboard: http://127.0.0.1:{server.server_port}")
-    server.serve_forever()
+    with create_server(journal_path, port) as server:
+        print(f"Read-only paper dashboard: http://127.0.0.1:{server.server_port}", flush=True)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--journal", default=None)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--journal", default=None, help="Existing local paper SQLite journal")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
     serve(args.journal, args.port)
