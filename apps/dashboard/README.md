@@ -1,5 +1,11 @@
-# Trading operations UI skeleton
+# Trading operations dashboard
 
-Open `index.html` locally in a browser or serve it as a static file. Responsive Korean dashboard with honest disconnected/empty states. No backend, no fake balances, no browser-side secrets, no order controls. The live-disabled label is informational and does not represent the state of a running broker.
+Run from repository root:
 
-Before production: authenticated read-only API, persisted order and position state, exchange-feed freshness, audit trail, and backend-enforced kill switch. Never turn this static page into a broker credential store.
+```bash
+python apps/dashboard/server.py --journal /absolute/path/to/paper.sqlite --port 8765
+```
+
+Open http://127.0.0.1:8765/ in the same computer. The responsive Korean UI fetches the latest 100 paper order records from `GET /api/orders` and refreshes every 15 seconds while the tab is visible. When disconnected, it displays an explicit error state rather than fabricated data. Values are rendered as text, not HTML.
+
+This is a local read-only operations view. It does **not** execute trades, display broker balances, authenticate users, or expose a remote API. Never publish this local server to the internet. Broker credentials must not be embedded in the UI. See `docs/DASHBOARD_LOCAL_API.md`.
