@@ -35,3 +35,4 @@ jobs:
           python -m unittest discover -s tests -p 'test_paper_execution.py' -v
           python -m unittest discover -s tests -p 'test_order_lifecycle.py' -v
           python -m unittest discover -s tests -p 'test_order_journal.py' -v
+          python -m unittest discover -s tests -p 'test_dashboard_api.py' -v
