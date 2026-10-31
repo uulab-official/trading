@@ -1,0 +1,19 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {validateResearch, createController} from '../apps/dashboard/research.mjs';
+const metrics=(r='1')=>({cash:r==='1'?'1010':'1000',equity:r==='1'?'1010':'1000',position_value:'0',fees:'0',fills:r==='1'?2:0,return_pct:r,daily_loss_halted:false,drawdown_halted:false});
+const policy={multipliers:['1','2','3'],selection:'frozen_base_training',allocation:'initial_position_size_pct',entry:'second_test_bar_open',valuation:'last_test_bar_close',liquidation:'not_forced',benchmark_risk:'no_active_exits',cash:'zero_interest'};
+export function fixture(version=2){
+ const r={schema_version:version,kind:'uulab_walk_forward',mode:'paper',read_only:true,live_enabled:false,run_id:'a'.repeat(64),generated_at:'2026-01-01T00:00:00Z',experiment:{symbol:'BTC/USDT',timeframe:'1h',bars:90,first_bar_ms:0,fixture_sha256:'b'.repeat(64),candidates:[{id:'ma',strategy:'ma_cross'}],settings:{initial_balance:'1000',fee_pct:'0',slippage_pct:'0',position_size_pct:'20',warmup:20,gap:1,min_training_fills:2}},folds:[{train_start:0,train_end:60,test_start:61,test_end:81,train_scores:[{candidate_id:'ma',metrics:metrics()}],selected:'ma',test:metrics()}],summary:{total_folds:1,evaluated_folds:1,skipped_folds:0,positive_folds:1,unused_tail_bars:9,mean_test_return_pct:'1',best_test_return_pct:'1',worst_test_return_pct:'1'}};
+ if(version===2)r.robustness={policy:structuredClone(policy),folds:[{entry_bar_ms:62*3600000,mark_bar_ms:80*3600000,entry_open:'100',terminal_close:'110',scenarios:['1','2','3'].map(multiplier=>({multiplier,fee_pct:'0',slippage_pct:'0',strategy:metrics(),buy_hold:{...metrics(),cash:'800',equity:'1020',position_value:'220',fills:1,return_pct:'2'},excess_return_pp:'-1'}))}],summary:['1','2','3'].map(multiplier=>({multiplier,total_folds:1,mean_strategy_return_pct:'1',mean_buy_hold_return_pct:'2',mean_excess_return_pp:'-1',worst_strategy_return_pct:'1',positive_folds:1,outperformed_benchmark_folds:0}))};
+ return r;
+}
+test('legacy reports remain available without fake diagnostics',()=>{const r=fixture(1);assert.equal(validateResearch(r),r);assert.equal(r.robustness,undefined)});
+test('valid diagnostic report is accepted',()=>{const r=fixture();assert.equal(validateResearch(r),r)});
+test('v1 cannot smuggle diagnostic fields',()=>{const r=fixture();r.schema_version=1;assert.throws(()=>validateResearch(r))});
+test('missing and malformed diagnostic scenarios rejected',()=>{
+ for(const change of [r=>delete r.robustness,r=>r.robustness.folds[0].scenarios.pop(),r=>r.robustness.folds[0].scenarios.reverse(),r=>r.robustness.folds[0].entry_bar_ms=0,r=>r.robustness.summary[0].outperformed_benchmark_folds=true,r=>r.robustness.policy.entry='first_open',r=>r.robustness.folds[0].scenarios[2].strategy.return_pct='NaN']){const r=fixture();change(r);assert.throws(()=>validateResearch(r))}
+});
+test('skipped window cannot report stressed trades',()=>{const r=fixture();r.folds[0].selected=null;r.folds[0].test=null;r.summary.evaluated_folds=0;r.summary.skipped_folds=1;r.summary.positive_folds=0;assert.throws(()=>validateResearch(r))});
+test('untrusted malformed diagnostics retain last good data',async()=>{let fail=false,last,seen=0;const good=fixture();const c=createController({request:async()=>{if(!fail)return good;const r=fixture();r.robustness.folds=[];return r},onData:()=>seen++,onError:(_e,previous)=>last=previous});await c.refresh();fail=true;await c.refresh();assert.equal(last,good);assert.equal(seen,1);fail=false;await c.refresh();assert.equal(seen,2)});
+test('overlapping refreshes are coalesced',async()=>{let release,calls=0;const c=createController({request:()=>{calls++;return new Promise(resolve=>release=resolve)},onData:()=>{},onError:e=>{throw e}});const first=c.refresh(),second=c.refresh();await Promise.resolve();assert.equal(calls,1);assert.equal(first,second);release(fixture());await first});
