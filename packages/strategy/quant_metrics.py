@@ -2,7 +2,7 @@
 
 Inputs are ordered periodic equity observations. No trades are executed.
 """
-from math import isfinite, sqrt
+from math import isclose, isfinite, sqrt
 from typing import Sequence
 
 
@@ -45,6 +45,6 @@ def sharpe_ratio(equity: Sequence[float], periods_per_year: float = 252, risk_fr
     excess = [r - rf for r in values]
     mean = sum(excess) / len(excess)
     variance = sum((r - mean) ** 2 for r in excess) / (len(excess) - 1)
-    if variance <= 0:
+    if variance <= 0 or isclose(variance, 0.0, abs_tol=1e-28):
         return None
     return mean / sqrt(variance) * sqrt(periods_per_year)
