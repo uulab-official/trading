@@ -40,10 +40,10 @@ class OrderJournal:
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
         with self.transaction():
             previous = self.db.execute(
-                "SELECT payload,status FROM orders WHERE client_id=?", (client_id,)
+                "SELECT payload,status,reserved FROM orders WHERE client_id=?", (client_id,)
             ).fetchone()
             if previous:
-                if previous[0] != encoded:
+                if previous[0] != encoded or (previous[1] != "cancelled" and Decimal(previous[2]) != notional):
                     raise ValueError("idempotency key reused with different payload")
                 return previous[1]
             rows = self.db.execute(
