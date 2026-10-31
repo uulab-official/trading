@@ -48,6 +48,8 @@ jobs:
           python -m unittest discover -s tests -p 'test_quant_research.py' -v
           python -m unittest discover -s tests -p 'test_research_cli.py' -v
           python -m unittest discover -s tests -p 'test_research_api.py' -v
+          python -m unittest discover -s tests -p 'test_research_robustness.py' -v
+          python -m unittest discover -s tests -p 'test_robustness_cli.py' -v
 
   dashboard-client:
     runs-on: ubuntu-latest
@@ -57,7 +59,7 @@ jobs:
         with:
           node-version: '22'
       - name: Verify dependency-free dashboard logic
-        run: node --test tests/dashboard_client.test.mjs tests/replay_client.test.mjs tests/market_provenance_client.test.mjs tests/research_client.test.mjs
+        run: node --test tests/dashboard_client.test.mjs tests/replay_client.test.mjs tests/market_provenance_client.test.mjs tests/research_client.test.mjs tests/research_robustness_client.test.mjs
 
   replay-integration:
     runs-on: ubuntu-latest
@@ -77,3 +79,4 @@ jobs:
           python -m unittest discover -s tests -p 'test_replay_runner_integration.py' -v
           python -m unittest discover -s tests -p 'test_market_history_integration.py' -v
           python -m unittest discover -s tests -p 'test_research_engine.py' -v
+          python -m unittest discover -s tests -p 'test_robustness_engine.py' -v

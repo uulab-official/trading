@@ -11,6 +11,7 @@
 <article><h2>가장 낮은 구간</h2><p id="worst">—</p><small>손실 결과도 그대로 표시</small></article>
 <article><h2>평가한 구간</h2><p id="evaluated">—</p><small>평가 / 전체 구간</small></article>
 <article><h2>표본 부족으로 건너뜀</h2><p id="skipped">—</p><small>전략을 억지로 선택하지 않음</small></article></section>
+<section class="panel robustness-panel" aria-labelledby="robustness-heading"><div class="section-head"><p class="eyebrow">BENCHMARK &amp; COST SENSITIVITY</p><h2 id="robustness-heading">수익이 아닌, 비교 우위를 확인합니다.</h2><p id="robustness-note"></p><p>모든 구간의 단순 평균 · 현금 대기 포함 · 표시값은 소수 4자리 반올림, 원값은 마우스 오버 및 JSON 보고서에서 확인 · 실거래 승인 기준 아님</p></div><div id="robustness-cards" class="robustness-cards"></div></section>
 <section class="panel"><div class="section-head"><h2>구간별 선택과 검증</h2><p id="context"></p><p id="assumptions"></p></div><div class="scroll" tabindex="0" role="region" aria-label="시간순 검증 결과"><table><thead><tr><th scope="col">학습 / 검증 기간 · KST</th><th scope="col">학습에서 선택한 전략</th><th scope="col">이후 구간 결과 · 비용 반영</th></tr></thead><tbody id="folds"></tbody></table></div></section>
 <section class="provenance"><p id="generated"></p><p id="source"></p><p id="last-fetch"></p></section></div>
 <section class="limits"><h2>결과를 해석할 때</h2><p>기존 실행기는 최소 50개 봉이 쌓인 뒤 분석합니다. 준비 구간은 지표 계산에만 사용하며 주문을 넘기지 않습니다. 종료 시 보유 자산은 종가 평가이고 강제 매도하지 않아 향후 청산 비용은 포함되지 않습니다. Sharpe·최대낙폭·연율 수익률은 이 요약에서 추정하지 않습니다.</p><p>이 화면은 데이터를 수집하거나 전략을 실행하지 않습니다. 테스트 결과를 반복해서 보며 후보를 바꾸면 과최적화될 수 있습니다. 수익성이나 실거래 안전성을 보증하지 않습니다.</p></section>
