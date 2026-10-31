@@ -73,7 +73,9 @@ class Handler(BaseHTTPRequestHandler):
             parsed = urlsplit(self.path)
             if parsed.scheme or parsed.netloc or len(self.path) > 2048:
                 raise ValueError("invalid target")
-            query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
+            # Python 3.10 treats strict parsing of an empty query as an error.
+            # Absence of parameters is valid; malformed nonempty queries stay strict.
+            query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True) if parsed.query else {}
             if any(len(values) != 1 for values in query.values()):
                 raise ValueError("duplicate query")
             route = parsed.path

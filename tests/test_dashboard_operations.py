@@ -115,6 +115,21 @@ class DashboardOperationsTests(unittest.TestCase):
         self.assertEqual([o["client_id"] for o in body["orders"]], ["a"])
         self.assertEqual(body["summary"]["total_orders"], 3)
 
+    def test_empty_query_works_with_python310_strict_parser(self):
+        from unittest.mock import patch
+        actual_parser = module.parse_qs
+        def python310_parser(query, **kwargs):
+            # CPython 3.10 rejects an empty string under strict_parsing=True.
+            if query == "" and kwargs.get("strict_parsing"):
+                raise ValueError("bad query field: ''")
+            return actual_parser(query, **kwargs)
+        with patch.object(module, "parse_qs", side_effect=python310_parser):
+            for route in ("/api/health", "/api/orders", "/api/snapshot", "/api/events"):
+                with self.subTest(route=route):
+                    self.assertEqual(self.request(route)[0], 200)
+            self.assertEqual(self.request("/api/snapshot?limit=1")[0], 200)
+            self.assertEqual(self.request("/api/snapshot?broken")[0], 400)
+
     def test_invalid_query_is_rejected(self):
         for query in ["limit=0", "limit=101", "limit=no", "offset=-1", "status=oops", "limit=1&limit=2", "path=/tmp/no"]:
             with self.subTest(query=query):
