@@ -16,7 +16,7 @@ from trading_bot.walk_forward_research import run_research, evaluate_with_runner
 from trading_bot.paper_runner import PaperRunner, PaperRunConfig
 from quant_research import export_research
 CANDIDATES = [dict(id='ma-fast', strategy='ma_cross', fast_period=2, slow_period=5), dict(id='ma-slow', strategy='ma_cross', fast_period=3, slow_period=9)]
-SETTINGS = dict(train_size=36, test_size=20, gap=2, warmup=12, min_training_fills=2, max_daily_loss_pct='100', max_drawdown_pct='100')
+SETTINGS = dict(train_size=72, test_size=20, gap=2, warmup=60, min_training_fills=2, max_daily_loss_pct='100', max_drawdown_pct='100')
 
 def history(n=120, quote='USDT'):
     pattern = [90, 91, 94, 99, 105, 111, 113, 109, 103, 97, 92, 89]
@@ -51,17 +51,18 @@ class EngineResearchTests(unittest.TestCase):
         bars = data['candles']
         options = dict(symbol=data['symbol'], timeframe='1h', max_daily_loss_pct='100', max_drawdown_pct='100')
         with patch.object(PaperRunner, 'run', spy):
-            evaluate_with_runner(CANDIDATES[0], bars[:24], bars[24:60], options)
+            evaluate_with_runner(CANDIDATES[0], bars[:60], bars[60:100], options)
         self.assertTrue(seen[0]['trades'])
-        self.assertTrue(all((t['timestamp'] >= bars[25][0] for t in seen[0]['trades'])))
-        self.assertEqual(seen[0]['bars_processed'], 36)
+        self.assertTrue(all((t['timestamp'] >= bars[61][0] for t in seen[0]['trades'])))
+        self.assertEqual(seen[0]['bars_processed'], 40)
 
     def test_segment_agrees_with_unmodified_runner_when_no_warmup(self):
         data = history()
-        bars = data['candles'][:36]
+        bars = data['candles'][:72]
         c = CANDIDATES[0]
         direct = asyncio.run(PaperRunner(PaperRunConfig(fast_period=2, slow_period=5)).run(bars))
         m = evaluate_with_runner(c, [], bars, dict(symbol='BTC/USDT', timeframe='1h'))
+        self.assertGreater(len(direct['trades']), 0)
         self.assertEqual(D(m['equity']), D(direct['equity']))
         self.assertEqual(D(m['fees']), D(direct['total_fees']))
         self.assertEqual(m['fills'], len(direct['trades']))
@@ -69,7 +70,7 @@ class EngineResearchTests(unittest.TestCase):
     def test_future_change_never_reselects_first_training_winner(self):
         data = history()
         a = run_research(data, 'a' * 64, candidates=CANDIDATES, settings=SETTINGS)
-        for bar in data['candles'][38:]:
+        for bar in data['candles'][74:]:
             bar[1:5] = ['200', '201', '199', '200']
         b = run_research(data, 'b' * 64, candidates=CANDIDATES, settings=SETTINGS)
         self.assertEqual(a['folds'][0]['train_scores'], b['folds'][0]['train_scores'])
@@ -91,6 +92,15 @@ class EngineResearchTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 export_research(path, out, candidates=CANDIDATES, settings={**SETTINGS, 'gap': 3})
             self.assertEqual(out.read_bytes(), saved)
+
+    def test_existing_fifty_bar_gate_is_not_bypassed(self):
+        # The unchanged Strategy.on_candle gate needs 50 observed bars.
+        # 36 scored bars + at most 12 warm-up bars must not create trades.
+        report = run_research(history(), 'a' * 64, candidates=CANDIDATES,
+                              settings={**SETTINGS, 'train_size': 36, 'warmup': 12})
+        self.assertEqual(report['summary']['evaluated_folds'], 0)
+        self.assertTrue(all(f['selected'] is None and f['test'] is None
+                            for f in report['folds']))
 
     def test_source_metadata_fails_before_engine(self):
         data = history()

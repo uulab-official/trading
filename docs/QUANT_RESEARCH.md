@@ -22,7 +22,7 @@ python apps/dashboard/server.py \
 
 Open `http://127.0.0.1:8765/research.html`. The input is a local file produced by the existing importer or a local fixture; the research process never fetches data. The existing source-annotation validator is reused before any evaluation. Fee/slippage values above are modeling examples, not a statement of actual broker charges.
 
-For the repository's smaller synthetic fixture, use `--train-size 40 --test-size 20 --warmup 30`. Input/output must be distinct. Existing output must describe the exact same experiment/results or publication fails; unrelated files are never overwritten. No source file or replay checkpoint is modified. The research job uses in-memory segment runs without checkpoint resume.
+For the repository's smaller synthetic fixture, use `--train-size 60 --test-size 20 --warmup 60`. Input/output must be distinct. Existing output must describe the exact same experiment/results or publication fails; unrelated files are never overwritten. No source file or replay checkpoint is modified. The research job uses in-memory segment runs without checkpoint resume.
 
 Example candidate file:
 
@@ -39,6 +39,7 @@ Example candidate file:
 - Rolling training windows by default; `--anchored` retains the first training bar. Test windows are non-overlapping, chronological, and never used for selection within their fold. Earlier test bars may legitimately enter later training windows.
 - Rank candidates by training **terminal marked return after modeled execution costs**, then ascending candidate ID on an exact numeric tie. Every training candidate score remains inspectable.
 - Require `--min-training-fills` (default 2) before selection. This is a count of fills, NOT completed round trips or a claim of statistical significance. If none qualifies, skip the test run and record a cash/no-interest return of 0 for that window. A losing but eligible training winner is not silently discarded.
+- The original `Strategy.on_candle` waits for 50 observed bars before analysis. This gate is not bypassed. Short early windows may therefore produce no eligible strategy; `--warmup` is a maximum, not fabricated prehistory. The first training window starts cold.
 - Warm up only with bars preceding the evaluated window (maximum `--warmup`). Already observed gap bars may initialize test indicators; they do not enter selection scoring. Warm-up signals are discarded. There is no cash, position, pending order or risk-state transfer between segments. First evaluated-bar signals can fill only at the next evaluated bar's open, following the existing engine.
 - Every segment starts with the same initial cash and configured execution/risk assumptions. A window's last-bar signal is not executed outside that window. Final holdings are marked at the last close, NOT force-liquidated; future liquidation costs are omitted. In particular, these results are not all-realized cash returns.
 - Summary is an unweighted arithmetic mean over all complete test windows, including cash/skip windows. It is NOT a compounded return or a continuous portfolio. Worst/best windows, evaluated/skipped counts and unused trailing bars are explicit. No endpoint-only Sharpe, MDD or CAGR is fabricated.
@@ -64,7 +65,7 @@ python -m unittest discover -s tests -p 'test_research_engine.py' -v
 node --test tests/research_client.test.mjs
 ```
 
-Local dependency-free checks: 17 core/contract tests + 4 CLI-boundary tests + 4 real-loopback HTTP tests, and 6 Node tests. Core/CLI tests inject explicit deterministic test evaluators; they do not claim real engine execution. The six original-engine cases are separately wired into GitHub Actions on Python 3.10/3.12, with sockets/DNS forbidden during evaluation. Consult the commit checks for their actual outcome.
+Local dependency-free checks: 17 core/contract tests + 4 CLI-boundary tests + 4 real-loopback HTTP tests, and 6 Node tests. Core/CLI tests inject explicit deterministic test evaluators; they do not claim real engine execution. The seven original-engine cases are separately wired into GitHub Actions on Python 3.10/3.12, with sockets/DNS forbidden during evaluation. Consult the commit checks for their actual outcome.
 
 Baseline source was read through the connected GitHub API because container GitHub DNS prevented cloning; exact hashes were verified for the unchanged server dependencies reconstructed locally. The complete legacy repository suite is exercised by GitHub CI, not the sparse local workspace. No external reviewer agent was available; review was inline.
 
@@ -78,3 +79,7 @@ Architecture references only; no upstream source was copied and no new research 
 - https://www.freqtrade.io/en/stable/recursive-analysis/ — indicator warm-up sensitivity.
 
 Research caution: repeatedly changing candidates after inspecting test results overfits those tests. Use a separately reserved final holdout and subsequent paper operation before considering deployment. This increment does not perform statistical significance, multiple-testing correction, order-book liquidity modeling or live partial-fill settlement.
+
+### Integration-fixture correction
+
+Initial CI cc4856c exposed that the original Strategy.on_candle requires at least 50 bars, while the synthetic integration fixture used 36 training bars plus at most 12 warm-up bars. The expected-fill assertion correctly failed. The engine and training-fill gate were not weakened: the positive test now uses 72 training / 60 warm-up bars; a separate original-engine regression confirms that the old short-window experiment remains skipped. The warm-up boundary test now actually crosses the original readiness threshold before its evaluation window.
