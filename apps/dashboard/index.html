@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>UULAB Trading | Operations</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,"Noto Sans KR",sans-serif;color:#1c2937;background:#f6f8fb}
+*{box-sizing:border-box}body{margin:0}.shell{max-width:1250px;margin:auto;padding:24px}
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:30px}
+h1{font-size:22px;letter-spacing:-.7px;margin:0}h2{font-size:15px;margin:0 0 16px}
+small,.muted{color:#728094}.tag{background:#edf2fa;color:#345b87;padding:7px 12px;border-radius:24px;font-size:12px;font-weight:700}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.panel{background:white;border:1px solid #e5eaf0;border-radius:16px;padding:20px;box-shadow:0 5px 18px #18253a06}
+.value{font-size:24px;font-weight:750;margin:12px 0 0}.span2{grid-column:span 2}
+.empty{padding:48px 12px;text-align:center;color:#728094;border:1px dashed #d4dce7;border-radius:12px}
+.nav{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 20px}.nav a{color:#46576b;text-decoration:none;background:white;border:1px solid #e5eaf0;border-radius:9px;padding:9px 12px;font-size:13px}
+.notice{border-left:4px solid #d18b27;background:#fff9eb;padding:14px 18px;border-radius:8px;margin-bottom:20px;font-size:13px}
+table{width:100%;border-collapse:collapse;text-align:left;font-size:13px}td,th{padding:12px;border-bottom:1px solid #eef1f4}th{color:#718095}
+footer{margin:24px 0;color:#728094;font-size:12px}
+@media(max-width:720px){.shell{padding:16px}.grid{grid-template-columns:1fr}.span2{grid-column:span 1}header{align-items:start}.value{font-size:20px}}
+@media(prefers-color-scheme:dark){:root{background:#101820;color:#e8eef6}.panel,.nav a{background:#18242f;border-color:#314051}.empty{border-color:#405366}.notice{background:#342b1c}.tag{background:#273d51;color:#b6d5f3}td,th{border-color:#314051}}
+</style>
+</head>
+<body><div class="shell">
+<header><div><h1>UULAB Trading</h1><small>Quant Operations Console</small></div><span class="tag">LIVE DISABLED</span></header>
+<div class="notice"><strong>연결되지 않음</strong> — 현재 화면은 읽기 전용 UI 골격입니다. 브로커 계정, 시세 피드, 실행 엔진과 연결되어 있지 않으며 주문을 전송하지 않습니다.</div>
+<nav class="nav"><a href="#overview">개요</a><a href="#strategies">전략</a><a href="#orders">주문</a><a href="#risk">위험 관리</a></nav>
+<main class="grid" id="overview">
+<section class="panel"><small>총 평가자산</small><p class="value">—</p><small>데이터 미연결</small></section>
+<section class="panel"><small>당일 손익</small><p class="value">—</p><small>데이터 미연결</small></section>
+<section class="panel"><small>시장 데이터</small><p class="value">미연결</p><small>마지막 수신: 없음</small></section>
+<section class="panel span2" id="strategies"><h2>전략 현황</h2><div class="empty">연결된 전략 실행기가 없습니다.<br>실행기 상태 API 연결 후 실제 전략이 표시됩니다.</div></section>
+<section class="panel" id="risk"><h2>위험 관리</h2><table><tr><th>항목</th><th>상태</th></tr><tr><td>실거래</td><td>비활성</td></tr><tr><td>브로커 연결</td><td>없음</td></tr><tr><td>킬 스위치</td><td>실행기 미연결</td></tr></table></section>
+<section class="panel span2" id="orders"><h2>주문 및 체결</h2><div class="empty">표시할 주문 데이터가 없습니다.</div></section>
+<section class="panel"><h2>환경 정보</h2><table><tr><td>운영 모드</td><td>Read-only</td></tr><tr><td>API 연결</td><td>미구현</td></tr><tr><td>데이터 출처</td><td>없음</td></tr></table></section>
+</main><footer>UULAB Trading · 주문/성과 데이터를 생성하지 않는 정적 운영 UI · 실거래 활성화 불가</footer>
+</div></body></html>
