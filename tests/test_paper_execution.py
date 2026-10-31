@@ -34,6 +34,13 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(self.engine.reserved_notional, D("0"))
         self.assertTrue(self.engine.submit(self.order("two"), self.state).decision.allowed)
 
+    def test_cancelled_id_cannot_reopen(self):
+        order = self.order("once")
+        self.assertTrue(self.engine.submit(order, self.state).decision.allowed)
+        self.engine.cancel("once")
+        self.assertEqual(self.engine.submit(order, self.state).decision.reason, "previously_cancelled")
+        self.assertEqual(self.engine.reserved_notional, D("0"))
+
     def test_sell_is_not_implemented(self):
         self.assertEqual(self.engine.submit(self.order("sell", Side.SELL), self.state).decision.reason, "sell_not_implemented")
 
