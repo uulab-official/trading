@@ -4,13 +4,13 @@ on:
   pull_request:
     paths:
       - 'packages/core/**'
-      - 'tests/test_order_manager_safety.py'
+      - 'tests/test_order_*.py'
       - '.github/workflows/order-manager-safety.yml'
   push:
     branches: ['feat/smc-market-structure']
     paths:
       - 'packages/core/**'
-      - 'tests/test_order_manager_safety.py'
+      - 'tests/test_order_*.py'
       - '.github/workflows/order-manager-safety.yml'
   workflow_dispatch:
 
@@ -32,5 +32,5 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install existing engine packages
         run: python -m pip install -e packages/core -e packages/data -e packages/strategy -e apps/server
-      - name: Check fake-adapter outcomes and original PaperExchange compatibility
-        run: python -m unittest discover -s tests -p 'test_order_manager_safety.py' -v
+      - name: Check outcomes, durable state, crash recovery and PaperExchange
+        run: python -m unittest discover -s tests -p 'test_order_*.py' -v

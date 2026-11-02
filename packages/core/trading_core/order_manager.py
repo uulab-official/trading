@@ -1,8 +1,9 @@
-"""Conservative, in-memory order tracking for one asyncio event loop.
+"""Conservative order tracking for one asyncio event loop.
 
 An adapter timeout or task cancellation is NOT a venue rejection. This module
-never resubmits an uncertain intent. It is not a durable journal, buying-power
-risk gate, broker-specific reconciliation service or authority to trade live.
+never resubmits an uncertain intent. Optional state_store provides synchronous
+write-ahead barriers. It is not a buying-power risk gate, broker-specific
+reconciliation service or authority to trade live.
 """
 
 import asyncio
@@ -84,6 +85,10 @@ class ReconciliationRequired(RuntimeError):
     """Resolve existing uncertain outcomes before admitting another intent."""
 
 
+class OrderPersistenceError(RuntimeError):
+    """Local storage is uncertain. Stop I/O; reopen and reconcile, never retry blindly."""
+
+
 class OrderOutcomeUnknown(RuntimeError):
     """No conclusive adapter result; inspect tracked state, do not resubmit."""
 
@@ -141,15 +146,61 @@ class OrderManager:
     Do not share this object across threads or event loops.
     """
 
-    def __init__(self, exchange: ExchangeInterface):
+    def __init__(self, exchange: ExchangeInterface, *, state_store=None):
         self.exchange = exchange
         self._orders: Dict[str, Order] = {}
         self._pending_orders: Set[str] = set()
         self._inflight: Set[str] = set()
         self._lock = asyncio.Lock()
         self._polling_task: Optional[asyncio.Task] = None
+        self._state_store = None
+        self._storage_failed = False
+        if state_store is not None:
+            try:
+                restored = state_store.claim()
+                self.load_orders(restored)
+                self._state_store = state_store
+                self._persist()  # Persist UNKNOWN normalization before admitting I/O.
+            except Exception:
+                self._storage_failed = True
+                raise OrderPersistenceError('order_state_restore_failed') from None
+
+    @property
+    def storage_failed(self) -> bool:
+        """Latched until this manager is discarded; getters are diagnostic only."""
+        return self._storage_failed
+
+    def _ensure_storage(self):
+        if self._storage_failed:
+            raise OrderPersistenceError('order_storage_failed_restart_required')
+        if self._state_store is not None:
+            try:
+                self._state_store.ensure_open()
+            except Exception:
+                self._storage_failed = True
+                raise OrderPersistenceError('order_state_store_unavailable') from None
+
+    def _persist(self):
+        self._ensure_storage()
+        if self._state_store is not None:
+            try:
+                self._state_store.save(self.get_all_orders())
+            except Exception:
+                self._storage_failed = True
+                raise OrderPersistenceError('order_state_save_failed') from None
+            except BaseException:
+                self._storage_failed = True
+                raise
+
+    def _interrupted(self, order):
+        # Preserve caller cancellation/interrupt even if recording UNKNOWN fails.
+        try:
+            self._unknown(order)
+        except OrderPersistenceError:
+            pass  # The manager's sticky storage failure still blocks all new I/O.
 
     async def start(self) -> None:
+        self._ensure_storage()
         if self._polling_task is None or self._polling_task.done():
             self._polling_task = asyncio.create_task(self._poll_orders_loop())
 
@@ -171,6 +222,7 @@ class OrderManager:
         order.status = OrderStatus.UNKNOWN
         order.updated_at = _now()
         self._pending_orders.add(order.client_order_id)
+        self._persist()
 
     @staticmethod
     def _map_exchange_status(status: str) -> OrderStatus:
@@ -239,6 +291,7 @@ class OrderManager:
             self._pending_orders.discard(order.client_order_id)
         else:
             self._pending_orders.add(order.client_order_id)
+        self._persist()
 
     async def place_order(self, symbol: str, side: OrderSide, order_type: OrderType,
                           amount: Decimal, price: Optional[Decimal] = None,
@@ -249,6 +302,7 @@ class OrderManager:
                           else 'order-' + uuid.uuid4().hex, 'client_order_id')
         intent = _request(symbol, side, order_type, amount, price, strategy_id)
         async with self._lock:
+            self._ensure_storage()
             if key in self._orders:
                 existing = self._orders[key]
                 if _intent(existing) != intent:
@@ -260,6 +314,7 @@ class OrderManager:
                           remaining=intent[3], status=OrderStatus.SUBMITTING)
             self._orders[key] = order
             self._pending_orders.add(key)
+            self._persist()  # Commit intent before any adapter side effect.
             self._inflight.add(key)
         try:
             response = await self.exchange.create_order(
@@ -268,14 +323,16 @@ class OrderManager:
                 params={'clientOrderId': key})
             self._apply_response(order, response)
         except asyncio.CancelledError:
-            self._unknown(order)
+            self._interrupted(order)
             raise  # Preserve structured cancellation; do not silently continue.
+        except OrderPersistenceError:
+            raise
         except Exception:
             self._unknown(order)
             logger.warning('order_submission_outcome_unknown')
             raise OrderOutcomeUnknown('submission_outcome_unknown') from None
         except BaseException:
-            self._unknown(order)
+            self._interrupted(order)
             raise
         finally:
             self._inflight.discard(key)
@@ -284,6 +341,7 @@ class OrderManager:
     async def cancel_order(self, client_order_id: str) -> Order:
         key = _identifier(client_order_id, 'client_order_id')
         async with self._lock:
+            self._ensure_storage()
             if key not in self._orders:
                 raise ValueError('order_not_found')
             order = self._orders[key]
@@ -294,19 +352,22 @@ class OrderManager:
             order.status = OrderStatus.CANCEL_PENDING
             order.cancel_requested = True
             order.updated_at = _now()
+            self._persist()  # Cancellation request is durable before sending.
             self._inflight.add(key)
         try:
             response = await self.exchange.cancel_order(order.exchange_order_id, order.symbol)
             self._apply_response(order, response, cancel_ack=True)
         except asyncio.CancelledError:
-            self._unknown(order)
+            self._interrupted(order)
+            raise
+        except OrderPersistenceError:
             raise
         except Exception:
             self._unknown(order)
             logger.warning('order_cancellation_outcome_unknown')
             raise OrderOutcomeUnknown('cancellation_outcome_unknown') from None
         except BaseException:
-            self._unknown(order)
+            self._interrupted(order)
             raise
         finally:
             self._inflight.discard(key)
@@ -332,9 +393,11 @@ class OrderManager:
             await asyncio.sleep(5)
 
     async def _sync_orders(self) -> None:
-        # Acquire ownership per order. No writes or cancel calls occur here.
+        self._ensure_storage()
+        # Acquire ownership per order. Read-back never submits or cancels.
         for key in list(self._orders):
             async with self._lock:
+                self._ensure_storage()
                 order = self._orders[key]
                 if key in self._inflight or order.status in TERMINAL or order.exchange_order_id is None:
                     continue
@@ -343,19 +406,21 @@ class OrderManager:
                 response = await self.exchange.fetch_order(order.exchange_order_id, order.symbol)
                 self._apply_response(order, response)
             except asyncio.CancelledError:
-                self._unknown(order)
+                self._interrupted(order)
+                raise
+            except OrderPersistenceError:
                 raise
             except Exception:
                 self._unknown(order)
                 logger.warning('order_readback_unavailable')
             except BaseException:
-                self._unknown(order)
+                self._interrupted(order)
                 raise
             finally:
                 self._inflight.discard(key)
 
     def get_all_orders(self) -> Dict[str, Order]:
-        """Detached data for a caller-owned durable store; no persistence here."""
+        """Detached diagnostic snapshot; never clear orders to bypass reconciliation."""
         return deepcopy(self._orders)
 
     def load_orders(self, orders: Dict[str, Order]) -> None:
@@ -364,7 +429,8 @@ class OrderManager:
         Active records become unknown until adapter read-back. Missing venue IDs
         cannot be reconciled generically. Never clear records to unlock trading.
         """
-        if self._orders or self._inflight or self._polling_task is not None or not isinstance(orders, dict):
+        if (self._state_store is not None or self._orders or self._inflight
+                or self._polling_task is not None or not isinstance(orders, dict)):
             raise ValueError('restore_requires_unused_manager')
         clean, venue_ids = {}, set()
         for key, original in orders.items():
