@@ -1,299 +1,401 @@
-"""Order management with idempotency - 주문 관리 (멱등성 보장)"""
+"""Conservative, in-memory order tracking for one asyncio event loop.
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from decimal import Decimal
-from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+An adapter timeout or task cancellation is NOT a venue rejection. This module
+never resubmits an uncertain intent. It is not a durable journal, buying-power
+risk gate, broker-specific reconciliation service or authority to trade live.
+"""
+
 import asyncio
+from copy import deepcopy
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from decimal import Decimal, DecimalException, localcontext
+from enum import Enum
 import logging
+from typing import Any, Dict, List, Optional, Set
 
 from trading_core.exchange import ExchangeInterface
 
 logger = logging.getLogger(__name__)
 
 
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _identifier(value, name):
+    if (not isinstance(value, str) or not value or value != value.strip()
+            or len(value) > 128 or any(ord(c) < 32 or ord(c) == 127 for c in value)):
+        raise ValueError('invalid_' + name)
+    return value
+
+
+def _quantity(value, *, positive=False):
+    if type(value) not in (str, int, float, Decimal) or len(str(value)) > 100:
+        raise ValueError('invalid_order_number')
+    try:
+        result = Decimal(str(value))
+        if (not result.is_finite() or result < 0 or (positive and result == 0)
+                or result > Decimal('1e30') or result.as_tuple().exponent < -30
+                or result.as_tuple().exponent > 30 or len(result.as_tuple().digits) > 60):
+            raise ValueError('invalid_order_number')
+        return result
+    except DecimalException:
+        raise ValueError('invalid_order_number') from None
+
+
+def _remaining(amount, filled):
+    with localcontext() as ctx:
+        ctx.prec = 80
+        return amount - filled
+
+
 class OrderSide(Enum):
-    BUY = "buy"
-    SELL = "sell"
+    BUY = 'buy'
+    SELL = 'sell'
 
 
 class OrderType(Enum):
-    MARKET = "market"
-    LIMIT = "limit"
-    STOP_LIMIT = "stop_limit"
+    MARKET = 'market'
+    LIMIT = 'limit'
+    STOP_LIMIT = 'stop_limit'
 
 
 class OrderStatus(Enum):
-    PENDING = "pending"      # 생성됨, 아직 미전송
-    OPEN = "open"           # 거래소에 접수됨
-    PARTIALLY_FILLED = "partially_filled"
-    FILLED = "filled"
-    CANCELED = "canceled"
-    REJECTED = "rejected"
-    EXPIRED = "expired"
+    PENDING = 'pending'
+    SUBMITTING = 'submitting'
+    UNKNOWN = 'unknown'
+    OPEN = 'open'
+    PARTIALLY_FILLED = 'partially_filled'
+    CANCEL_PENDING = 'cancel_pending'
+    FILLED = 'filled'
+    CANCELED = 'canceled'
+    REJECTED = 'rejected'
+    EXPIRED = 'expired'
+
+
+TERMINAL = frozenset((OrderStatus.FILLED, OrderStatus.CANCELED,
+                      OrderStatus.REJECTED, OrderStatus.EXPIRED))
+UNCERTAIN = frozenset((OrderStatus.PENDING, OrderStatus.SUBMITTING,
+                       OrderStatus.UNKNOWN, OrderStatus.CANCEL_PENDING))
+
+
+class ReconciliationRequired(RuntimeError):
+    """Resolve existing uncertain outcomes before admitting another intent."""
+
+
+class OrderOutcomeUnknown(RuntimeError):
+    """No conclusive adapter result; inspect tracked state, do not resubmit."""
 
 
 @dataclass
 class Order:
-    """주문 데이터"""
-    # 낱등성 키 - 중복 주문 방지
     client_order_id: str
-    
-    # 거래소 정보
     symbol: str
     side: OrderSide
     order_type: OrderType
-    amount: Decimal          # 주문 수량
-    price: Optional[Decimal] = None  # 지정가
-    
-    # 상태
+    amount: Decimal
+    price: Optional[Decimal] = None
     status: OrderStatus = OrderStatus.PENDING
-    filled: Decimal = field(default_factory=lambda: Decimal("0"))
-    remaining: Decimal = field(default_factory=lambda: Decimal("0"))
-    
-    # 거래소 응답
+    filled: Decimal = field(default_factory=lambda: Decimal('0'))
+    remaining: Decimal = field(default_factory=lambda: Decimal('0'))
     exchange_order_id: Optional[str] = None
-    
-    # 메타데이터
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
-    
-    # 전략 정보 (추적용)
+    created_at: datetime = field(default_factory=_now)
+    updated_at: datetime = field(default_factory=_now)
     strategy_id: Optional[str] = None
-    
+    cancel_requested: bool = False
+
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            'client_order_id': self.client_order_id,
-            'symbol': self.symbol,
-            'side': self.side.value,
-            'order_type': self.order_type.value,
-            'amount': str(self.amount),
-            'price': str(self.price) if self.price else None,
-            'status': self.status.value,
-            'filled': str(self.filled),
-            'remaining': str(self.remaining),
-            'exchange_order_id': self.exchange_order_id,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat(),
-            'strategy_id': self.strategy_id,
-        }
+        return dict(client_order_id=self.client_order_id, symbol=self.symbol,
+                    side=self.side.value, order_type=self.order_type.value,
+                    amount=str(self.amount), price=str(self.price) if self.price is not None else None,
+                    status=self.status.value, filled=str(self.filled), remaining=str(self.remaining),
+                    exchange_order_id=self.exchange_order_id,
+                    created_at=self.created_at.isoformat(), updated_at=self.updated_at.isoformat(),
+                    strategy_id=self.strategy_id, cancel_requested=self.cancel_requested)
+
+
+def _request(symbol, side, order_type, amount, price, strategy_id):
+    _identifier(symbol, 'symbol')
+    if not isinstance(side, OrderSide) or not isinstance(order_type, OrderType):
+        raise ValueError('invalid_order_side_or_type')
+    amount = _quantity(amount, positive=True)
+    price = None if price is None else _quantity(price, positive=True)
+    if order_type != OrderType.MARKET and price is None:
+        raise ValueError('limit_price_required')
+    if strategy_id is not None:
+        _identifier(strategy_id, 'strategy_id')
+    return symbol, side, order_type, amount, price, strategy_id
+
+
+def _intent(order):
+    return (order.symbol, order.side, order.order_type, order.amount, order.price, order.strategy_id)
 
 
 class OrderManager:
-    """주문 관리자 - 멱등성 및 상태 추적 보장"""
-    
+    """One-event-loop manager; all returned records are detached snapshots.
+
+    Calls that share an ID may inspect an in-flight snapshot but cannot submit
+    twice. Different new IDs fail closed while any outcome remains uncertain.
+    Per-order I/O exclusion prevents an older poll from overwriting a cancel.
+    Do not share this object across threads or event loops.
+    """
+
     def __init__(self, exchange: ExchangeInterface):
         self.exchange = exchange
-        self._orders: Dict[str, Order] = {}  # client_order_id -> Order
+        self._orders: Dict[str, Order] = {}
         self._pending_orders: Set[str] = set()
+        self._inflight: Set[str] = set()
         self._lock = asyncio.Lock()
         self._polling_task: Optional[asyncio.Task] = None
-        
+
     async def start(self) -> None:
-        """주문 관리 시작"""
-        self._polling_task = asyncio.create_task(self._poll_orders_loop())
-        logger.info("OrderManager started")
-        
+        if self._polling_task is None or self._polling_task.done():
+            self._polling_task = asyncio.create_task(self._poll_orders_loop())
+
     async def stop(self) -> None:
-        """주문 관리 중지"""
-        if self._polling_task:
-            self._polling_task.cancel()
+        task = self._polling_task
+        if task is not None:
+            task.cancel()
             try:
-                await self._polling_task
+                await task
             except asyncio.CancelledError:
                 pass
-        logger.info("OrderManager stopped")
-        
-    async def place_order(
-        self,
-        symbol: str,
-        side: OrderSide,
-        order_type: OrderType,
-        amount: Decimal,
-        price: Optional[Decimal] = None,
-        strategy_id: Optional[str] = None,
-        client_order_id: Optional[str] = None
-    ) -> Order:
+            finally:
+                if self._polling_task is task:
+                    self._polling_task = None
+
+    def _unknown(self, order):
+        # No await between state changes: task cancellation cannot strand a half
+        # updated record. Keep the last validated venue ID and cumulative fills.
+        order.status = OrderStatus.UNKNOWN
+        order.updated_at = _now()
+        self._pending_orders.add(order.client_order_id)
+
+    @staticmethod
+    def _map_exchange_status(status: str) -> OrderStatus:
+        values = {'open': OrderStatus.OPEN, 'closed': OrderStatus.FILLED,
+                  'filled': OrderStatus.FILLED, 'canceled': OrderStatus.CANCELED,
+                  'cancelled': OrderStatus.CANCELED, 'expired': OrderStatus.EXPIRED,
+                  'rejected': OrderStatus.REJECTED, 'pending': OrderStatus.PENDING,
+                  'partially_filled': OrderStatus.PARTIALLY_FILLED,
+                  'cancel_pending': OrderStatus.CANCEL_PENDING}
+        if not isinstance(status, str) or status.lower() not in values:
+            raise ValueError('unrecognized_order_status')
+        return values[status.lower()]
+
+    def _apply_response(self, order, response, *, cancel_ack=False):
+        """Validate the complete update before mutating anything.
+
+        Required adapter fields: id, status, filled. Optional identity/amount/
+        remaining fields must agree when supplied. Adapters must normalize their
+        venue replies; a generic HTTP success is not a conclusive order outcome.
         """
-        주문 생성
-        
-        Args:
-            symbol: 거래 심볼 (BTC/USDT)
-            side: buy/sell
-            order_type: market/limit/stop_limit
-            amount: 수량
-            price: 지정가 (market은 None)
-            strategy_id: 전략 식별자
-            client_order_id: 외부에서 지정하는 ID (미지정시 자동 생성)
-        """
+        if not isinstance(response, dict):
+            raise ValueError('invalid_order_response')
+        venue_id = _identifier(response.get('id'), 'venue_order_id')
+        if order.exchange_order_id is not None and venue_id != order.exchange_order_id:
+            raise ValueError('venue_order_id_conflict')
+        if any(other.client_order_id != order.client_order_id and other.exchange_order_id == venue_id
+               for other in self._orders.values()):
+            raise ValueError('duplicate_venue_order_id')
+        for name, expected in (('clientOrderId', order.client_order_id), ('symbol', order.symbol),
+                               ('side', order.side.value), ('type', order.order_type.value)):
+            if name in response and response[name] != expected:
+                raise ValueError('response_order_identity_conflict')
+        filled = _quantity(response.get('filled'))
+        if not order.filled <= filled <= order.amount:
+            raise ValueError('invalid_cumulative_fill')
+        remaining = _remaining(order.amount, filled)
+        if 'amount' in response and _quantity(response['amount'], positive=True) != order.amount:
+            raise ValueError('response_order_amount_conflict')
+        if 'remaining' in response and _quantity(response['remaining']) != remaining:
+            raise ValueError('response_remaining_conflict')
+        target = self._map_exchange_status(response.get('status'))
+        if target == OrderStatus.FILLED and remaining != 0:
+            raise ValueError('incomplete_closed_order')
+        if target in (OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED,
+                      OrderStatus.PENDING, OrderStatus.CANCEL_PENDING) and remaining == 0:
+            raise ValueError('complete_nonterminal_order')
+        if target == OrderStatus.REJECTED and (filled != 0 or order.exchange_order_id is not None):
+            # A rejected cancellation request must not reject the accepted order.
+            # Generic post-ack rejection needs venue-specific reconciliation.
+            raise ValueError('unproven_post_ack_rejection')
+        if target in (OrderStatus.CANCELED, OrderStatus.EXPIRED) and remaining == 0:
+            raise ValueError('full_fill_requires_filled_status')
+        if target == OrderStatus.PARTIALLY_FILLED and filled == 0:
+            raise ValueError('empty_partial_fill')
+        if order.status in TERMINAL and (target != order.status or filled != order.filled):
+            raise ValueError('terminal_order_changed')
+        if target == OrderStatus.OPEN and filled > 0:
+            target = OrderStatus.PARTIALLY_FILLED
+        if (cancel_ack or order.cancel_requested) and target not in TERMINAL:
+            target = OrderStatus.CANCEL_PENDING
+        order.exchange_order_id = venue_id
+        order.filled, order.remaining, order.status = filled, remaining, target
+        order.updated_at = _now()
+        if target in TERMINAL:
+            order.cancel_requested = False
+            self._pending_orders.discard(order.client_order_id)
+        else:
+            self._pending_orders.add(order.client_order_id)
+
+    async def place_order(self, symbol: str, side: OrderSide, order_type: OrderType,
+                          amount: Decimal, price: Optional[Decimal] = None,
+                          strategy_id: Optional[str] = None,
+                          client_order_id: Optional[str] = None) -> Order:
         import uuid
-        
-        # 멱등성 키 생성
-        if client_order_id is None:
-            client_order_id = f"order-{uuid.uuid4().hex[:16]}"
-        
+        key = _identifier(client_order_id if client_order_id is not None
+                          else 'order-' + uuid.uuid4().hex, 'client_order_id')
+        intent = _request(symbol, side, order_type, amount, price, strategy_id)
         async with self._lock:
-            # 중복 주문 체크
-            if client_order_id in self._orders:
-                existing = self._orders[client_order_id]
-                logger.warning(f"Duplicate order attempt: {client_order_id}")
-                return existing
-            
-            # 주문 객체 생성
-            order = Order(
-                client_order_id=client_order_id,
-                symbol=symbol,
-                side=side,
-                order_type=order_type,
-                amount=amount,
-                price=price,
-                remaining=amount,
-                strategy_id=strategy_id
-            )
-            
-            self._orders[client_order_id] = order
-            self._pending_orders.add(client_order_id)
-        
-        # 거래소에 주문 전송
+            if key in self._orders:
+                existing = self._orders[key]
+                if _intent(existing) != intent:
+                    raise ValueError('client_order_id_reused_with_different_intent')
+                return deepcopy(existing)
+            if any(o.status in UNCERTAIN for o in self._orders.values()):
+                raise ReconciliationRequired('unresolved_order_outcome')
+            order = Order(key, *intent[:4], price=intent[4], strategy_id=intent[5],
+                          remaining=intent[3], status=OrderStatus.SUBMITTING)
+            self._orders[key] = order
+            self._pending_orders.add(key)
+            self._inflight.add(key)
         try:
             response = await self.exchange.create_order(
-                symbol=symbol,
-                order_type=order_type.value,
-                side=side.value,
-                amount=amount,
-                price=price,
-                params={'clientOrderId': client_order_id}
-            )
-            
-            # 응답 업데이트
-            order.exchange_order_id = response.get('id')
-            order.status = self._map_exchange_status(response.get('status') or 'open')
-            order.filled = Decimal(str(response.get('filled') or 0))
-            order.remaining = order.amount - order.filled
-            order.updated_at = datetime.utcnow()
-            
-            logger.info(f"Order placed: {client_order_id} -> {order.exchange_order_id}")
-            
-        except Exception as e:
-            order.status = OrderStatus.REJECTED
-            order.updated_at = datetime.utcnow()
-            logger.error(f"Order failed: {client_order_id} - {e}")
+                symbol=order.symbol, order_type=order.order_type.value,
+                side=order.side.value, amount=order.amount, price=order.price,
+                params={'clientOrderId': key})
+            self._apply_response(order, response)
+        except asyncio.CancelledError:
+            self._unknown(order)
+            raise  # Preserve structured cancellation; do not silently continue.
+        except Exception:
+            self._unknown(order)
+            logger.warning('order_submission_outcome_unknown')
+            raise OrderOutcomeUnknown('submission_outcome_unknown') from None
+        except BaseException:
+            self._unknown(order)
             raise
-            
-        return order
-    
+        finally:
+            self._inflight.discard(key)
+        return deepcopy(order)
+
     async def cancel_order(self, client_order_id: str) -> Order:
-        """주문 취소"""
+        key = _identifier(client_order_id, 'client_order_id')
         async with self._lock:
-            if client_order_id not in self._orders:
-                raise ValueError(f"Order not found: {client_order_id}")
-            
-            order = self._orders[client_order_id]
-            
-            if order.status in [OrderStatus.FILLED, OrderStatus.CANCELED, OrderStatus.REJECTED]:
-                logger.warning(f"Cannot cancel order in status {order.status}: {client_order_id}")
-                return order
-        
-        # 거래소에 취소 요청
-        if order.exchange_order_id:
-            try:
-                await self.exchange.cancel_order(order.exchange_order_id, order.symbol)
-                order.status = OrderStatus.CANCELED
-                order.updated_at = datetime.utcnow()
-                logger.info(f"Order canceled: {client_order_id}")
-            except Exception as e:
-                logger.error(f"Cancel failed: {client_order_id} - {e}")
-                raise
-                
-        return order
-    
+            if key not in self._orders:
+                raise ValueError('order_not_found')
+            order = self._orders[key]
+            if order.status in TERMINAL or key in self._inflight or order.status == OrderStatus.CANCEL_PENDING:
+                return deepcopy(order)
+            if order.status not in (OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED) or order.exchange_order_id is None:
+                raise ReconciliationRequired('order_requires_readback_before_cancel')
+            order.status = OrderStatus.CANCEL_PENDING
+            order.cancel_requested = True
+            order.updated_at = _now()
+            self._inflight.add(key)
+        try:
+            response = await self.exchange.cancel_order(order.exchange_order_id, order.symbol)
+            self._apply_response(order, response, cancel_ack=True)
+        except asyncio.CancelledError:
+            self._unknown(order)
+            raise
+        except Exception:
+            self._unknown(order)
+            logger.warning('order_cancellation_outcome_unknown')
+            raise OrderOutcomeUnknown('cancellation_outcome_unknown') from None
+        except BaseException:
+            self._unknown(order)
+            raise
+        finally:
+            self._inflight.discard(key)
+        return deepcopy(order)
+
     async def get_order(self, client_order_id: str) -> Optional[Order]:
-        """주문 조회"""
         async with self._lock:
-            return self._orders.get(client_order_id)
-    
+            return deepcopy(self._orders.get(client_order_id))
+
     async def get_open_orders(self, symbol: Optional[str] = None) -> List[Order]:
-        """미체결 주문 목록"""
+        """Return all nonterminal intents, INCLUDING pending/unknown outcomes."""
         async with self._lock:
-            orders = [
-                o for o in self._orders.values()
-                if o.status in [OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]
-            ]
-            if symbol:
-                orders = [o for o in orders if o.symbol == symbol]
-            return orders
-    
+            return deepcopy([o for o in self._orders.values() if o.status not in TERMINAL
+                             and (symbol is None or o.symbol == symbol)])
+
     async def get_orders_by_strategy(self, strategy_id: str) -> List[Order]:
-        """전략별 주문 조회"""
         async with self._lock:
-            return [
-                o for o in self._orders.values()
-                if o.strategy_id == strategy_id
-            ]
-    
+            return deepcopy([o for o in self._orders.values() if o.strategy_id == strategy_id])
+
     async def _poll_orders_loop(self) -> None:
-        """주문 상태 폴링 루프"""
         while True:
-            try:
-                await self._sync_orders()
-                await asyncio.sleep(5)  # 5초마다 동기화
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Order sync error: {e}")
-                await asyncio.sleep(10)
-    
+            await self._sync_orders()
+            await asyncio.sleep(5)
+
     async def _sync_orders(self) -> None:
-        """거래소와 주문 상태 동기화"""
-        async with self._lock:
-            open_orders = [
-                o for o in self._orders.values()
-                if o.status in [OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]
-                and o.exchange_order_id
-            ]
-        
-        for order in open_orders:
+        # Acquire ownership per order. No writes or cancel calls occur here.
+        for key in list(self._orders):
+            async with self._lock:
+                order = self._orders[key]
+                if key in self._inflight or order.status in TERMINAL or order.exchange_order_id is None:
+                    continue
+                self._inflight.add(key)
             try:
-                exchange_order = await self.exchange.fetch_order(
-                    order.exchange_order_id,
-                    order.symbol
-                )
-                
-                # 상태 업데이트
-                new_status = self._map_exchange_status(exchange_order.get('status'))
-                if new_status != order.status:
-                    order.status = new_status
-                    order.updated_at = datetime.utcnow()
-                    logger.info(f"Order status updated: {order.client_order_id} -> {new_status.value}")
-                
-                # 체결량 업데이트
-                filled = Decimal(str(exchange_order.get('filled', 0)))
-                if filled != order.filled:
-                    order.filled = filled
-                    order.remaining = order.amount - filled
-                    
-            except Exception as e:
-                logger.error(f"Failed to sync order {order.client_order_id}: {e}")
-    
-    def _map_exchange_status(self, status: str) -> OrderStatus:
-        """거래소 상태를 내부 상태로 매핑"""
-        status_map = {
-            'open': OrderStatus.OPEN,
-            'closed': OrderStatus.FILLED,
-            'canceled': OrderStatus.CANCELED,
-            'cancelled': OrderStatus.CANCELED,
-            'expired': OrderStatus.EXPIRED,
-            'rejected': OrderStatus.REJECTED,
-            'pending': OrderStatus.PENDING,
-        }
-        return status_map.get(status.lower(), OrderStatus.OPEN)
-    
+                response = await self.exchange.fetch_order(order.exchange_order_id, order.symbol)
+                self._apply_response(order, response)
+            except asyncio.CancelledError:
+                self._unknown(order)
+                raise
+            except Exception:
+                self._unknown(order)
+                logger.warning('order_readback_unavailable')
+            except BaseException:
+                self._unknown(order)
+                raise
+            finally:
+                self._inflight.discard(key)
+
     def get_all_orders(self) -> Dict[str, Order]:
-        """전체 주문 조회 (복구용)"""
-        return self._orders.copy()
-    
+        """Detached data for a caller-owned durable store; no persistence here."""
+        return deepcopy(self._orders)
+
     def load_orders(self, orders: Dict[str, Order]) -> None:
-        """주문 복원 (재시작 시)"""
-        self._orders = orders
-        logger.info(f"Loaded {len(orders)} orders")
+        """Restore only into an unused manager, atomically validating all records.
+
+        Active records become unknown until adapter read-back. Missing venue IDs
+        cannot be reconciled generically. Never clear records to unlock trading.
+        """
+        if self._orders or self._inflight or self._polling_task is not None or not isinstance(orders, dict):
+            raise ValueError('restore_requires_unused_manager')
+        clean, venue_ids = {}, set()
+        for key, original in orders.items():
+            _identifier(key, 'client_order_id')
+            if not isinstance(original, Order) or original.client_order_id != key:
+                raise ValueError('invalid_restored_order')
+            item = deepcopy(original)
+            intent = _request(*_intent(item))
+            item.amount, item.price = intent[3:5]
+            item.filled, item.remaining = _quantity(item.filled), _quantity(item.remaining)
+            if (type(item.cancel_requested) is not bool
+                    or not isinstance(item.status, OrderStatus) or item.filled > item.amount
+                    or item.remaining != _remaining(item.amount, item.filled)
+                    or (item.status == OrderStatus.FILLED and item.remaining != 0)
+                    or (item.status == OrderStatus.REJECTED and item.filled != 0)
+                    or (item.status in (OrderStatus.CANCELED, OrderStatus.EXPIRED) and item.remaining == 0)
+                    or (item.status not in TERMINAL and item.remaining == 0)
+                    or not isinstance(item.created_at, datetime)
+                    or not isinstance(item.updated_at, datetime)):
+                raise ValueError('invalid_restored_order')
+            if item.exchange_order_id is not None:
+                _identifier(item.exchange_order_id, 'venue_order_id')
+                if item.exchange_order_id in venue_ids:
+                    raise ValueError('duplicate_restored_venue_id')
+                venue_ids.add(item.exchange_order_id)
+            if item.status == OrderStatus.CANCEL_PENDING:
+                item.cancel_requested = True
+            if item.status not in TERMINAL:
+                item.status = OrderStatus.UNKNOWN
+            elif item.cancel_requested:
+                raise ValueError('terminal_order_has_pending_cancel')
+            clean[key] = item
+        self._orders = clean
+        self._pending_orders = {key for key, o in clean.items() if o.status not in TERMINAL}
