@@ -7,6 +7,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from decimal import Decimal, localcontext
 import os
+import re
 from pathlib import Path
 import sqlite3
 from threading import Lock
@@ -24,6 +25,58 @@ DETAIL_LIMIT = 100
 
 class PaperSessionUnavailable(ValueError):
     """No trustworthy current read; callers must not substitute zero balances."""
+
+
+class PaperSessionChanged(PaperSessionUnavailable):
+    """The requested revision is no longer current; restart from page one."""
+
+
+class PaperOrderPageInvalid(ValueError):
+    """Invalid bounded page request, never a signal to substitute empty data."""
+
+
+ORDER_FILTERS = frozenset(('all', 'unresolved', 'submitting', 'unknown', 'filled'))
+
+
+def _page_options(offset, limit, status, revision, digest):
+    if (type(offset) is not int or not 0 <= offset <= 10000
+            or type(limit) is not int or not 1 <= limit <= DETAIL_LIMIT
+            or not isinstance(status, str) or status not in ORDER_FILTERS
+            or (revision is None) != (digest is None)
+            or (offset > 0 and revision is None)):
+        raise PaperOrderPageInvalid('invalid_order_page')
+    if revision is not None:
+        if (not isinstance(revision, str) or not re.fullmatch(r'0|[1-9][0-9]{0,18}', revision)
+                or int(revision) >= 2**62 or not isinstance(digest, str)
+                or not re.fullmatch(r'[0-9a-f]{64}', digest)):
+            raise PaperOrderPageInvalid('invalid_order_page')
+
+
+def _ordered_orders(orders):
+    ordered = sorted(orders.values(), key=lambda o: (o.updated_at, o.client_order_id), reverse=True)
+    ordered.sort(key=lambda o: o.status in TERMINAL)
+    return ordered
+
+
+def _order_items(ordered, state):
+    return [dict(**o.to_dict(), account_fill_present=o.client_order_id in state['orders'])
+            for o in ordered]
+
+
+def _order_page(data, orders, book, version, revision, digest, *, offset, limit, status):
+    selected = [o for o in _ordered_orders(orders) if status == 'all'
+                or (status == 'unresolved' and o.status not in TERMINAL)
+                or o.status.value == status]
+    if offset > 0 and offset >= len(selected):
+        raise PaperOrderPageInvalid('invalid_order_page')
+    return dict(schema_version=1, source='durable_paper_order_page', mode='paper',
+        read_only=True, live_enabled=False, account_id=data['account_id'],
+        session_version=version, revision=str(revision), digest=digest,
+        observed_at=datetime.now(timezone.utc).isoformat(),
+        orders=dict(total=len(orders), matched=len(selected), status=status,
+            offset=offset, limit=limit, has_previous=offset > 0,
+            has_next=offset + limit < len(selected),
+            items=_order_items(selected[offset:offset + limit], data['book'])))
 
 
 def _identity_and_header(path):
@@ -99,10 +152,7 @@ def _project(data, orders, book, version, revision, digest):
         value = None if equity is None else equity - cash
     unresolved = [o for o in orders.values() if o.status not in TERMINAL]
     # Keep every unresolved count, even when the bounded detail list is truncated.
-    ordered = sorted(orders.values(), key=lambda o: (o.updated_at, o.client_order_id), reverse=True)
-    ordered.sort(key=lambda o: o.status in TERMINAL)
-    items = [dict(**o.to_dict(), account_fill_present=o.client_order_id in state['orders'])
-             for o in ordered[:DETAIL_LIMIT]]
+    items = _order_items(_ordered_orders(orders)[:DETAIL_LIMIT], state)
     policy = data.get('policy')
     return dict(schema_version=1, source='durable_paper_session', mode='paper',
         read_only=True, live_enabled=False, account_id=data['account_id'],
@@ -143,6 +193,22 @@ class PaperSessionObserver:
         self._previous = None
 
     def read(self):
+        return self._observe(_project)
+
+    def read_orders(self, *, offset=0, limit=50, status='all',
+                    expected_revision=None, expected_digest=None):
+        """Bounded pages of one current revision; never silently mix snapshots.
+
+        A continuation requires both tokens from the first page. The observer
+        retains no historical snapshot: any account commit requires a restart.
+        Validation happens before source I/O; no order is normalized or changed.
+        """
+        _page_options(offset, limit, status, expected_revision, expected_digest)
+        def project(*args):
+            return _order_page(*args, offset=offset, limit=limit, status=status)
+        return self._observe(project, expected_revision, expected_digest)
+
+    def _observe(self, project, expected_revision=None, expected_digest=None):
         if not self._gate.acquire(blocking=False):
             raise PaperSessionUnavailable('paper_session_unavailable')
         try:
@@ -165,12 +231,17 @@ class PaperSessionObserver:
                 if (revision < old_revision or generation < old_generation
                         or (revision == old_revision and digest != old_digest)):
                     raise ValueError('session_history_regressed')
-            report = _project(data, orders, book, version, revision, digest)
+            if (expected_revision is not None
+                    and (str(revision) != expected_revision or digest != expected_digest)):
+                raise PaperSessionChanged('paper_session_changed')
+            report = project(data, orders, book, version, revision, digest)
             if _identity(self._path) != identity:
                 raise ValueError('session_file_changed')
             self._binding = binding
             self._previous = revision, digest, generation
             return report
+        except (PaperSessionChanged, PaperOrderPageInvalid):
+            raise
         except Exception:
             raise PaperSessionUnavailable('paper_session_unavailable') from None
         finally:

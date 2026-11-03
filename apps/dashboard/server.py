@@ -6,6 +6,7 @@ No credential handling, broker connection, order submission or fill simulation.
 import argparse
 import importlib.util
 import json
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -27,6 +28,20 @@ def _report_reader(filename):
     return module
 
 
+def _order_page_query(query):
+    if set(query) - {'offset', 'limit', 'status', 'revision', 'digest'}:
+        raise ValueError('unsupported page parameter')
+    numbers = {}
+    for key, default in (('offset', '0'), ('limit', '50')):
+        value = query.get(key, [default])[0]
+        if not re.fullmatch(r'0|[1-9][0-9]{0,4}', value):
+            raise ValueError('invalid page number')
+        numbers[key] = int(value)
+    return dict(**numbers, status=query.get('status', ['all'])[0],
+                expected_revision=query.get('revision', [None])[0],
+                expected_digest=query.get('digest', [None])[0])
+
+
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/index.html": ("index.html", "text/html; charset=utf-8"),
           "/styles.css": ("styles.css", "text/css; charset=utf-8"),
@@ -36,6 +51,9 @@ ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/research.html": ("research.html", "text/html; charset=utf-8"),
           "/research.mjs": ("research.mjs", "text/javascript; charset=utf-8"),
           "/research.css": ("research.css", "text/css; charset=utf-8"),
+          "/paper-orders.html": ("paper-orders.html", "text/html; charset=utf-8"),
+          "/paper-orders.css": ("paper-orders.css", "text/css; charset=utf-8"),
+          "/paper-orders.mjs": ("paper-orders.mjs", "text/javascript; charset=utf-8"),
           "/paper-account.html": ("paper-account.html", "text/html; charset=utf-8"),
           "/paper-account.css": ("paper-account.css", "text/css; charset=utf-8"),
           "/paper-account.mjs": ("paper-account.mjs", "text/javascript; charset=utf-8")}
@@ -108,6 +126,21 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     return self.respond(503, {"error": "asset_unavailable"})
                 return self._send(200, body, content_type)
+            if route == "/api/paper-session/orders":
+                options = _order_page_query(query)
+                if self.paper_session_observer is None:
+                    return self.respond(503, {"error": "paper_session_unavailable", "mode": "paper",
+                                              "live_enabled": False, "read_only": True})
+                from trading_core.paper_session_observer import PaperSessionChanged, PaperSessionUnavailable
+                try:
+                    report = self.paper_session_observer.read_orders(**options)
+                except PaperSessionChanged:
+                    return self.respond(409, {"error": "paper_session_changed", "mode": "paper",
+                                              "live_enabled": False, "read_only": True})
+                except PaperSessionUnavailable:
+                    return self.respond(503, {"error": "paper_session_unavailable", "mode": "paper",
+                                              "live_enabled": False, "read_only": True})
+                return self.respond(200, report)
             if route == "/api/paper-session":
                 if query:
                     raise ValueError("session parameters are not supported")

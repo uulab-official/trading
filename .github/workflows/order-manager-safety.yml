@@ -6,6 +6,7 @@ on:
       - 'packages/core/**'
       - 'tests/test_order_*.py'
       - 'tests/paper_account_client.test.mjs'
+      - 'tests/paper_orders_client.test.mjs'
       - 'apps/dashboard/**'
       - 'tools/paper_session_status.py'
       - '.github/workflows/order-manager-safety.yml'
@@ -15,6 +16,7 @@ on:
       - 'packages/core/**'
       - 'tests/test_order_*.py'
       - 'tests/paper_account_client.test.mjs'
+      - 'tests/paper_orders_client.test.mjs'
       - 'apps/dashboard/**'
       - 'tools/paper_session_status.py'
       - '.github/workflows/order-manager-safety.yml'
@@ -50,4 +52,4 @@ jobs:
         with:
           node-version: '22'
       - name: Validate read-only paper account client
-        run: node --test tests/paper_account_client.test.mjs
+        run: node --test tests/paper_account_client.test.mjs tests/paper_orders_client.test.mjs
