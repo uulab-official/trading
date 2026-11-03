@@ -1,6 +1,7 @@
 """Local paper admission: no network, keys or external account access."""
 import asyncio
 from copy import deepcopy
+from contextlib import closing
 from decimal import Decimal as D
 import importlib
 import inspect
@@ -147,14 +148,14 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
 
 
     async def test_synthetic_cli_and_existing_file_protection(self):
-        result=subprocess.run([sys.executable,'-S','-B',str(ROOT/'tools/paper_admission_demo.py'),
+        result=subprocess.run([sys.executable,'-B',str(ROOT/'tools/paper_admission_demo.py'),
             '--database',str(self.path)],capture_output=True,text=True,timeout=15)
         self.assertEqual(result.returncode,0,result.stderr)
         data=json.loads(result.stdout)
         self.assertTrue(data['success']);self.assertFalse(data['live_enabled'])
         self.assertEqual(data['fill_count'],2);self.assertEqual(D(data['final_cash']),D('999.8'))
         original=self.path.read_bytes()
-        repeat=subprocess.run([sys.executable,'-S','-B',str(ROOT/'tools/paper_admission_demo.py'),
+        repeat=subprocess.run([sys.executable,'-B',str(ROOT/'tools/paper_admission_demo.py'),
             '--database',str(self.path)],capture_output=True,text=True,timeout=15)
         self.assertNotEqual(repeat.returncode,0)
         self.assertEqual(self.path.read_bytes(),original)
@@ -162,7 +163,7 @@ class AdmissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_legacy_account_stays_version_one_without_implicit_policy(self):
         session=await self.open(create=True)
         self.assertEqual(session.admission_policy,{'max_quote_age_ms':None,'max_order_notional':None})
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db:
             version,raw=db.execute('SELECT version,payload FROM paper_session').fetchone()
         self.assertEqual(version,1);self.assertNotIn('policy',json.loads(raw))
 
@@ -322,8 +323,8 @@ class GuardedTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_policy_version_mismatch_is_rejected_on_reopen(self):
         session=await self.guarded();await session.close()
-        with sqlite3.connect(self.path) as db:
-            db.execute('UPDATE paper_session SET version=1')
+        with closing(sqlite3.connect(self.path)) as db:
+            db.execute('UPDATE paper_session SET version=1'); db.commit()
         with self.assertRaises(OrderPersistenceError):await self.open()
 
     async def test_failed_quote_write_cannot_create_receipt(self):
