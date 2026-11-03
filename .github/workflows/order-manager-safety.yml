@@ -10,6 +10,7 @@ on:
       - 'tests/paper_order_detail_client.test.mjs'
       - 'apps/dashboard/**'
       - 'tools/paper_session_status.py'
+      - 'tools/paper_evidence.py'
       - '.github/workflows/order-manager-safety.yml'
   push:
     branches: ['feat/smc-market-structure']
@@ -21,6 +22,7 @@ on:
       - 'tests/paper_order_detail_client.test.mjs'
       - 'apps/dashboard/**'
       - 'tools/paper_session_status.py'
+      - 'tools/paper_evidence.py'
       - '.github/workflows/order-manager-safety.yml'
   workflow_dispatch:
 

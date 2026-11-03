@@ -228,6 +228,16 @@ class PaperSessionObserver:
     def read(self):
         return self._observe(_project)
 
+    def read_evidence(self, *, expected_revision=None, expected_digest=None):
+        """Capture all validated entries once, without acquiring writer ownership.
+
+        Optional paired anchors select a displayed revision, never a newer one.
+        The resulting evidence is a historical observation, not a restore input.
+        """
+        _page_options(0, 1, 'all', expected_revision, expected_digest)
+        from trading_core.paper_evidence import _make_evidence
+        return self._observe(_make_evidence, expected_revision, expected_digest)
+
     def read_orders(self, *, offset=0, limit=50, status='all',
                     expected_revision=None, expected_digest=None):
         """Bounded pages of one current revision; never silently mix snapshots.

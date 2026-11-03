@@ -92,3 +92,7 @@ Cargo.lock
 apps/**/target/
 packages/**/target/
 **/*.pdb
+
+# Private local paper evidence (not public fixtures)
+.private/
+*.paper-evidence.json
