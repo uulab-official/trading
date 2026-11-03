@@ -42,7 +42,9 @@ def _order_page_query(query):
                 expected_digest=query.get('digest', [None])[0])
 
 
-ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
+ASSETS = {"/paper-order-contract.mjs": ("paper-order-contract.mjs", "text/javascript; charset=utf-8"),
+          "/paper-order-detail.mjs": ("paper-order-detail.mjs", "text/javascript; charset=utf-8"),
+          "/": ("index.html", "text/html; charset=utf-8"),
           "/index.html": ("index.html", "text/html; charset=utf-8"),
           "/styles.css": ("styles.css", "text/css; charset=utf-8"),
           "/app.mjs": ("app.mjs", "text/javascript; charset=utf-8"),
@@ -126,6 +128,27 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     return self.respond(503, {"error": "asset_unavailable"})
                 return self._send(200, body, content_type)
+            if route == "/api/paper-session/order":
+                if set(query) != {"client_id", "revision", "digest"}:
+                    raise ValueError("detail requires exact id and both preconditions")
+                if self.paper_session_observer is None:
+                    return self.respond(503, {"error": "paper_session_unavailable", "mode": "paper",
+                                              "live_enabled": False, "read_only": True})
+                from trading_core.paper_session_observer import (
+                    PaperSessionChanged, PaperSessionUnavailable, PaperOrderNotFound)
+                try:
+                    report = self.paper_session_observer.read_order(query["client_id"][0],
+                        expected_revision=query["revision"][0], expected_digest=query["digest"][0])
+                except PaperSessionChanged:
+                    return self.respond(409, {"error": "paper_session_changed", "mode": "paper",
+                                              "live_enabled": False, "read_only": True})
+                except PaperOrderNotFound:
+                    return self.respond(404, {"error": "paper_order_not_found", "mode": "paper",
+                                              "live_enabled": False, "read_only": True})
+                except PaperSessionUnavailable:
+                    return self.respond(503, {"error": "paper_session_unavailable", "mode": "paper",
+                                              "live_enabled": False, "read_only": True})
+                return self.respond(200, report)
             if route == "/api/paper-session/orders":
                 options = _order_page_query(query)
                 if self.paper_session_observer is None:

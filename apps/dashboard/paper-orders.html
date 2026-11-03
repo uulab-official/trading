@@ -11,12 +11,21 @@
 <section class="heading"><div><p class="eyebrow">PAPER ORDER EXPLORER</p><h1>주문 기록을, 끝까지.</h1><p class="subtitle">저장된 모의계좌의 전체 주문을 같은 리비전 기준으로 확인합니다.</p></div><a class="back" href="/paper-account.html">계좌 요약으로 ↗</a></section>
 <div id="notice" class="notice" role="alert" hidden></div>
 <section class="summary" aria-label="조회 범위"><article><span>계좌 전체 주문</span><strong id="total">—</strong></article><article><span>필터 일치 주문</span><strong id="matched">—</strong></article><article class="boundary"><strong>조회만 가능 · 주문 실행 없음</strong><span>저장 상태는 프로세스 생존이나 최신 거래소 응답을 의미하지 않습니다.</span></article></section>
+<section id="order-detail" class="panel detail-panel" aria-labelledby="detail-title" tabindex="-1" hidden>
+<div class="detail-heading"><div><p class="eyebrow">ORDER EVIDENCE</p><h2 id="detail-title">주문 상세 · 저장 기록 대조</h2></div><button id="detail-close" type="button">닫기</button></div>
+<p id="detail-status" role="status" aria-live="polite"></p><p id="detail-message" class="detail-message"></p>
+<div id="detail-values" class="detail-grid" hidden>
+<article><h3>주문 응답 기록</h3><dl id="detail-order-fields"></dl></article>
+<article><h3>계좌에 저장된 모의 체결</h3><dl id="detail-fill-fields"></dl></article>
+</div><p id="detail-provenance" class="help"></p>
+<p class="help">주문 기록 시각은 로컬 저장 시각, 체결 시각은 입력 시세의 모의 시각입니다. 서로 다른 시계를 하나의 처리 이력으로 해석하지 않습니다. 실제 거래소 확인·복구·재주문은 수행하지 않습니다.</p>
+</section>
 <section class="panel">
 <div class="toolbar"><label for="filter">주문 상태 <select id="filter"><option value="all">전체</option><option value="unresolved">미해결 전체</option><option value="unknown">결과 미확인</option><option value="submitting">전송 의도 저장</option><option value="filled">체결 확인</option></select></label><button id="refresh" type="button">최신 기록으로 처음부터 ↻</button><span id="request-status" role="status" aria-live="polite">조회 대기</span></div>
 <p class="help">미해결 주문 우선 · 동일 시점 내 최근 갱신순 · 한 페이지 50건. 조회 중 저장 내용이 바뀌면 이동을 멈추고 새 조회를 요청합니다.</p>
 <div class="pagination"><span><b id="filter-label">전체</b> · <span id="page-range">조회 대기</span></span><div><button id="previous" type="button" disabled>← 이전</button><button id="next" type="button" disabled>다음 →</button></div></div>
-<div class="table-wrap"><table><thead><tr><th>고객 주문 ID</th><th>종목 · 방향</th><th>주문수량</th><th>확인 체결 / 잔량</th><th>저장 상태</th><th>계좌 체결</th></tr></thead><tbody id="orders"></tbody></table><p id="empty" hidden>해당 상태의 저장된 주문이 없습니다.</p></div>
+<div class="table-wrap"><table><thead><tr><th>고객 주문 ID</th><th>종목 · 방향</th><th>주문수량</th><th>확인 체결 / 잔량</th><th>저장 상태</th><th>계좌 체결</th><th>상세</th></tr></thead><tbody id="orders"></tbody></table><p id="empty" hidden>해당 상태의 저장된 주문이 없습니다.</p></div>
 </section>
-<section class="bottom"><article class="panel"><h2>계좌 체결과 응답 확인은 다릅니다.</h2><p>계좌에 모의 체결이 기록됐어도 주문 응답은 미확인일 수 있습니다. 이 화면은 주문 상태를 바꾸거나 미해결 주문을 재전송하지 않습니다.</p><p>수량은 원본 소수 문자열 그대로 표시합니다. 수수료·체결가격·실현손익은 이 목록의 계산 대상이 아닙니다.</p></article><article class="panel provenance"><h2>이번 페이지의 출처</h2><dl><dt>계좌 ID</dt><dd id="account-id">—</dd><dt>저장 리비전</dt><dd id="revision">—</dd><dt>파일 조회 시각</dt><dd id="observed-at">—</dd></dl><details><summary>내용 식별값</summary><code id="digest">—</code></details></article></section>
+<section class="bottom"><article class="panel"><h2>계좌 체결과 응답 확인은 다릅니다.</h2><p>계좌에 모의 체결이 기록됐어도 주문 응답은 미확인일 수 있습니다. 이 화면은 주문 상태를 바꾸거나 미해결 주문을 재전송하지 않습니다.</p><p>수량은 원본 소수 문자열 그대로 표시합니다. 주문별 상세에서 저장된 체결가격과 수수료를 확인할 수 있습니다. 체결금액은 실현손익이나 현금 변화량이 아닙니다.</p></article><article class="panel provenance"><h2>이번 페이지의 출처</h2><dl><dt>계좌 ID</dt><dd id="account-id">—</dd><dt>저장 리비전</dt><dd id="revision">—</dd><dt>파일 조회 시각</dt><dd id="observed-at">—</dd></dl><details><summary>내용 식별값</summary><code id="digest">—</code></details></article></section>
 <footer>로컬 모의계좌 전용 · DB 수정 없음 · 과거 스냅샷 보관 기능이 아님 · 실거래 비활성</footer>
 </main></body></html>

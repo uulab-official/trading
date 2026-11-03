@@ -13,7 +13,7 @@ import sqlite3
 from threading import Lock
 import time
 
-from trading_core.order_manager import TERMINAL
+from trading_core.order_manager import TERMINAL, _identifier
 from trading_core.order_state_store import MAX_BYTES, _canonical, _digest, _identity
 from trading_core.paper_control import control_status
 from trading_core.paper_exchange import PAPER_CALCULATION_CONTEXT
@@ -29,6 +29,10 @@ class PaperSessionUnavailable(ValueError):
 
 class PaperSessionChanged(PaperSessionUnavailable):
     """The requested revision is no longer current; restart from page one."""
+
+
+class PaperOrderNotFound(LookupError):
+    """No such order in this valid, matching snapshot; never infer a rejection."""
 
 
 class PaperOrderPageInvalid(ValueError):
@@ -77,6 +81,35 @@ def _order_page(data, orders, book, version, revision, digest, *, offset, limit,
             offset=offset, limit=limit, has_previous=offset > 0,
             has_next=offset + limit < len(selected),
             items=_order_items(selected[offset:offset + limit], data['book'])))
+
+
+def _order_detail(data, orders, book, version, revision, digest, *, client_order_id):
+    if client_order_id not in orders:
+        return None  # Finish source-identity checks before reporting absence.
+    order = orders[client_order_id]
+    saved = data['book']['orders'].get(client_order_id)
+    fill = None
+    if saved is not None:
+        # Match the original model's multiplication context, not caller precision.
+        # This is modeled notional, NOT a realized P&L or a balance delta.
+        with localcontext(PAPER_CALCULATION_CONTEXT):
+            notional = Decimal(saved['filled']) * Decimal(saved['average'])
+        fill = dict(venue_order_id=saved['id'], quantity=saved['filled'],
+                    average_price=saved['average'], notional=str(notional),
+                    fee_amount=saved['fee']['cost'], fee_currency=saved['fee']['currency'],
+                    timestamp_ms=saved['timestamp'])
+    confirmed = order.status.value == 'filled'
+    classification = ('confirmed_fill' if confirmed else
+                      'unconfirmed_account_fill' if fill is not None else
+                      'unresolved_without_account_fill')
+    return dict(schema_version=1, source='durable_paper_order_detail', mode='paper',
+        read_only=True, live_enabled=False, account_id=data['account_id'],
+        session_version=version, revision=str(revision), digest=digest,
+        observed_at=datetime.now(timezone.utc).isoformat(),
+        quote_currency=book.quote_currency,
+        order=_order_items([order], data['book'])[0], fill=fill,
+        evidence=dict(classification=classification, cause='not_recorded',
+                      requires_reconciliation=not confirmed, may_resubmit=False))
 
 
 def _identity_and_header(path):
@@ -207,6 +240,27 @@ class PaperSessionObserver:
         def project(*args):
             return _order_page(*args, offset=offset, limit=limit, status=status)
         return self._observe(project, expected_revision, expected_digest)
+
+    def read_order(self, client_order_id, *, expected_revision=None, expected_digest=None):
+        """Inspect one exact ID from a displayed snapshot, never the latest silently.
+
+        Both page anchors are mandatory even for the first detail request. The
+        full saved account is validated before absence or fill evidence is shown.
+        No writer ownership, normalization, external lookup or replay occurs.
+        """
+        try:
+            key = _identifier(client_order_id, 'client_order_id')
+            if expected_revision is None or expected_digest is None:
+                raise ValueError('missing_detail_precondition')
+            _page_options(0, 1, 'all', expected_revision, expected_digest)
+        except ValueError:
+            raise PaperOrderPageInvalid('invalid_order_detail') from None
+        def project(*args):
+            return _order_detail(*args, client_order_id=key)
+        report = self._observe(project, expected_revision, expected_digest)
+        if report is None:
+            raise PaperOrderNotFound('paper_order_not_found')
+        return report
 
     def _observe(self, project, expected_revision=None, expected_digest=None):
         if not self._gate.acquire(blocking=False):
