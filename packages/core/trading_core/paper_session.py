@@ -14,6 +14,8 @@ import sqlite3
 import tempfile
 import uuid
 
+from trading_core.paper_admission import (PaperOrderRejected, QuoteAdmission,
+    policy_values, validate_policy)
 from trading_core.exchange import ExchangeInterface
 from trading_core.order_manager import (
     OrderManager, OrderPersistenceError, OrderStatus, ReconciliationRequired,
@@ -35,10 +37,13 @@ def _bundle(raw):
     if not isinstance(raw, str) or len(raw.encode('utf-8')) > MAX_BYTES:
         raise ValueError('invalid_paper_session_size')
     data = json.loads(raw, object_pairs_hook=_pairs)
-    if (not isinstance(data, dict) or set(data) != {'account_id', 'initial', 'book', 'orders'}
+    if (not isinstance(data, dict) or set(data) not in ({'account_id', 'initial', 'book', 'orders'},
+                                 {'account_id', 'initial', 'book', 'orders', 'policy'})
             or _canonical(data) != raw or not isinstance(data['account_id'], str)
             or not re.fullmatch('[0-9a-f]{32}', data['account_id'])):
         raise ValueError('invalid_paper_session')
+    if 'policy' in data:
+        validate_policy(data['policy'])
     initial = data['initial']
     if not isinstance(initial, dict) or set(initial) != {'initial_balance', 'fee_pct', 'slippage_pct', 'quote_currency'}:
         raise ValueError('invalid_paper_initial_settings')
@@ -95,8 +100,8 @@ def _bundle(raw):
 
 class _SessionStore(SQLiteOrderStateStore):
     """Reuses v20 ownership/identity guards; schema is not an order-only store."""
-    def __init__(self, path, *, initial=None):
-        self._initial = initial
+    def __init__(self, path, *, initial=None, policy=None):
+        self._initial, self._policy = initial, policy
         super().__init__(path, scope='paper-session-v1', create=initial is not None)
 
     def _create(self):
@@ -104,6 +109,8 @@ class _SessionStore(SQLiteOrderStateStore):
             raise ValueError('paper_session_already_exists')
         data = dict(account_id=uuid.uuid4().hex, initial=self._initial,
                     book=PaperExchange(**self._initial).snapshot(), orders={})
+        if self._policy is not None:
+            data['policy'] = validate_policy(self._policy)
         raw = _canonical(data)
         _bundle(raw)
         fd, name = tempfile.mkstemp(prefix='.paper-session-', dir=self.path.parent)
@@ -114,7 +121,8 @@ class _SessionStore(SQLiteOrderStateStore):
                 db.execute('PRAGMA synchronous=EXTRA')
                 db.execute('BEGIN IMMEDIATE')
                 db.execute(SCHEMA)
-                db.execute('INSERT INTO paper_session VALUES(1,1,?,0,?,?)', (self.scope, raw, _digest(raw)))
+                db.execute('INSERT INTO paper_session VALUES(1,?,?,0,?,?)',
+                           (2 if self._policy is not None else 1, self.scope, raw, _digest(raw)))
                 db.execute('COMMIT')
             os.link(temporary, self.path)
             temporary.unlink()
@@ -134,12 +142,14 @@ class _SessionStore(SQLiteOrderStateStore):
         if len(rows) != 1:
             raise ValueError('missing_paper_session')
         singleton, version, scope, revision, raw, digest = rows[0]
-        if (singleton != 1 or version != 1 or scope != self.scope
+        if (singleton != 1 or type(version) is not int or version not in (1, 2) or scope != self.scope
                 or type(revision) is not int or not 0 <= revision < 2**62
                 or not isinstance(raw, str) or len(raw.encode('utf-8')) > MAX_BYTES
                 or digest != _digest(raw)):
             raise ValueError('invalid_paper_session_row')
-        _bundle(raw)
+        data, _, _ = _bundle(raw)
+        if (version == 2) != ('policy' in data):
+            raise ValueError('paper_policy_version_mismatch')
         return revision, raw, digest
 
     def view(self):
@@ -170,6 +180,7 @@ class _SessionStore(SQLiteOrderStateStore):
             _, new_orders, _ = _bundle(raw)
             old, old_orders, _ = _bundle(self._last[1])
             if (data['account_id'] != old['account_id'] or data['initial'] != old['initial']
+                    or data.get('policy') != old.get('policy')
                     or not old_orders.keys() <= new_orders.keys()
                     or data['book']['trades'][:len(old['book']['trades'])] != old['book']['trades']):
                 raise ValueError('paper_history_replaced')
@@ -214,6 +225,7 @@ class _SessionStore(SQLiteOrderStateStore):
 class _PaperAdapter(ExchangeInterface):
     def __init__(self, store):
         self._store, self._connected = store, False
+        self._admission = QuoteAdmission(store.view()[0].get('policy'))
 
     async def connect(self):
         self._store.ensure_open()
@@ -248,8 +260,38 @@ class _PaperAdapter(ExchangeInterface):
         _identifier(symbol, 'symbol')
         price = _quantity(price, positive=True)
         book = self._book()
+        receipt = self._admission.prepare_quote(symbol, price, timestamp,
+                                                book.snapshot()['tickers'].get(symbol))
         book.set_price(symbol, price, timestamp=timestamp)
         self._store.save_book(book)
+        self._admission.accept_quote(symbol, receipt)
+
+    async def preflight(self, order):
+        """Simulate on a detached original book. Never publish its fills or balance."""
+        if not self._connected:
+            raise PaperOrderRejected('paper_session_disconnected')
+        data, _, book = self._store.view()
+        self._admission.require_quote(order.symbol, book.snapshot()['tickers'])
+        await book.connect()
+        try:
+            response = await book.create_order(order.symbol, order.order_type.value,
+                order.side.value, order.amount, order.price,
+                {'clientOrderId': order.client_order_id})
+            self._admission.require_notional(response)
+            # The proposed acknowledgement must also fit the original manager contract.
+            checker = OrderManager(None)
+            checker._apply_response(deepcopy(order), response)
+            # Also validate the prospective stage-2 bundle (chronology, size,
+            # tracked intent and complete balance history) without writing it.
+            data['orders'][order.client_order_id] = order.to_dict()
+            data['book'] = book.snapshot()
+            _bundle(_canonical(data))
+        except ValueError as exc:
+            if isinstance(exc, PaperOrderRejected):
+                raise
+            raise PaperOrderRejected('paper_order_not_executable') from None
+        finally:
+            await book.disconnect()
 
     async def create_order(self, symbol, order_type, side, amount, price=None, params=None):
         if not self._connected:
@@ -263,8 +305,11 @@ class _PaperAdapter(ExchangeInterface):
         order = orders[key]
         if (symbol, order_type, side, amount, price) != (order.symbol, order.order_type.value, order.side.value, order.amount, order.price):
             raise ValueError('paper_intent_conflict')
+        self._admission.require_quote(symbol, book.snapshot()['tickers'])
         await book.connect()
         response = await book.create_order(symbol, order_type, side, amount, price, params)
+        self._admission.require_notional(response)
+        self._admission.require_quote(symbol, book.snapshot()['tickers'])
         # Commit account effect WITH its existing intent, before the acknowledgement.
         self._store.save_book(book)
         return deepcopy(response)
@@ -297,6 +342,11 @@ class _PaperAdapter(ExchangeInterface):
         return await self._read('fetch_my_trades', symbol, since, limit)
 
 
+class _SessionOrderManager(OrderManager):
+    async def _preflight_order(self, order):
+        await self.exchange.preflight(order)
+
+
 class PaperTradingSession:
     """Own one paper account and manager; never pair separately restored files.
 
@@ -305,10 +355,13 @@ class PaperTradingSession:
     Only manager.place_order submits; adapter writes require its durable intent.
     """
     def __init__(self, path, *, create=False, initial_balance=None, fee_pct=None,
-                 slippage_pct=None, quote_currency=None):
+                 slippage_pct=None, quote_currency=None, max_quote_age_ms=None,
+                 max_order_notional=None):
         options = dict(initial_balance=initial_balance, fee_pct=fee_pct,
                        slippage_pct=slippage_pct, quote_currency=quote_currency)
-        if type(create) is not bool or (not create and any(v is not None for v in options.values())):
+        policy = policy_values(max_quote_age_ms, max_order_notional)
+        if type(create) is not bool or (not create and (any(v is not None for v in options.values())
+                or any(v is not None for v in policy.values()))):
             raise ValueError('settings_only_allowed_for_new_paper_session')
         initial = None
         if create:
@@ -318,13 +371,19 @@ class PaperTradingSession:
                 _quantity(initial[name])
             PaperExchange(**initial)  # Validate costs/currency before file creation.
         self._closed = False
-        self._store = _SessionStore(path, initial=initial)
+        self._store = _SessionStore(path, initial=initial,
+            policy=policy if any(v is not None for v in policy.values()) else None)
         try:
             self.exchange = _PaperAdapter(self._store)
-            self.manager = OrderManager(self.exchange, state_store=self._store)
+            self.manager = _SessionOrderManager(self.exchange, state_store=self._store)
         except BaseException:
             self._store.close()
             raise
+
+    @property
+    def admission_policy(self):
+        """Detached persisted settings; all None means legacy/no optional guards."""
+        return deepcopy(self._store.view()[0].get('policy', policy_values()))
 
     @property
     def account_id(self):

@@ -293,6 +293,14 @@ class OrderManager:
             self._pending_orders.add(order.client_order_id)
         self._persist()
 
+    async def _preflight_order(self, order: Order) -> None:
+        """Protected local-only hook before persistence; default admits unchanged.
+
+        Overrides must not submit, mutate account/order state, or perform external
+        I/O. Exceptions here are pre-admission failures, NOT venue rejections.
+        The candidate is detached and the admission lock is held.
+        """
+
     async def place_order(self, symbol: str, side: OrderSide, order_type: OrderType,
                           amount: Decimal, price: Optional[Decimal] = None,
                           strategy_id: Optional[str] = None,
@@ -312,6 +320,12 @@ class OrderManager:
                 raise ReconciliationRequired('unresolved_order_outcome')
             order = Order(key, *intent[:4], price=intent[4], strategy_id=intent[5],
                           remaining=intent[3], status=OrderStatus.SUBMITTING)
+            try:
+                await self._preflight_order(deepcopy(order))
+            except OrderPersistenceError:
+                self._storage_failed = True
+                raise
+            self._ensure_storage()
             self._orders[key] = order
             self._pending_orders.add(key)
             self._persist()  # Commit intent before any adapter side effect.

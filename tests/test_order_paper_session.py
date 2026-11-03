@@ -241,9 +241,11 @@ class PaperSessionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_intent_cannot_bypass_manager_via_adapter(self):
         session=await self.open(create=True)
-        # No local price: submission cannot fill; UNKNOWN is retained.
-        with self.assertRaises(OrderOutcomeUnknown): await self.buy(session)
         session.exchange.set_price('BTC/USDT',D('100'),timestamp=1)
+        # Post-admission transport failure is uncertain; missing local quotes
+        # are now rejected BEFORE creating an intent by the session preflight.
+        with patch.object(session.exchange, 'create_order', side_effect=TimeoutError('lost')):
+            with self.assertRaises(OrderOutcomeUnknown): await self.buy(session)
         with self.assertRaises(ReconciliationRequired):
             await session.exchange.create_order('BTC/USDT','market','buy',D('2'),params={'clientOrderId':'buy'})
         self.assertEqual(session.exchange.snapshot()['trades'],[])
