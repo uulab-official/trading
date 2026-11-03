@@ -16,6 +16,8 @@ import uuid
 
 from trading_core.paper_admission import (PaperOrderRejected, QuoteAdmission,
     policy_values, validate_policy)
+from trading_core.paper_control import (MODES, control_status, initial_control,
+    next_control, require_mode, validate_control)
 from trading_core.exchange import ExchangeInterface
 from trading_core.order_manager import (
     OrderManager, OrderPersistenceError, OrderStatus, ReconciliationRequired,
@@ -37,13 +39,15 @@ def _bundle(raw):
     if not isinstance(raw, str) or len(raw.encode('utf-8')) > MAX_BYTES:
         raise ValueError('invalid_paper_session_size')
     data = json.loads(raw, object_pairs_hook=_pairs)
-    if (not isinstance(data, dict) or set(data) not in ({'account_id', 'initial', 'book', 'orders'},
-                                 {'account_id', 'initial', 'book', 'orders', 'policy'})
+    if (not isinstance(data, dict) or not {'account_id', 'initial', 'book', 'orders'} <= set(data)
+            or not set(data) <= {'account_id', 'initial', 'book', 'orders', 'policy', 'control'}
             or _canonical(data) != raw or not isinstance(data['account_id'], str)
             or not re.fullmatch('[0-9a-f]{32}', data['account_id'])):
         raise ValueError('invalid_paper_session')
     if 'policy' in data:
         validate_policy(data['policy'])
+    if 'control' in data:
+        validate_control(data['control'])
     initial = data['initial']
     if not isinstance(initial, dict) or set(initial) != {'initial_balance', 'fee_pct', 'slippage_pct', 'quote_currency'}:
         raise ValueError('invalid_paper_initial_settings')
@@ -100,8 +104,9 @@ def _bundle(raw):
 
 class _SessionStore(SQLiteOrderStateStore):
     """Reuses v20 ownership/identity guards; schema is not an order-only store."""
-    def __init__(self, path, *, initial=None, policy=None):
+    def __init__(self, path, *, initial=None, policy=None, enable_control=False):
         self._initial, self._policy = initial, policy
+        self._enable_control = enable_control
         super().__init__(path, scope='paper-session-v1', create=initial is not None)
 
     def _create(self):
@@ -111,6 +116,8 @@ class _SessionStore(SQLiteOrderStateStore):
                     book=PaperExchange(**self._initial).snapshot(), orders={})
         if self._policy is not None:
             data['policy'] = validate_policy(self._policy)
+        if self._enable_control:
+            data['control'] = initial_control()
         raw = _canonical(data)
         _bundle(raw)
         fd, name = tempfile.mkstemp(prefix='.paper-session-', dir=self.path.parent)
@@ -122,7 +129,8 @@ class _SessionStore(SQLiteOrderStateStore):
                 db.execute('BEGIN IMMEDIATE')
                 db.execute(SCHEMA)
                 db.execute('INSERT INTO paper_session VALUES(1,?,?,0,?,?)',
-                           (2 if self._policy is not None else 1, self.scope, raw, _digest(raw)))
+                           (3 if self._enable_control else 2 if self._policy is not None else 1,
+                            self.scope, raw, _digest(raw)))
                 db.execute('COMMIT')
             os.link(temporary, self.path)
             temporary.unlink()
@@ -142,13 +150,14 @@ class _SessionStore(SQLiteOrderStateStore):
         if len(rows) != 1:
             raise ValueError('missing_paper_session')
         singleton, version, scope, revision, raw, digest = rows[0]
-        if (singleton != 1 or type(version) is not int or version not in (1, 2) or scope != self.scope
+        if (singleton != 1 or type(version) is not int or version not in (1, 2, 3) or scope != self.scope
                 or type(revision) is not int or not 0 <= revision < 2**62
                 or not isinstance(raw, str) or len(raw.encode('utf-8')) > MAX_BYTES
                 or digest != _digest(raw)):
             raise ValueError('invalid_paper_session_row')
         data, _, _ = _bundle(raw)
-        if (version == 2) != ('policy' in data):
+        expected_version = 3 if 'control' in data else 2 if 'policy' in data else 1
+        if version != expected_version:
             raise ValueError('paper_policy_version_mismatch')
         return revision, raw, digest
 
@@ -171,7 +180,7 @@ class _SessionStore(SQLiteOrderStateStore):
         self._claimed = True
         return orders
 
-    def _write(self, data):
+    def _write(self, data, *, control_update=False):
         self.ensure_open()
         try:
             if not self._claimed:
@@ -179,6 +188,17 @@ class _SessionStore(SQLiteOrderStateStore):
             raw = _canonical(data)
             _, new_orders, _ = _bundle(raw)
             old, old_orders, _ = _bundle(self._last[1])
+            if control_update:
+                previous = old.get('control')
+                proposed = data.get('control')
+                if (previous is None or proposed is None
+                        or proposed == previous
+                        or next_control(previous, proposed['mode'], previous['generation'],
+                                        proposed['reason']) != proposed
+                        or data['book'] != old['book'] or data['orders'] != old['orders']):
+                    raise ValueError('invalid_paper_control_transition')
+            elif data.get('control') != old.get('control'):
+                raise ValueError('paper_control_requires_explicit_transition')
             if (data['account_id'] != old['account_id'] or data['initial'] != old['initial']
                     or data.get('policy') != old.get('policy')
                     or not old_orders.keys() <= new_orders.keys()
@@ -210,6 +230,11 @@ class _SessionStore(SQLiteOrderStateStore):
             if not isinstance(exc, Exception):
                 raise
             raise OrderPersistenceError('paper_session_write_failed') from None
+
+    def save_control(self, control):
+        data, _, _ = self.view()
+        data['control'] = control
+        self._write(data, control_update=True)
 
     def save(self, orders):
         data, _, _ = self.view()
@@ -271,6 +296,7 @@ class _PaperAdapter(ExchangeInterface):
         if not self._connected:
             raise PaperOrderRejected('paper_session_disconnected')
         data, _, book = self._store.view()
+        require_mode(data.get('control'), order.side)
         self._admission.require_quote(order.symbol, book.snapshot()['tickers'])
         await book.connect()
         try:
@@ -303,6 +329,7 @@ class _PaperAdapter(ExchangeInterface):
         if key not in orders or orders[key].status != OrderStatus.SUBMITTING:
             raise ReconciliationRequired('durable_submitting_intent_required')
         order = orders[key]
+        require_mode(self._store.view()[0].get('control'), order.side)
         if (symbol, order_type, side, amount, price) != (order.symbol, order.order_type.value, order.side.value, order.amount, order.price):
             raise ValueError('paper_intent_conflict')
         self._admission.require_quote(symbol, book.snapshot()['tickers'])
@@ -310,6 +337,8 @@ class _PaperAdapter(ExchangeInterface):
         response = await book.create_order(symbol, order_type, side, amount, price, params)
         self._admission.require_notional(response)
         self._admission.require_quote(symbol, book.snapshot()['tickers'])
+        # No await between the final operating-mode check and account commit.
+        require_mode(self._store.view()[0].get('control'), order.side)
         # Commit account effect WITH its existing intent, before the acknowledgement.
         self._store.save_book(book)
         return deepcopy(response)
@@ -356,12 +385,13 @@ class PaperTradingSession:
     """
     def __init__(self, path, *, create=False, initial_balance=None, fee_pct=None,
                  slippage_pct=None, quote_currency=None, max_quote_age_ms=None,
-                 max_order_notional=None):
+                 max_order_notional=None, enable_control=False):
         options = dict(initial_balance=initial_balance, fee_pct=fee_pct,
                        slippage_pct=slippage_pct, quote_currency=quote_currency)
         policy = policy_values(max_quote_age_ms, max_order_notional)
-        if type(create) is not bool or (not create and (any(v is not None for v in options.values())
-                or any(v is not None for v in policy.values()))):
+        if (type(create) is not bool or type(enable_control) is not bool
+                or (not create and (enable_control or any(v is not None for v in options.values())
+                or any(v is not None for v in policy.values())))):
             raise ValueError('settings_only_allowed_for_new_paper_session')
         initial = None
         if create:
@@ -372,13 +402,43 @@ class PaperTradingSession:
             PaperExchange(**initial)  # Validate costs/currency before file creation.
         self._closed = False
         self._store = _SessionStore(path, initial=initial,
-            policy=policy if any(v is not None for v in policy.values()) else None)
+            policy=policy if any(v is not None for v in policy.values()) else None,
+            enable_control=enable_control)
         try:
             self.exchange = _PaperAdapter(self._store)
             self.manager = _SessionOrderManager(self.exchange, state_store=self._store)
         except BaseException:
             self._store.close()
             raise
+
+    @property
+    def control_status(self):
+        """Latest persisted decision only; not readiness, liveness or an audit log."""
+        return control_status(self._store.view()[0].get('control'))
+
+    async def set_operating_mode(self, mode, *, expected_generation, reason):
+        """Explicit compare-and-swap on this owner. Never submits or cancels orders."""
+        async with self.manager._lock:
+            self.manager._ensure_storage()
+            try:
+                current = self._store.view()[0].get('control')
+                proposed = next_control(current, mode, expected_generation, reason)
+                if proposed == current:
+                    return control_status(current)
+                if MODES[mode] < MODES[current['mode']]:
+                    if self.manager._inflight or any(
+                            o.status not in TERMINAL for o in self.manager._orders.values()):
+                        raise ReconciliationRequired('paper_control_requires_reconciliation')
+                self._store.save_control(proposed)
+                # A transition never blesses an old price. New receipts are required
+                # only when the existing quote-age policy is enabled.
+                self.exchange._admission = QuoteAdmission(self.admission_policy
+                    if any(v is not None for v in self.admission_policy.values()) else None)
+                return control_status(proposed)
+            except BaseException as exc:
+                if isinstance(exc, OrderPersistenceError) or self._store._broken:
+                    self.manager._storage_failed = True
+                raise
 
     @property
     def admission_policy(self):
