@@ -111,8 +111,8 @@ def _file_info(info):
             info.st_ctime_ns, info.st_mode, info.st_uid)
 
 
-def verify_evidence(path):
-    """Read one private regular file, without SQLite or any write/repair."""
+def _read_evidence(path):
+    """Return validated captured bytes and summary from the SAME private-file read."""
     fd = None
     try:
         target = Path(path).absolute()
@@ -128,12 +128,17 @@ def verify_evidence(path):
                 raise ValueError('evidence_changed')
         if _file_info(target.lstat()) != before:
             raise ValueError('evidence_replaced')
-        return report
+        return raw, report
     except Exception:
         raise PaperEvidenceInvalid('paper_evidence_invalid') from None
     finally:
         if fd is not None:
             os.close(fd)
+
+
+def verify_evidence(path):
+    """Read one private regular file, without SQLite or any write/repair."""
+    return _read_evidence(path)[1]
 
 
 def _publish(raw, output):
