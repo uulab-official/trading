@@ -21,6 +21,8 @@ def main(argv=None):
     compare = commands.add_parser('compare', help='Compare two saved observations without the DB')
     compare.add_argument('before')
     compare.add_argument('after')
+    sequence = commands.add_parser('sequence', help='Check 2-32 ordered saved observations')
+    sequence.add_argument('files', nargs='*')
     args = parser.parse_args(argv)
     comparison_error = None
     try:
@@ -34,14 +36,21 @@ def main(argv=None):
         else:
             from trading_core.paper_evidence_compare import compare_evidence, PaperEvidenceComparisonError
             comparison_error = PaperEvidenceComparisonError
-            report = compare_evidence(args.before, args.after)
+            if args.command == 'sequence':
+                from trading_core.paper_evidence_sequence import compare_evidence_sequence
+                report = compare_evidence_sequence(args.files)
+            else:
+                report = compare_evidence(args.before, args.after)
     except KeyboardInterrupt:
         print(json.dumps({'error': 'paper_evidence_interrupted_check_output'}), file=sys.stderr)
         return 130
     except Exception as error:
         # Only fixed public codes are emitted; no paths, account data or raw I/O.
         if comparison_error is not None and isinstance(error, comparison_error):
-            print(json.dumps({'error': str(error), 'reason': error.reason}), file=sys.stderr)
+            detail = {'error': str(error), 'reason': error.reason}
+            if args.command == 'sequence' and hasattr(error, 'interval_index'):
+                detail['interval_index'] = error.interval_index
+            print(json.dumps(detail), file=sys.stderr)
             return 5
         allowed = {'paper_evidence_published_check_required': 3,
                    'paper_session_changed': 4,

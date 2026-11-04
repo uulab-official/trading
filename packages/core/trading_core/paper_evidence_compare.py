@@ -173,8 +173,13 @@ def compare_evidence(before_path, after_path):
     No claim that these files still occupy the paths after their completed reads.
     Captured byte hashes identify the actual inputs to the result.
     """
-    before_raw, before_report = _read_evidence(before_path)
-    after_raw, after_report = _read_evidence(after_path)
+    return _compare_captured_evidence(_read_evidence(before_path), _read_evidence(after_path))
+
+
+def _compare_captured_evidence(before_capture, after_capture):
+    """Internal only: consume captures already validated by _read_evidence."""
+    before_raw, before_report = before_capture
+    after_raw, after_report = after_capture
     left, right = json.loads(before_raw), json.loads(after_raw)
     trades = _compatible(left, right)
     a, b = left['payload'], right['payload']
