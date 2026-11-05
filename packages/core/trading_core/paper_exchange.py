@@ -177,6 +177,19 @@ class PaperExchange(ExchangeInterface):
                 return deepcopy(order)
         raise ValueError("Unknown paper order")
 
+    async def fetch_order_by_client_id(self, client_order_id: str, symbol: str) -> Optional[Dict[str, Any]]:
+        """Read this local book, including closed orders; never create or guess IDs."""
+        self._ensure_connected()
+        if (not isinstance(client_order_id, str) or not client_order_id
+                or len(client_order_id) > 128 or client_order_id != client_order_id.strip()
+                or any(ord(c) < 32 or ord(c) == 127 for c in client_order_id)):
+            raise ValueError("Invalid paper client order ID")
+        self._market_assets(symbol)
+        order = self._orders.get(client_order_id)
+        if order is None or order["symbol"] != symbol:
+            return None
+        return deepcopy(order)
+
     async def fetch_open_orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         self._ensure_connected()
         return []
