@@ -12,7 +12,9 @@ on:
       - 'tools/paper_session_status.py'
       - 'apps/server/trading_bot/paper_runner.py'
       - 'apps/server/trading_bot/durable_paper_run.py'
+      - 'apps/server/trading_bot/durable_paper_resume.py'
       - 'tools/paper_operate.py'
+      - 'tools/paper_resume.py'
       - 'tools/paper_evidence.py'
       - '.github/workflows/order-manager-safety.yml'
   push:
@@ -27,7 +29,9 @@ on:
       - 'tools/paper_session_status.py'
       - 'apps/server/trading_bot/paper_runner.py'
       - 'apps/server/trading_bot/durable_paper_run.py'
+      - 'apps/server/trading_bot/durable_paper_resume.py'
       - 'tools/paper_operate.py'
+      - 'tools/paper_resume.py'
       - 'tools/paper_evidence.py'
       - '.github/workflows/order-manager-safety.yml'
   workflow_dispatch:

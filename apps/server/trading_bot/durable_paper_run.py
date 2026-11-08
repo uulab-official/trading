@@ -1,8 +1,10 @@
 """Bounded original-engine replay into a new, durable local paper account.
 
-No existing account, resume, credentials, provider, automatic reconciliation or
-live mode. In-memory/checkpoint replay remains the original PaperRunner path.
+No existing account, credentials, provider, automatic reconciliation or live
+mode. Optional recovery metadata enables the separate explicit resume command.
+In-memory/checkpoint replay remains the original PaperRunner path.
 """
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from decimal import localcontext
 import hashlib
@@ -50,13 +52,18 @@ async def _halt(session):
         raise DurableReplayStopUnconfirmed('durable_replay_stop_unconfirmed') from None
 
 
-async def run_durable_replay(fixture, *, config=None, directory):
+async def run_durable_replay(fixture, *, config=None, directory, resumable=False):
     """Explicit NEW-run operation. Failures preserve artifacts; never auto-resume.
+
+    resumable=True pins a recovery manifest before activation. The default
+    remains a new-run-only operation; recovery is a separate explicit command.
 
     A catchable exit attempts halt. SIGKILL, power loss, repeated cancellation or
     storage failures cannot guarantee that finalizer; saved mode is not liveness.
     Completion is published only after final halt and independent evidence checks.
     """
+    if type(resumable) is not bool:
+        raise ValueError('invalid_resumable_option')
     config = config or PaperRunConfig()
     candles = validate_bars(fixture, config)
     frozen = dict(mode='paper', config=config.identity(), candles=[
@@ -68,6 +75,16 @@ async def run_durable_replay(fixture, *, config=None, directory):
     target = Path(directory).absolute()
     target = target.parent.resolve(strict=True) / target.name
     target.mkdir(mode=0o700)  # Exclusive ownership; no existing/partial run reuse.
+    if resumable:
+        from trading_bot.durable_paper_resume import recovery_lock
+        guard = recovery_lock(target)
+    else:
+        guard = nullcontext()
+    with guard:
+        return await _run_new(target, raw, config, candles, resumable)
+
+
+async def _run_new(target, raw, config, candles, resumable):
     _publish(raw, target / 'input.json')
     database = target / 'account.sqlite'
     quote = config.symbol.split('/')[1]
@@ -78,6 +95,9 @@ async def run_durable_replay(fixture, *, config=None, directory):
                 enable_control=True) as session:
             observer = PaperSessionObserver(database)
             export_evidence(observer, target / 'before.paper-evidence.json')
+            if resumable:
+                from trading_bot.durable_paper_resume import prepare_recovery
+                prepare_recovery(target, session.account_id, raw)
             try:
                 await session.set_operating_mode('active', expected_generation=0, reason='operator')
                 replay = await PaperRunner(config)._run(candles, _session=session)
@@ -100,7 +120,7 @@ async def run_durable_replay(fixture, *, config=None, directory):
                 account_id=session.account_id, input_sha256=hashlib.sha256(raw).hexdigest(),
                 replay=replay, comparison=comparison,
                 boundaries=dict(prices='historical_inputs', process_liveness='not_asserted',
-                    resume_supported=False, risk_controls='original_paper_runner',
+                    resume_supported=resumable, risk_controls='original_paper_runner',
                     quote_freshness='not_applicable_to_historical_replay'))
         # The owner is closed before publishing completion. No live activation.
         _publish((_canonical(result) + '\n').encode('utf-8'), target / 'result.json')

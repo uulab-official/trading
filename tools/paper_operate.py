@@ -44,6 +44,7 @@ def main(argv=None):
     parser.add_argument('fixture', nargs='?', help='Local JSON with symbol, timeframe and six-column candles')
     parser.add_argument('--demo', action='store_true', help='Use explicitly synthetic local candles')
     parser.add_argument('--directory', required=True, help='NEW private run directory; never reused')
+    parser.add_argument('--resumable', action='store_true', help='Opt in to explicit historical recovery')
     parser.add_argument('--strategy', choices=('ma_cross','rsi'), default='ma_cross')
     for name, default in [('initial-balance','10000'),('position-size-pct','20'),
                           ('fee-pct','0.1'),('slippage-pct','0.05'),
@@ -64,7 +65,7 @@ def main(argv=None):
             slippage_pct=Decimal(args.slippage_pct), max_daily_loss_pct=Decimal(args.max_daily_loss_pct),
             max_drawdown_pct=Decimal(args.max_drawdown_pct), fast_period=args.fast_period,
             slow_period=args.slow_period, rsi_period=args.rsi_period)
-        result = asyncio.run(run_durable_replay(data['candles'],config=config,directory=args.directory))
+        result = asyncio.run(run_durable_replay(data['candles'],config=config,directory=args.directory,resumable=args.resumable))
     except (KeyboardInterrupt, asyncio.CancelledError):
         print(json.dumps({'error':'durable_paper_run_interrupted_check_directory'}))
         return 130
