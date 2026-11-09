@@ -15,6 +15,8 @@ on:
       - 'apps/server/trading_bot/durable_paper_resume.py'
       - 'tools/paper_operate.py'
       - 'tools/paper_resume.py'
+      - 'tools/paper_preflight.py'
+      - 'apps/server/trading_bot/durable_paper_preflight.py'
       - 'tools/paper_evidence.py'
       - '.github/workflows/order-manager-safety.yml'
   push:
@@ -32,6 +34,8 @@ on:
       - 'apps/server/trading_bot/durable_paper_resume.py'
       - 'tools/paper_operate.py'
       - 'tools/paper_resume.py'
+      - 'tools/paper_preflight.py'
+      - 'apps/server/trading_bot/durable_paper_preflight.py'
       - 'tools/paper_evidence.py'
       - '.github/workflows/order-manager-safety.yml'
   workflow_dispatch:
