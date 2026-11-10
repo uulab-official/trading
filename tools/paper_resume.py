@@ -16,14 +16,21 @@ def main(argv=None):
     parser.add_argument('--reconcile-saved-fills',action='store_true',
         help='Explicit read-back of already-saved simulated fills, never resubmit unknown intents')
     args=parser.parse_args(argv)
+    interruption_type = None
     try:
+        from trading_bot.paper_process import run_paper_operation, PaperProcessInterrupted
+        interruption_type = PaperProcessInterrupted
         from trading_bot.durable_paper_resume import resume_durable_replay
-        result=asyncio.run(resume_durable_replay(args.directory,
+        result=run_paper_operation(lambda: resume_durable_replay(args.directory,
             reconcile_saved_fills=args.reconcile_saved_fills))
     except (KeyboardInterrupt,asyncio.CancelledError):
         print(json.dumps({'error':'durable_paper_resume_interrupted_check_directory'}))
         return 130
     except Exception as error:
+        if interruption_type is not None and isinstance(error, interruption_type):
+            print(json.dumps({'error':'durable_paper_resume_interrupted_check_directory',
+                'signal':error.signal_name, 'account_state':'inspect_saved_record'}))
+            return error.exit_code
         fixed={
             'durable_replay_stop_unconfirmed':3,
             'durable_resume_reconciliation_required':4,

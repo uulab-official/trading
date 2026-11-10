@@ -53,7 +53,10 @@ def main(argv=None):
     for name, default in [('fast-period',3),('slow-period',5),('rsi-period',14)]:
         parser.add_argument('--'+name, type=int, default=default)
     args = parser.parse_args(argv)
+    interruption_type = None
     try:
+        from trading_bot.paper_process import run_paper_operation, PaperProcessInterrupted
+        interruption_type = PaperProcessInterrupted
         from trading_bot.durable_paper_run import run_durable_replay
         from trading_bot.paper_runner import PaperRunConfig
         if bool(args.fixture) == args.demo:
@@ -65,11 +68,15 @@ def main(argv=None):
             slippage_pct=Decimal(args.slippage_pct), max_daily_loss_pct=Decimal(args.max_daily_loss_pct),
             max_drawdown_pct=Decimal(args.max_drawdown_pct), fast_period=args.fast_period,
             slow_period=args.slow_period, rsi_period=args.rsi_period)
-        result = asyncio.run(run_durable_replay(data['candles'],config=config,directory=args.directory,resumable=args.resumable))
+        result = run_paper_operation(lambda: run_durable_replay(data['candles'],config=config,directory=args.directory,resumable=args.resumable))
     except (KeyboardInterrupt, asyncio.CancelledError):
         print(json.dumps({'error':'durable_paper_run_interrupted_check_directory'}))
         return 130
     except Exception as error:
+        if interruption_type is not None and isinstance(error, interruption_type):
+            print(json.dumps({'error':'durable_paper_run_interrupted_check_directory',
+                'signal':error.signal_name, 'account_state':'inspect_saved_record'}))
+            return error.exit_code
         # Do not leak source paths, identifiers, raw errors or account contents.
         stop_unknown = str(error) == 'durable_replay_stop_unconfirmed'
         print(json.dumps({'error':'durable_replay_stop_unconfirmed' if stop_unknown
