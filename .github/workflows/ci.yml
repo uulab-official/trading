@@ -45,6 +45,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        # Offline CLI installation tests disable build isolation and network access.
+        python -m pip install "setuptools>=61.0" wheel
         pip install -e packages/core
         pip install -e packages/data
         pip install -e packages/strategy

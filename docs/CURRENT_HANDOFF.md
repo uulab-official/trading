@@ -28,6 +28,8 @@ main-merge, deployment, credentials and live-execution boundaries.
   active/malformed values remain blocked with source bytes preserved.
 - CI now includes `apps/server/tests/` alongside package tests, so the legacy
   lifecycle/restart path is a required check instead of an unexercised gap.
+  The test environment explicitly installs the declared `setuptools` and `wheel`
+  build prerequisites for the existing offline CLI installation checks.
 - Independent review found a late output-directory replacement race.
   Publication now binds both the canonical parent path and its device/inode to
   the original validated directory. Regression cases cover a symlink replacement
@@ -107,3 +109,11 @@ are development checkpoints, not remote delivery identifiers.
 Verify remote CI against the actual current PR head rather than assuming a past
 workflow run covers later commits. The branch and PR links above are the durable
 resume locations; this handoff is written before the delivery CI run completes.
+
+The first delivery commit was `efb17d74d5482b55cd3f077ea14a5bc3312588c7`.
+Its Quant Regression succeeded. Required server tests passed on Python 3.10/3.11,
+but Python 3.12 exposed missing global `setuptools` during the existing isolated,
+offline CLI installation test setup. The follow-up explicitly supplies the
+declared build prerequisites before testing. It does not enable network access
+inside those tests or skip any required check. Use the current PR head for the
+final workflow outcome rather than the first delivery's failed CI run.
