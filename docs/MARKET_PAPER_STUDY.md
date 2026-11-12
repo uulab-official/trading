@@ -1,4 +1,4 @@
-# Fixed-plan market paper studies (v38)
+# Fixed-plan market paper studies (v38–v39)
 
 ## Design
 Run 2–8 explicitly named MA/RSI candidates on one captured imported historical
@@ -110,3 +110,51 @@ python tools/paper_overview.py \
 
 Keep source bundles, comparison JSON and HTML private. The plan/receipt format is
 not signed, and success is consistency checking rather than investment validation.
+
+## Study comparison report (v39)
+
+Export the existing read-only check as a self-contained Korean HTML report:
+
+```bash
+python tools/paper_study.py check .private/study-001 \
+  --html .private/study-comparison-001.html
+```
+
+Open that HTML file in a browser on the same computer. It needs no server, network,
+JavaScript, API key or browser extension. The report shows common capital, costs
+and risk assumptions; every candidate in the original plan order; the original
+verified equity, return, fees, fills and bar counts; and each candidate's status.
+Return differences are in **percentage points**, using the first planned candidate
+as baseline. They are displayed only when the whole study and its receipt verify.
+Verified child metrics may remain inspectable while the whole study is incomplete
+or blocked. Unavailable values stay blank; actual zero values are displayed as zero.
+
+The output must be a **new file**, outside the study and all its child runs, in an
+existing directory owned by the current user with owner-only permissions (`0700`).
+For example, create `.private` with `mkdir -m 700 .private` if it does not already
+exist. The file is published with `0600` permissions. Existing targets, symlink
+targets, source-directory aliases and shared output directories are refused.
+Choose a new filename for each observation; previous reports are never replaced.
+
+`--html` is available only on `check`. It does not execute a study, resume a child,
+repair a receipt or change an account. JSON stdout is still the original inspection
+report, and exit status still describes that inspection:
+
+| Exit | Meaning with `--html` |
+| --- | --- |
+| `0` | Study and receipt verified; HTML published |
+| `4` | Study incomplete or receipt missing; diagnostic HTML published |
+| `2` | Study blocked/unavailable, or invalid output/publication failure |
+| `3` | Output may have been published but publication confirmation failed; retain and inspect it |
+| `130` / `143` | Interrupted; inspect saved output before retrying with a new filename |
+
+A blocked/unavailable study still gets diagnostic HTML when inspection returns a
+report and the output path is valid. An `error` JSON response means the command
+could not complete its reporting operation; no HTML success is implied. The HTML
+is an observation at the printed time, with sequential per-candidate checks, and
+does not refresh. Run a new check for a new observation.
+
+Risk-stop indicators are the original engine's flags, not measured maximum
+drawdown. Costs are explicit simulation assumptions, not current broker quotes.
+There is no ranking, automatic selection, portfolio sum or out-of-sample claim.
+All text is escaped and the document has no active content or external assets.

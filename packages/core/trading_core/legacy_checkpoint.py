@@ -211,7 +211,14 @@ def _restore_economics(data):
         raise CheckpointError("Order manager and paper ledger identities disagree")
     manager = OrderManager(exchange)
     for key, item in data["orders"].items():
-        _object(item, ORDER_KEYS, "order")
+        fields = ORDER_KEYS
+        if isinstance(item, dict) and "cancel_requested" in item:
+            # Historical v1 rows predate this field. A completed paper fill can
+            # carry only the newer serializer's explicit inactive default.
+            if item["cancel_requested"] is not False:
+                raise CheckpointError("Invalid completed paper order cancellation")
+            fields = ORDER_KEYS | {"cancel_requested"}
+        _object(item, fields, "order")
         fill = ledger["orders"][key]
         if (item["client_order_id"], item["symbol"], item["side"], item["order_type"], item["status"], item["exchange_order_id"]) != (
                 key, fill["symbol"], fill["side"], "market", "filled", fill["id"]):

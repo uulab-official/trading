@@ -141,8 +141,14 @@ def verify_evidence(path):
     return _read_evidence(path)[1]
 
 
-def _publish(raw, output):
-    """POSIX same-directory no-clobber publish; never unlink a final target."""
+def _publish(raw, output, *, expected_parent=None):
+    """POSIX no-clobber publication, optionally bound to a validated directory.
+
+    expected_parent is the caller's (resolved Path, st_dev, st_ino) observation.
+    Reject path/alias replacement or relocation before creating files when it is
+    supplied; writes use the held fd.
+    Existing callers retain their original behavior. Never unlink a final target.
+    """
     directory = fd = None
     temporary = None
     created_id = None
@@ -153,6 +159,8 @@ def _publish(raw, output):
         info = parent.stat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
             raise ValueError('private_output_directory_required')
+        if expected_parent is not None and (parent, info.st_dev, info.st_ino) != expected_parent:
+            raise ValueError('directory_changed')
         directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         held = os.fstat(directory)
         if (held.st_dev, held.st_ino) != (info.st_dev, info.st_ino):

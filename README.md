@@ -2,6 +2,27 @@
 
 암호화폐 자동매매 개발 모노레포 · 현재 검증된 개인 체험은 오프라인 합성 데이터 재생
 
+## Development branch: audited market-history studies
+
+`feat/smc-market-structure` extends the original offline workflow with imported
+historical data, durable local paper accounts, explicit recovery/audit and fixed
+MA/RSI candidate studies. [PR #1](https://github.com/uulab-official/trading/pull/1)
+remains Draft. The latest continuation state is in
+[CURRENT_HANDOFF.md](docs/CURRENT_HANDOFF.md).
+
+To inspect an existing study and open its comparison as a private local HTML file:
+
+```bash
+python tools/paper_study.py check .private/study-001 \
+  --html .private/study-comparison-001.html
+```
+
+The output filename must be new, outside the study, in an existing private
+directory. The report retains every planned candidate and shows original audited
+metrics and incomplete/blocked states. This is a static historical simulation
+report; it does not start trading. See [MARKET_PAPER_STUDY.md](docs/MARKET_PAPER_STUDY.md)
+for study creation, explicit assumptions, output permissions and exit codes.
+
 ## Verified offline paper workflow
 
 The deterministic offline paper runner is the tested entrypoint for this revision.
