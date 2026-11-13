@@ -24,6 +24,8 @@ border-radius:6px;padding:4px 9px;white-space:nowrap;font-size:11px}.panel,.fold
 border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:15px}
 .badge{display:inline-block;background:#e6f4ee;color:var(--green);font-size:11px;font-weight:700;
 padding:3px 8px;border-radius:5px}.skip{background:#fff3d9;color:var(--amber)}
+.unchecked{background:#eef2f8;color:var(--sub)}.mismatch{background:#fff0ed;color:#92331f}
+.fixture-check .facts{grid-template-columns:repeat(2,minmax(0,1fr))}.fixture-check .note{margin-top:10px}
 .facts,.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 22px;margin-top:13px}
 .facts>div,.metrics>div{min-width:0}dt{color:var(--sub);font-size:11px}dd{margin:3px 0 0;
 overflow-wrap:anywhere;font-variant-numeric:tabular-nums;font-weight:550}.metrics dd{font-size:12px}
@@ -182,10 +184,39 @@ def _robustness(robustness):
             +''.join(rows)+'</section>')
 
 
-def render_research_report(report: dict) -> str:
+def _fixture_comparison(check):
+    """Present an already validated comparison independently from report checks."""
+    if check is None:
+        status, label, style = 'not_requested', '원본 파일 미대조', ' unchecked'
+        message = '로컬 파일을 지정하지 않아 보고서에 기록된 fixture 해시와 대조하지 않았습니다.'
+        fields = ''
+    else:
+        status = check['status']
+        label = '파일 해시 일치' if status == 'matched' else '파일 해시 불일치'
+        style = '' if status == 'matched' else ' mismatch'
+        message = ('검사 때 읽은 로컬 파일의 바이트 SHA-256이 보고서에 기록된 값과 '
+                   +('일치합니다.' if status == 'matched' else '다릅니다.'))
+        fields = '<dl class="facts">'+''.join((
+            _field('fixture-expected-sha256', '보고서에 기록된 SHA-256', check['expected_sha256']),
+            _field('fixture-actual-sha256', '검사 때 읽은 파일의 SHA-256', check['actual_sha256']),
+            _field('fixture-size-bytes', '검사한 파일 크기', check['size_bytes'], 'bytes'),
+        ))+'</dl>'
+    return ('<section class="panel fixture-check" data-fixture-status="'+_e(status)+'">'
+            '<div class="heading"><h2>로컬 원본 파일 대조</h2><span class="badge'+style
+            +'" data-field="fixture-check-status">'+_e(label)+'</span></div>'
+            '<p class="subtitle">'+_e(message)+'</p>'+fields
+            +'<p class="note">파일 해시 대조는 보고서 일관성 확인과 별개입니다. '
+            '데이터 출처, 가격 데이터의 유효성 및 실제 실행을 인증하지 않으며 연구를 다시 실행하지 않습니다. '
+            '이후 파일 변경은 이 스냅샷에 반영되지 않습니다.</p></section>')
+
+
+def render_research_report(report: dict, *, fixture_check=None) -> str:
     """Validate saved-report consistency and project exact values without I/O."""
     report = research_report.validate_report(report)
     spec, summary = report['experiment'], report['summary']
+    if fixture_check is not None:
+        from .research_fixture import validate_fixture_check
+        fixture_check = validate_fixture_check(fixture_check, spec['fixture_sha256'])
     settings, quote = spec['settings'], spec['symbol'].split('/')[1]
     frame = spec['timeframe']
     duration = int(frame[:-1])*{'m':60000, 'h':3600000, 'd':86400000, 'w':604800000}[frame[-1]]
@@ -228,7 +259,8 @@ def render_research_report(report: dict) -> str:
             '<span class="badge" data-field="research-status">연구 보고서 일관성 확인</span>'
             '<p class="subtitle">저장된 구조·식별자·산술의 일관성을 확인했습니다. 데이터 출처와 실제 실행은 '
             '인증하지 않으며, 시장 연구 완료 기록(receipt) 검증을 제공하지 않습니다.</p>'
-            '<dl class="facts">'+overview+'</dl></section><section class="panel"><h2>공통 조건과 후보</h2>'
+            '<dl class="facts">'+overview+'</dl></section>'+_fixture_comparison(fixture_check)
+            +'<section class="panel"><h2>공통 조건과 후보</h2>'
             '<p class="note">각 창은 독립 자본으로 시작합니다. 아래 후보와 선택은 저장된 보고서 값입니다.</p>'
             '<dl class="facts">'+''.join(assumptions)+'</dl><div class="candidate-list">'
             +''.join(_candidate(c) for c in spec['candidates'])+'</div></section>'
@@ -240,8 +272,8 @@ def render_research_report(report: dict) -> str:
             '미청산 보유분은 마지막 포함 봉 종가의 평가자산에 반영하며 강제 청산하지 않습니다.</p>'
             '<p>일일 손실·낙폭 중지 표시는 설정에 따른 중지 발생 플래그입니다. 낙폭 제한 설정이나 중지 여부는 '
             '측정된 최대 낙폭(MDD)이 아닙니다. 미래 성과나 실거래 준비 상태를 보장하지 않습니다.</p>'
-            '<p>실험 식별자는 저장된 설정의 일관성을 위한 해시입니다. 보고된 fixture 해시는 원본 가격을 다시 '
-            '열어 확인하지 않았으며 데이터 출처나 실행의 증명이 아닙니다. 생성 시각은 원본 보고서의 값입니다.</p>'
+            '<p>실험 식별자는 저장된 설정의 일관성을 위한 해시입니다. 로컬 파일 대조 결과와 별개로 '
+            '보고된 fixture 해시는 데이터 출처나 실행의 증명이 아닙니다. 생성 시각은 원본 보고서의 값입니다.</p>'
             '</aside><details class="provenance"><summary>보고서 생성 시각 및 식별 정보</summary>'
             '<dl class="facts">'+provenance+'</dl></details><p class="footer">PAPER · 읽기 전용 · '
             '저장된 보고서 일관성 확인 · 실거래 권한 없음</p></main></body></html>')

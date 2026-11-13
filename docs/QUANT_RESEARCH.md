@@ -38,7 +38,9 @@ Example candidate file:
 
 Inspect an **existing** research JSON without a dashboard server or another
 research run. The inspector uses the existing bounded schema/arithmetic reader.
-It does not load the source fixture, fetch prices or operate a paper account.
+By default it does not open the source fixture. An explicit `--fixture` can
+compare local file bytes as described below. Inspection never fetches prices or
+operates a paper account.
 
 ```bash
 # Check only; print the checked report's identity and original summary as JSON.
@@ -63,13 +65,69 @@ python tools/quant_research.py config/examples/offline_fixture.json \
   --output .private/research-001.json \
   --train-size 60 --test-size 20 --gap 1 --warmup 60 --robustness
 python tools/paper_research_report.py .private/research-001.json \
+  --fixture config/examples/offline_fixture.json \
   --html .private/research-001.html
 ```
 
 The first command after directory setup explicitly runs research. The second
-only checks and renders its saved result. This example is not market evidence.
+checks its saved result, compares the explicitly supplied fixture and renders
+the snapshot. This example is not market evidence.
 Omit `--robustness` when producing a schema-1 report. The inspector supports both
 versions and does not upgrade an old report or manufacture missing diagnostics.
+
+### Optional local fixture match (v41)
+
+Use `--fixture` when you also want to compare a local file with the SHA-256
+recorded in `experiment.fixture_sha256`. This is the same **raw-byte** digest
+that the existing research producer records. It does not parse or normalize
+the fixture; changing whitespace, a newline or encoding changes the digest even
+when parsed JSON would be equivalent.
+
+```bash
+# Compare only; report and fixture both already exist.
+python tools/paper_research_report.py .private/research-001.json \
+  --fixture config/examples/offline_fixture.json
+
+# Publish a new private snapshot containing the comparison result as well.
+python tools/paper_research_report.py .private/research-001.json \
+  --fixture config/examples/offline_fixture.json \
+  --html .private/research-001-checked.html
+```
+
+Without `--fixture`, the existing JSON result is unchanged and contains no
+`fixture_check` key. The HTML explicitly displays **원본 파일 미대조**. With the
+option, a completed comparison adds `fixture_check` with these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `matched` or `mismatch`, derived from the two digests |
+| `scope` | Always `local_fixture_bytes` |
+| `algorithm` | Always `sha256` |
+| `expected_sha256` | Digest recorded in this validated research report |
+| `actual_sha256` | Digest of the file bytes observed by this check |
+| `size_bytes` | Number of bytes read, at most 33,554,432 (32 MiB) |
+
+A match is shown as **파일 해시 일치** and exits `0`. A completed mismatch is
+shown as **파일 해시 불일치** and exits `1`; optional HTML is still published so
+the difference remains reviewable. Both preserve the original report identity,
+summary and `research_report_checked` status, which refers only to report
+consistency. An output failure takes precedence over the mismatch exit code.
+
+Only a bounded regular local file is accepted. Final-component symlinks,
+directories, FIFOs, missing/unreadable files, oversized inputs and detected
+changes during reading return `research_report_fixture_unavailable` with exit
+`2`, without publishing HTML. The checker compares identity, size, mode and
+nanosecond modification/change times around the read and rechecks the named
+path and parent. It permits an initially resolved parent alias while rejecting
+detected redirection during the observation. These ordinary metadata checks are
+not an authenticated atomic filesystem snapshot.
+
+The result describes the bytes observed during this invocation. It does not
+prove that they came from a provider, constitute valid market data, or were used
+by the producing engine. No research rerun or account access occurs. Neither
+file paths nor contents are included in the result or HTML. The displayed report
+generation time remains the saved report's original value; later file changes
+do not update a saved snapshot.
 
 ### What is displayed
 
@@ -95,13 +153,16 @@ risk exits; equal starting cash does not imply equal exposure or risk.
 | Inspection | What is checked | What it does not establish |
 | --- | --- | --- |
 | `paper_research_report.py` | Existing research schema, experiment identity, chronological bounds, training selection, internal accounting and summary; optional diagnostics | Source authenticity, an engine rerun, execution attestation, repository revision, or market-study completion receipt |
+| Optional `--fixture LOCAL_FILE` | Exact local bytes against this report's recorded SHA-256, with a separate comparison status | Provider authenticity, data validity, execution attestation or a guarantee against later file changes |
 | `paper_study.py check` | The separate saved study/account audit and its existing completion-receipt contract | Walk-forward evaluation or source-provider authenticity merely from a successful receipt |
 
 The HTML status is **연구 보고서 일관성 확인**. The CLI success status is
 `research_report_checked`, with `validation_scope: saved_report_consistency`.
 `robustness_available` distinguishes schema 2 from legacy reports, and
-`html_written` says whether this invocation also published a file. Neither status
-is a trading authorization. Retain the original JSON and producing code revision;
+`html_written` says whether this invocation also published a file. A requested
+fixture comparison has its own `fixture_check.status`; report consistency alone
+does not imply a match. These statuses are not trading authorization. Retain the
+original JSON and producing code revision;
 an experiment ID and a reported fixture digest do not authenticate the results.
 
 ### Output and failure behavior
@@ -114,8 +175,9 @@ the shared publisher. The command never replaces or deletes a final target.
 
 | Exit | Meaning |
 | --- | --- |
-| `0` | Saved-report checks completed; optional HTML was published |
-| `2` | Invalid arguments/report/output, or a pre-publication failure; JSON contains a bounded error code |
+| `0` | Saved-report checks completed; any explicitly requested fixture matched; optional HTML was published |
+| `1` | Saved-report checks completed, but the explicit fixture digest differs; optional diagnostic HTML was published |
+| `2` | Invalid/unavailable arguments/report/fixture/output, or a pre-publication failure; JSON contains a bounded error code |
 | `3` | HTML may already exist but publication confirmation failed; preserve and inspect it |
 | `130` | Keyboard interruption; inspect any saved output before retrying with a new filename |
 

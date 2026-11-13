@@ -25,7 +25,7 @@ jobs:
       - name: Compile new modules
         run: |
           python -m py_compile packages/strategy/smc_structure.py packages/strategy/quant_metrics.py packages/strategy/walk_forward.py packages/core/broker_interface.py packages/core/paper_broker.py packages/core/risk_gate.py packages/core/paper_execution.py packages/core/order_lifecycle.py packages/core/order_journal.py apps/dashboard/server.py apps/dashboard/store.py tools/paper_operations_demo.py apps/server/trading_bot/replay_report.py tools/paper_replay_dashboard.py apps/server/trading_bot/research_report.py apps/server/trading_bot/walk_forward_research.py tools/quant_research.py
-          python -m py_compile apps/server/trading_bot/research_html.py tools/paper_research_report.py
+          python -m py_compile apps/server/trading_bot/research_html.py apps/server/trading_bot/research_fixture.py tools/paper_research_report.py
       - name: Run isolated regression suite
         run: |
           python -m unittest discover -s tests -p 'test_smc_structure.py' -v
@@ -52,6 +52,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_research_robustness.py' -v
           python -m unittest discover -s tests -p 'test_robustness_cli.py' -v
           python -m unittest discover -s tests -p 'test_research_html.py' -v
+          python -m unittest discover -s tests -p 'test_research_fixture.py' -v
           python -m unittest discover -s tests -p 'test_research_report_cli.py' -v
 
   dashboard-client:

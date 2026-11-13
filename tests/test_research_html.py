@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'apps/server'))
@@ -62,6 +63,14 @@ class Document(HTMLParser):
 def report():
     return run_research(dataset(), 'a'*64, candidates=CANDIDATES, settings=SETTINGS,
                         evaluator=lambda *args: metrics())
+
+
+def fixture_check(value, *, matched=True, size=123):
+    expected = value['experiment']['fixture_sha256']
+    actual = expected if matched else ('b'*64 if expected != 'b'*64 else 'c'*64)
+    return dict(status='matched' if matched else 'mismatch', scope='local_fixture_bytes',
+                algorithm='sha256', expected_sha256=expected, actual_sha256=actual,
+                size_bytes=size)
 
 
 def skip_fold(value, index):
@@ -273,21 +282,116 @@ class ResearchHtmlTests(unittest.TestCase):
         self.assertEqual(self.render(value), self.render(value))
         self.assertEqual(value, before)
 
+    def test_default_explicitly_distinguishes_unchecked_fixture_from_report_consistency(self):
+        value = report()
+        page = self.page(value)
+        self.assertEqual(self.field(page.root, 'fixture-check-status'), '원본 파일 미대조')
+        self.assertEqual(len(page.root.find(data_fixture_status='not_requested')), 1)
+        self.assertEqual(self.field(page.root, 'research-status'), '연구 보고서 일관성 확인')
+        self.assertEqual(page.root.find(data_field='fixture-actual-sha256'), [])
+        self.assertEqual(page.root.find(data_field='fixture-size-bytes'), [])
+        self.assertIn('로컬 파일을 지정하지 않아', page.root.text)
+        self.assertIn(value['experiment']['fixture_sha256'], page.root.text)
+
+    def test_matched_fixture_keeps_separate_byte_scope_and_exact_evidence_for_both_schemas(self):
+        for value in (report(), robust_report()):
+            check = fixture_check(value)
+            with self.subTest(schema=value['schema_version']):
+                page = Document(self.render(value, fixture_check=check))
+                section = page.root.find(data_fixture_status='matched')
+                self.assertEqual(len(section), 1)
+                self.assertEqual(self.field(section[0], 'fixture-check-status'), '파일 해시 일치')
+                self.assertEqual(self.field(section[0], 'fixture-expected-sha256'), check['expected_sha256'])
+                self.assertEqual(self.field(section[0], 'fixture-actual-sha256'), check['actual_sha256'])
+                self.assertEqual(self.field(section[0], 'fixture-size-bytes'), '123 bytes')
+                self.assertEqual(self.field(page.root, 'fixture_sha256'), check['expected_sha256'])
+                self.assertEqual(self.field(page.root, 'generated_at'), value['generated_at'])
+                self.assertEqual(self.field(page.root, 'research-status'), '연구 보고서 일관성 확인')
+                for phrase in ('검사 때 읽은', '바이트', 'SHA-256', '데이터 출처', '가격 데이터의 유효성',
+                               '실행', '인증', '이후 파일 변경'):
+                    self.assertIn(phrase, section[0].text)
+                self.assertNotIn('열어 확인하지 않았', page.root.text)
+                self.assertEqual(len(page.root.find(data_role='training-score')),
+                                 sum(len(fold['train_scores']) for fold in value['folds']))
+                self.assertEqual(len(page.root.find(data_role='cost-scenario')),
+                                 3*len(value['folds']) if value['schema_version'] == 2 else 0)
+
+    def test_mismatched_fixture_is_visible_without_discarding_saved_research_values(self):
+        value = robust_report()
+        check = fixture_check(value, matched=False)
+        page = Document(self.render(value, fixture_check=check))
+        section = page.root.find(data_fixture_status='mismatch')
+        self.assertEqual(len(section), 1)
+        status = section[0].find(data_field='fixture-check-status')[0]
+        self.assertEqual(status.text, '파일 해시 불일치')
+        self.assertIn('mismatch', status.attrs['class'].split())
+        self.assertEqual(self.field(section[0], 'fixture-actual-sha256'), check['actual_sha256'])
+        self.assertIn('다릅니다', section[0].text)
+        self.assertEqual(self.field(page.root, 'research-status'), '연구 보고서 일관성 확인')
+        self.assertEqual(self.field(page.root, 'mean_test_return_pct'),
+                         value['summary']['mean_test_return_pct']+' %')
+        self.assertEqual(len(page.root.find(data_role='cost-scenario')), 3*len(value['folds']))
+
+    def test_zero_and_maximum_comparison_sizes_are_displayed_without_truthiness_loss(self):
+        value = report()
+        for size in (0, 32*1024*1024):
+            with self.subTest(size=size):
+                page = Document(self.render(value, fixture_check=fixture_check(value, size=size)))
+                self.assertEqual(self.field(page.root, 'fixture-size-bytes'), str(size)+' bytes')
+
+    def test_inconsistent_foreign_or_injected_fixture_context_is_rejected(self):
+        value = report()
+        checks = [[], '', False]
+        changes = (
+            {'status': 'mismatch'}, {'actual_sha256': 'b'*64},
+            {'status': 'not_requested'}, {'scope': 'authenticated_source'},
+            {'algorithm': 'sha512'}, {'size_bytes': True}, {'size_bytes': -1},
+            {'size_bytes': 32*1024*1024+1}, {'actual_sha256': '<script>alert(1)</script>'},
+            {'expected_sha256': 'b'*64, 'actual_sha256': 'b'*64},
+            {'path': '/private/do-not-display'},
+        )
+        checks.extend(dict(fixture_check(value), **change) for change in changes)
+        missing = fixture_check(value)
+        del missing['actual_sha256']
+        checks.append(missing)
+        for check in checks:
+            with self.subTest(check=check), self.assertRaises(ValueError):
+                self.render(value, fixture_check=check)
+
+    def test_fixture_context_projection_has_no_io_and_does_not_mutate_inputs(self):
+        from trading_bot import research_fixture
+        value = robust_report()
+        check = fixture_check(value, matched=False)
+        original = deepcopy((value, check))
+        with patch('builtins.open', side_effect=AssertionError('renderer opened a file')), \
+                patch('os.open', side_effect=AssertionError('renderer opened a descriptor')), \
+                patch('os.stat', side_effect=AssertionError('renderer inspected a file')), \
+                patch('os.lstat', side_effect=AssertionError('renderer inspected a link')), \
+                patch.object(Path, 'open', side_effect=AssertionError('renderer opened a path')), \
+                patch.object(research_fixture, 'check_fixture',
+                             side_effect=AssertionError('renderer reran the source check')):
+            self.assertEqual(self.render(value, fixture_check=check),
+                             self.render(value, fixture_check=check))
+        self.assertEqual((value, check), original)
+
     def test_standalone_document_has_no_active_or_external_content(self):
-        page = self.page(robust_report())
-        self.assertTrue(any(n.tag == 'html' and n.attrs.get('lang') == 'ko' for n in page.nodes))
-        self.assertTrue(any(n.tag == 'style' for n in page.nodes))
-        self.assertFalse({n.tag for n in page.nodes} & {'script', 'link', 'img', 'iframe', 'form', 'object', 'a'})
-        for node in page.nodes:
-            self.assertFalse(set(node.attrs) & {'src', 'href', 'action'})
-            self.assertFalse(any(key.lower().startswith('on') for key in node.attrs))
-        metadata = [n.attrs for n in page.nodes if n.tag == 'meta']
-        csp = next(m['content'] for m in metadata if m.get('http-equiv') == 'Content-Security-Policy')
-        self.assertIn("default-src 'none'", csp)
-        self.assertIn("form-action 'none'", csp)
-        self.assertTrue(any(m.get('name') == 'referrer' and m['content'] == 'no-referrer' for m in metadata))
-        self.assertTrue(any(m.get('name') == 'viewport' for m in metadata))
-        self.assertFalse(any(m.get('http-equiv', '').lower() == 'refresh' for m in metadata))
+        value = robust_report()
+        for check in (None, fixture_check(value), fixture_check(value, matched=False)):
+            with self.subTest(status=None if check is None else check['status']):
+                page = Document(self.render(value, fixture_check=check))
+                self.assertTrue(any(n.tag == 'html' and n.attrs.get('lang') == 'ko' for n in page.nodes))
+                self.assertTrue(any(n.tag == 'style' for n in page.nodes))
+                self.assertFalse({n.tag for n in page.nodes} & {'script', 'link', 'img', 'iframe', 'form', 'object', 'a'})
+                for node in page.nodes:
+                    self.assertFalse(set(node.attrs) & {'src', 'href', 'action'})
+                    self.assertFalse(any(key.lower().startswith('on') for key in node.attrs))
+                metadata = [n.attrs for n in page.nodes if n.tag == 'meta']
+                csp = next(m['content'] for m in metadata if m.get('http-equiv') == 'Content-Security-Policy')
+                self.assertIn("default-src 'none'", csp)
+                self.assertIn("form-action 'none'", csp)
+                self.assertTrue(any(m.get('name') == 'referrer' and m['content'] == 'no-referrer' for m in metadata))
+                self.assertTrue(any(m.get('name') == 'viewport' for m in metadata))
+                self.assertFalse(any(m.get('http-equiv', '').lower() == 'refresh' for m in metadata))
 
 
 if __name__ == '__main__':
