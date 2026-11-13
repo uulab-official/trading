@@ -34,6 +34,97 @@ Example candidate file:
 ]
 ```
 
+## Static research snapshot (v40)
+
+Inspect an **existing** research JSON without a dashboard server or another
+research run. The inspector uses the existing bounded schema/arithmetic reader.
+It does not load the source fixture, fetch prices or operate a paper account.
+
+```bash
+# Check only; print the checked report's identity and original summary as JSON.
+python tools/paper_research_report.py .private/research-001.json
+
+# Check and create a NEW private HTML file.
+python tools/paper_research_report.py .private/research-001.json \
+  --html .private/research-001.html
+```
+
+Open the saved HTML on your own computer. It contains its own CSS and needs no
+JavaScript, network assets or API. It is a static observation of the loaded report;
+later source changes do not update it. Choose another output filename to export a
+new snapshot. A private HTML sibling beside the research JSON is allowed.
+
+For a complete first run using only the repository's **synthetic** fixture:
+
+```bash
+# Create this only if absent; an existing output directory must be owner-private.
+mkdir -m 700 .private
+python tools/quant_research.py config/examples/offline_fixture.json \
+  --output .private/research-001.json \
+  --train-size 60 --test-size 20 --gap 1 --warmup 60 --robustness
+python tools/paper_research_report.py .private/research-001.json \
+  --html .private/research-001.html
+```
+
+The first command after directory setup explicitly runs research. The second
+only checks and renders its saved result. This example is not market evidence.
+Omit `--robustness` when producing a schema-1 report. The inspector supports both
+versions and does not upgrade an old report or manufacture missing diagnostics.
+
+### What is displayed
+
+The Korean report keeps all folds, all training candidates, selected candidates,
+negative outcomes and skipped windows. Original decimal strings retain their
+precision and quote-currency units. Training/test indices are half-open; displayed
+UTC timestamps identify the first and last **included** bars. Settings show the
+gap, warm-up, minimum fills, rolling/anchored policy and cost/risk assumptions.
+
+A skipped fold has no measured test result. Its zero-interest cash contribution
+to the existing summary remains explicit. The all-fold mean is arithmetic across
+independently funded windows, not compound growth or a continuous account curve.
+Open holdings remain marked at the last close, with no forced liquidation.
+
+Schema 2 also shows every original fixed-selection 1x/2x/3x cost scenario and its
+strategy, buy-and-hold and percentage-point excess results. Schema 1 instead
+labels those diagnostics as not performed. The reference uses the original
+allocation, second test bar's opening price and last closing mark, with no active
+risk exits; equal starting cash does not imply equal exposure or risk.
+
+### Meaning of validation
+
+| Inspection | What is checked | What it does not establish |
+| --- | --- | --- |
+| `paper_research_report.py` | Existing research schema, experiment identity, chronological bounds, training selection, internal accounting and summary; optional diagnostics | Source authenticity, an engine rerun, execution attestation, repository revision, or market-study completion receipt |
+| `paper_study.py check` | The separate saved study/account audit and its existing completion-receipt contract | Walk-forward evaluation or source-provider authenticity merely from a successful receipt |
+
+The HTML status is **연구 보고서 일관성 확인**. The CLI success status is
+`research_report_checked`, with `validation_scope: saved_report_consistency`.
+`robustness_available` distinguishes schema 2 from legacy reports, and
+`html_written` says whether this invocation also published a file. Neither status
+is a trading authorization. Retain the original JSON and producing code revision;
+an experiment ID and a reported fixture digest do not authenticate the results.
+
+### Output and failure behavior
+
+The existing output parent must be a POSIX directory owned by the current user
+with no group/other permission bits. The final HTML is mode `0600`. Existing
+targets, source aliases, hardlinks and symlink targets are rejected. Directory
+identity is bound before inspection, rechecked afterwards and checked again by
+the shared publisher. The command never replaces or deletes a final target.
+
+| Exit | Meaning |
+| --- | --- |
+| `0` | Saved-report checks completed; optional HTML was published |
+| `2` | Invalid arguments/report/output, or a pre-publication failure; JSON contains a bounded error code |
+| `3` | HTML may already exist but publication confirmation failed; preserve and inspect it |
+| `130` | Keyboard interruption; inspect any saved output before retrying with a new filename |
+
+Errors do not echo invalid report contents, exception details or source paths.
+Do not treat a failed report as an empty account or zero-return experiment.
+The HTML interface has automated structure/content tests. Actual desktop/mobile
+browser visual verification for this increment is tracked separately in
+[CURRENT_HANDOFF.md](CURRENT_HANDOFF.md).
+
 ## Exact evaluation contract
 
 - Rolling training windows by default; `--anchored` retains the first training bar. Test windows are non-overlapping, chronological, and never used for selection within their fold. Earlier test bars may legitimately enter later training windows.
@@ -55,7 +146,7 @@ Atomic create-if-absent publication protects unrelated files and races. Report r
 
 The UI preserves last-good data on a failed refresh, labels unavailable/stale reports and displays amounts as text. Reports/mean returns are historical experiments, not live account balances. No new real-provider network success, brokerage integration, order reconciliation or profitability is implied.
 
-## Verification
+## Original research implementation verification
 
 ```bash
 python -m unittest discover -s tests -p 'test_quant_research.py' -v

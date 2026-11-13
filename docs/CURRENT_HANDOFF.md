@@ -1,119 +1,128 @@
-# Trading continuation handoff — 2026-11-12 (v39)
+# Trading continuation handoff — 2026-11-13 (v40)
 
 ## Resume point
 
 Repository: `uulab-official/trading`. Continue on
 `feat/smc-market-structure`; [PR #1](https://github.com/uulab-official/trading/pull/1)
-remains Draft. The recovered v38 baseline was `00712a42e26fd674dc9921b50d6f99303e01c98d`.
-Its Quant Regression, Order Outcome Safety and CI/CD workflows had all succeeded.
-The old `4f7d677` conversation checkpoint is obsolete.
+remains Draft. The restored v39 head was
+`111ef2ea26db646e36b4081979ea303ecfd3fdcf`. Independent remote inspection found no
+new commits, all three exact-head workflows successful, and `main` unchanged at
+`a5750019dcd7a980a28783258c06c7ef4706afc1`.
 
-The user asked to resume the interrupted automation-system development. Ongoing
-implementation and development-branch delivery are authorized. Keep the existing
-main-merge, deployment, credentials and live-execution boundaries.
+The user again asked to resume interrupted development. Ongoing implementation
+and development-branch delivery remain authorized. Keep the established main
+merge, deployment, credentials and live-execution boundaries. Temporary files
+from the preceding session were gone, so this continuation used a fresh full
+clone of the actual remote head, not a stale conversation checkpoint.
 
-## Delivered implementation
+## Delivered v40 implementation
 
-- Pure Korean HTML study renderer, original candidate order, exact
-  authoritative metrics, explicit missing values, per-row states and receipt-gated
-  percentage-point comparisons. No network assets, scripts or execution actions.
-- `python tools/paper_study.py check DIRECTORY --html NEW_FILE`.
-  The optional output is private, no-clobber and outside the inspected study;
-  JSON and inspection exit statuses are retained. Existing check/run semantics,
-  source bindings, original audit and fingerprinted engines are unchanged.
-- Two pre-existing legacy-paper compatibility repairs, found by testing
-  the actual restored checkout. Exact empty signal IDs become `None` only at legacy
-  BUY handoffs; malformed explicit IDs remain rejected. Checkpoint restore accepts
-  original records without `cancel_requested` and newer explicit boolean `False`;
-  active/malformed values remain blocked with source bytes preserved.
-- CI now includes `apps/server/tests/` alongside package tests, so the legacy
-  lifecycle/restart path is a required check instead of an unexercised gap.
-  The test environment explicitly installs the declared `setuptools` and `wheel`
-  build prerequisites for the existing offline CLI installation checks.
-- Independent review found a late output-directory replacement race.
-  Publication now binds both the canonical parent path and its device/inode to
-  the original validated directory. Regression cases cover a symlink replacement
-  and relocation of that same directory into the study; neither may write there.
+- `python tools/paper_research_report.py REPORT_JSON [--html NEW_FILE]` inspects
+  an existing schema-1 or schema-2 walk-forward research report. The default
+  prints a bounded JSON result with its original identity and summary; optional
+  HTML is a new private standalone Korean document.
+- Reuse `research_report.read_report` and `validate_report`. The renderer has no
+  I/O, does not recompute trading metrics and preserves all original decimal
+  strings, folds, training candidates, losses and skipped windows.
+- Display train/test half-open indices and first/last included UTC bar times,
+  settings, original summary, reported input digest and experiment identity.
+  Independent windows and arithmetic averages remain explicit; a skipped window
+  has no measured test result even though it contributes cash-zero to the summary.
+- Schema 1 labels cost diagnostics as not performed. Schema 2 displays every
+  original fixed-selection 1x/2x/3x cost scenario, strategy/buy-hold metrics and
+  excess percentage points. No retuning, ranking or report upgrade is performed.
+- The visible status is **연구 보고서 일관성 확인**. CLI status is
+  `research_report_checked` with `validation_scope: saved_report_consistency`.
+  These are not source/execution authentication or a market-study receipt.
+- The output parent must already be owner-private. Reuse the v39 publisher's
+  canonical-parent/device/inode binding and no-clobber publication. Existing
+  files/aliases are preserved, output mode is 0600, uncertain completion exits 3,
+  and keyboard interruption exits 130 with an instruction to inspect output.
+- New renderer/CLI tests and compile checks are required in Quant Regression CI.
+  Existing producer, research contract, dashboard and study behavior are retained.
 
-See [MARKET_PAPER_STUDY.md](MARKET_PAPER_STUDY.md) for the complete report command,
-permissions and meaning of nonzero statuses.
+Full usage, synthetic setup, permissions and exit codes:
+[QUANT_RESEARCH.md](QUANT_RESEARCH.md#static-research-snapshot-v40).
+Design and implementation record:
+[spec](superpowers/specs/2026-11-13-research-snapshot-design.md) and
+[plan](superpowers/plans/2026-11-13-research-snapshot.md).
 
-## Verification record
+## Verification in this continuation
 
-- Baseline v38 study suite: 35 passed.
-- New renderer: 11 passed after failure-first implementation.
-- New real-study CLI/report integration: 17 passed after failure-first implementation.
-- Legacy checkpoint/lifecycle/restart/zero-mark/UTC-boundary suites: 53 passed,
-  plus 31 parameterized subtests; both original failures reproduced at `00712a4`.
-- Final full development regression: 887 tests passed (`unittest discover -s tests`).
+- Restored research baseline: 45 tests passed before implementation.
+- New renderer: 14 tests passed after 14 expected missing-feature failures.
+- New CLI/publication integration: 18 tests passed after missing-feature failures.
+  Real subprocesses forbid research/strategy/configuration imports, network/DNS
+  calls and SQLite account connections. The shared publisher still imports
+  existing paper model definitions; importing those definitions is not execution.
+- Package/server tests: 309 passed, plus 382 subtests. This fresh environment
+  initially lacked pytest; after installing the existing CI test dependencies,
+  the complete suite passed. Existing deprecation warnings remain visible.
 - Node clients: 79 tests passed.
-- Package and server application suite: 309 tests and 382 subtests passed on the
-  final implementation (Python 3.12). No failing test was skipped or weakened.
-- Shared private-evidence publisher regressions: 35 passed after the review fix.
-- Actual three-candidate synthetic study creation, check and HTML export: verified
-  receipt; no real market acquisition and no profitability claim.
-- Exact delivered-commit CI is checked after the branch push, independently of
-  local evidence. See the PR Checks for the latest branch head.
+- Full development unittest regression: 919 tests passed in 208.388 seconds.
+- All 16 execution-fingerprinted source modules and the three research
+  contract/producer modules are byte-identical to the restored v39 baseline.
+- A real original-engine run of the bundled synthetic fixture retained one
+  skipped window. A second synthetic wave example produced two evaluated windows
+  and seven simulated fills, including a losing window. Both schema-2 reports
+  were then rendered with research imports/network/account connections forbidden;
+  source bytes stayed unchanged and HTML was mode 0600. No market-performance
+  claim is made from these synthetic examples.
+- Fresh independent whole-increment review found no Critical, Important or Minor
+  issue. The reviewer independently reran all 32 new tests and injected a lost
+  link confirmation after actual publication: exit 3, complete output retained,
+  private error details suppressed, source unchanged and no owned temporary left.
 
-The initial broad package/application run was interrupted after baseline failures
-and a lifecycle wait that could not be reached after invalid ID rejection. It is
-not counted as a successful test run. Existing `datetime.utcnow` and pytest-asyncio
-deprecation warnings are not new failures.
+Actual desktop/mobile browser visual QA remains incomplete. The earlier Browser
+connection was unavailable and the cloud browser refused the local-file protocol;
+that security boundary was not bypassed by another surface or localhost. Structure,
+content, escaping and timestamp tests do not establish font, print, accessibility
+interaction or responsive appearance in a real browser.
 
-Actual browser layout verification remains incomplete: there was no connected
-local Browser, and Cloud Browser refused the local file protocol. No alternate
-browser path was used to bypass that policy. HTML structure/escaping/receipt
-semantics are tested; 390px/1440px visual checks remain a manual validation item.
+## Carried-forward v39 capabilities
+
+`python tools/paper_study.py check DIRECTORY --html NEW_FILE` retains its separate
+saved study/account audit and completion-receipt semantics. The v39 report keeps
+all planned candidates and distinguishes incomplete/blocked states. Its private
+no-clobber publisher includes the late-directory-replacement fix reused here.
+
+The prior legacy fixes remain: only exact empty signal IDs are normalized at the
+legacy BUY boundary; saved filled orders accept absent or literal false
+`cancel_requested`, while malformed/active values stay blocked. Required server
+CI and declared offline CLI build prerequisites remain in place.
 
 ## Keep these boundaries
 
-- HTML is a static historical observation with sequential child checks, not live
-  market data or a simultaneous portfolio view. No automatic refresh.
-- Missing receipt remains `complete_without_receipt`; HTML generation does not
-  repair, resume or execute anything. Every planned row remains visible.
-- No candidate ranking, winning strategy selection, balance aggregation or
-  out-of-sample/profitability claim. Stop flags are not measured maximum drawdown.
-- No automatic study continuation or uncertain-order retry. Individual child
-  recovery uses the existing explicit preflight/resume path.
+- Research JSON consistency, study receipt verification, source data authenticity
+  and actual execution are different claims. Do not combine their statuses.
+- The report's fixture digest is a reported value; this inspector does not reopen
+  source prices to compare it. Experiment identity does not attest the producing
+  code revision or independently authenticate results.
+- No research rerun, source acquisition, automatic strategy selection, portfolio
+  compounding, automatic study recovery or uncertain-order retry is added.
+- Risk-stop flags are not measured maximum drawdown. Marked open holdings are not
+  fully realized cash and do not include a forced final sale.
 - No main merge, deployment, broker credentials/orders or live enablement.
-- Earlier local-only KIS/UI/research cumulative packages are not assumed integrated.
-- Private source, accounts and rendered results remain outside Git. UI testing used
-  synthetic fixtures, not personal account data or certified provider evidence.
+- Existing research modules are integrated and verified in this checkout; earlier
+  unrelated local-only KIS/UI packages are not assumed integrated.
+- Keep personal inputs/results outside Git. Only synthetic examples were used.
 
 ## Next useful work
 
-First complete the desktop/mobile visual check using an authorized local browser.
-Then connect existing out-of-sample/walk-forward research evidence to a similarly
-read-only result view, with a distinct validation status from same-period studies.
-This is a proposed continuation, not evidence that such validation already exists
-for any particular strategy or dataset.
+First perform desktop/mobile visual checks through an authorized browser route.
+A useful next code increment is optional, explicit matching of an existing local
+fixture file to the report's recorded digest, with a distinct source-match status.
+It must remain separate from provider authentication or execution attestation;
+keep size/regular-file checks and never fetch or rerun research during inspection.
 
-## Final delivery verification
+## Delivery verification
 
-Independent review identified one important publication race and no other material
-findings. Both the reproduced race and the same-inode relocation variant failed
-before the fix and passed afterwards. The renderer remains a projection of the
-existing checker, not a second receipt authenticator. It does not fabricate
-candidate data when the underlying study cannot be loaded.
+Publish only to the existing development branch using an expected-head,
+fast-forward update. Compare the exact Git tree with the tested local tree. If
+connected GitHub delivery consolidates local commits, local development SHAs in
+work records are checkpoints, not remote delivery identifiers.
 
-All 16 source modules in the original execution fingerprint were compared with
-`00712a4` and remain unchanged. Keep the source and result files private.
-
-Final post-review local verification completed: 887 development tests, 309
-package/application tests (382 subtests), and 79 Node client tests all passed.
-The shell has no GitHub push credential, so delivery uses the connected GitHub
-API as a consolidated commit with an exact local/remote Git tree comparison and
-an expected-head, fast-forward update. Local incremental commit IDs in the plan
-are development checkpoints, not remote delivery identifiers.
-
-Verify remote CI against the actual current PR head rather than assuming a past
-workflow run covers later commits. The branch and PR links above are the durable
-resume locations; this handoff is written before the delivery CI run completes.
-
-The first delivery commit was `efb17d74d5482b55cd3f077ea14a5bc3312588c7`.
-Its Quant Regression succeeded. Required server tests passed on Python 3.10/3.11,
-but Python 3.12 exposed missing global `setuptools` during the existing isolated,
-offline CLI installation test setup. The follow-up explicitly supplies the
-declared build prerequisites before testing. It does not enable network access
-inside those tests or skip any required check. Use the current PR head for the
-final workflow outcome rather than the first delivery's failed CI run.
+This handoff is written before final remote publication/CI completes. Verify the
+actual current PR head and its Quant Regression, Order Outcome Safety and CI/CD
+runs; a workflow from an earlier commit does not cover a later head. The branch
+and PR are the durable resume locations.

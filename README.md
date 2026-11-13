@@ -23,6 +23,20 @@ metrics and incomplete/blocked states. This is a static historical simulation
 report; it does not start trading. See [MARKET_PAPER_STUDY.md](docs/MARKET_PAPER_STUDY.md)
 for study creation, explicit assumptions, output permissions and exit codes.
 
+Saved walk-forward research has a separate read-only snapshot command:
+
+```bash
+python tools/paper_research_report.py .private/research-001.json \
+  --html .private/research-001.html
+```
+
+It checks an existing research JSON and displays all training/test windows and
+available cost diagnostics without running research again or starting a server.
+This is **saved-report consistency checking**; it does not authenticate source
+data or engine execution and has no market-study completion receipt. See
+[QUANT_RESEARCH.md](docs/QUANT_RESEARCH.md#static-research-snapshot-v40) for the
+complete synthetic example, output permissions and evidence boundaries.
+
 ## Verified offline paper workflow
 
 The deterministic offline paper runner is the tested entrypoint for this revision.
