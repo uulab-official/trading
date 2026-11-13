@@ -13,4 +13,3 @@ def load_fixture(raw):
     if 'data_provenance' in data:
         validate_market_fixture(data)
     return data
-
