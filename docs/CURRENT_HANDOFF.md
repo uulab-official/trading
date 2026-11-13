@@ -1,152 +1,165 @@
-# Trading continuation handoff — 2026-11-13 (v41)
+# Trading continuation handoff — 2026-11-13 (v42)
 
 ## Resume point
 
-Repository: `uulab-official/trading`. Continue on
-`feat/smc-market-structure`; [PR #1](https://github.com/uulab-official/trading/pull/1)
-remains Draft. This continuation started from verified v40 head
-`c6c9fa934a8480bd97d8f55cb282bc24728a8bbf`, tree
-`e7be30eb39555593c388bfc707e1ec55afd13819`. Local and independent remote checks
-matched, all three exact-head workflows passed, and main remained
+Repository: `uulab-official/trading`. Continue on `feat/smc-market-structure`
+and [Draft PR #1](https://github.com/uulab-official/trading/pull/1).
+The verified starting head was v41 `2b0b4cd6ceb2d136029056cb42c8ac505e55d2cb`,
+tree `3ae52cea4aa07f19bc787b6c482cbbfb8ea4891d`. Independent remote inspection
+found no divergence, all three exact-head workflows successful, PR open/Draft
+and unmerged with no auto-merge, and main unchanged at
 `a5750019dcd7a980a28783258c06c7ef4706afc1`.
 
-The user again authorized continued implementation and development-branch
-delivery. The existing checkout and installed test environment were intact.
-Keep the established main-merge, deployment, credential and live-execution
-boundaries. The actual current branch and PR are the durable resume locations;
-local workstream commits may be consolidated during connected GitHub delivery.
+The user again requested continued implementation. Existing feature-branch
+delivery remains authorized. Keep main merge, deployment, credentials and live
+execution outside this continuation. The checkout was intact and clean.
 
-## Delivered v41 implementation
+## Delivered v42 implementation
 
 ```text
-python tools/paper_research_report.py REPORT_JSON [--fixture LOCAL_FILE] [--html NEW_FILE]
+python tools/paper_research_report.py REPORT_JSON --fixture LOCAL_FILE --validate-fixture [--html NEW_FILE]
 ```
 
-- An optional, explicitly supplied `--fixture` compares the observed raw bytes
-  with `experiment.fixture_sha256` from a validated schema-1 or schema-2 report.
-  It reuses the original producer's SHA-256 convention and 32 MiB size limit;
-  no parsing, normalization, source acquisition or research rerun occurs.
-- Without `--fixture`, the default JSON envelope remains unchanged. HTML now
-  explicitly shows **원본 파일 미대조**. A completed explicit comparison adds
-  `fixture_check` with exactly `status`, `scope`, `algorithm`,
-  `expected_sha256`, `actual_sha256` and `size_bytes`; no paths or file contents.
-- `fixture_check.status` is `matched` or `mismatch`. These remain separate from
-  `research_report_checked` / `saved_report_consistency`. HTML displays
-  **파일 해시 일치** or **파일 해시 불일치**, both digests and the exact byte count,
-  while retaining all original windows, metrics, skips and cost diagnostics.
-- A completed mismatch exits 1 and still publishes optional diagnostic HTML.
-  An explicitly requested match exits 0. Invalid/unavailable input or a
-  pre-publication failure exits 2; uncertain publication exits 3; interruption
-  exits 130. Output failures take precedence over a completed mismatch.
-- New standard-library module `trading_bot.research_fixture` holds directory and
-  file descriptors, uses a bounded chunked read with one sentinel byte, and
-  checks file identity, size, mode, ownership/link metadata and nanosecond
-  modification/change times. It rechecks the named file and canonical parent.
-  Final symlinks, nonregular files, oversized inputs and detected changes fail
-  closed. Initially resolved parent aliases are permitted; later detected
-  redirection is rejected. Descriptors close on failure and interruption.
-- The pure HTML renderer validates optional comparison context against the
-  current report's expected digest. Inconsistent status/hash combinations,
-  foreign expected digests, malformed sizes and unknown fields cannot be
-  projected as a match. The saved research schema and identity are unchanged.
-- The existing private no-clobber publisher remains unchanged: new 0600 HTML in
-  an owner-private directory, canonical-parent/device/inode binding and explicit
-  uncertain-completion handling. Existing fixture/report files and aliases
-  remain protected. Initial output binding happens before inspection; fixture
-  alias resolution follows the validated fixture check.
+The new explicit `--validate-fixture` requires `--fixture`. It applies the
+original research producer's input rules under the saved report's candidates,
+settings and schema, then compares symbol, timeframe, bar count and first/last
+included timestamps. It does not acquire data, evaluate a strategy or run research.
+Default report-only and v41 hash-only JSON remain unchanged, including hash-only
+acceptance of arbitrary bytes without a data-validity claim.
 
-Usage, byte semantics and exit codes:
-[QUANT_RESEARCH.md](QUANT_RESEARCH.md#optional-local-fixture-match-v41).
-Design and implementation record:
-[spec](superpowers/specs/2026-11-13-research-fixture-match-design.md) and
-[plan](superpowers/plans/2026-11-13-research-fixture-match.md).
+### Shared authoritative rules
+
+- `trading_bot.fixture_input.load_fixture(raw)` is the original replay loader,
+  moved without changing its statements and re-exported from the original tool.
+  It retains duplicate-key rejection, legacy float decoding, row shape and
+  imported-provenance checks.
+- `trading_bot.research_input.prepare_research_input(...)` is the original
+  producer preflight through cleaned rows. `run_research` delegates once, then
+  performs its unchanged evaluation. The extraction preserves failure order,
+  `number(str(v))`, numeric bounds, defaults, timestamp continuity, OHLC ranges,
+  candidate/history/window/work limits and optional robustness budgets.
+- This small producer/replay source refactor is deliberate: the loader alone
+  was too weak for unannotated data, and a separate copied validator would drift.
+  Saved report schema/identity and all 16 execution fingerprint sources are intact.
+
+### One observation, three separate claims
+
+The existing stable bounded reader now has a shared private observation function.
+`check_fixture` stays streaming; `read_fixture_snapshot` captures the same chunks
+it hashes, returning them only after original descriptor, file/path/parent and
+metadata checks. The parser never reopens the file. Limits remain 32 MiB plus one
+sentinel byte, with final symlinks, nonregular files and detected changes rejected.
+
+The original saved-report status and six-field `fixture_check` remain separate.
+Only the new flag adds the eight-field `fixture_data_check`:
+
+- `status`: `matched`, `mismatch` or `invalid`.
+- `scope`: `research_input_consistency`.
+- `run_id`: saved report identity; `fixture_sha256`: actual observed byte digest.
+- `expected` and `observed`: five metadata fields; observed is null on invalid input.
+- `mismatches`: differing field names in fixed metadata order.
+- `error`: null, or the fixed `research_input_invalid` code.
+
+The pure validator binds context to both identities, checks metadata with the
+existing report experiment/window constraints, strict integers and derived last
+time, enforces status/difference/error consistency, and returns nested copies.
+The renderer performs no fixture loading or preparation. Its separate section
+shows input inspection unrequested, matched, metadata mismatched or invalid,
+with exact expected/observed values, UTC endpoints and textual difference markers.
+Invalid input has no invented observed metadata. Existing research metrics,
+skips, cost diagnostics, escaping and standalone CSP are retained.
+
+Exit 0 requires all explicitly requested checks to match. A completed mismatch
+or invalid-input diagnostic exits 1 and can still publish clearly labeled HTML.
+File-observation or unexpected failures exit 2; uncertain publication and
+interruption retain 3 and 130 and take precedence. The same private no-clobber
+publisher produces new 0600 HTML. Existing files and aliases remain protected.
+
+Usage and semantics:
+[QUANT_RESEARCH.md](QUANT_RESEARCH.md#optional-research-input-inspection-v42).
+Design and plan:
+[spec](superpowers/specs/2026-11-13-research-input-inspection-design.md) and
+[plan](superpowers/plans/2026-11-13-research-input-inspection.md).
 
 ## Verification in this continuation
 
-- Restored v40 baseline: 14 renderer and 18 CLI tests passed before implementation.
-- Checker: 21 tests passed after 21 observed missing-feature failures. Coverage
-  includes exact 32 MiB input, bounded growth, empty/binary raw data, file and
-  parent replacement, in-place edits with restored mtime, FIFO/symlink races,
-  descriptor cleanup and strict comparison-context validation.
-- Renderer: 20 tests passed, including six new tests written before the feature.
-  All three source-comparison states retain schema-1/2 content and standalone
-  CSP; supplied context is validated without I/O or input mutation.
-- Final CLI/publication integration: 31 tests passed in 8.678 seconds. Actual
-  subprocesses forbid research/strategy/configuration imports, network/DNS and
-  SQLite account connections. The shared publisher imports existing paper model
-  definitions; those imports are not account operation or execution.
-- Full development unittest discovery: 958 tests passed in 202.916 seconds. This
-  discovery started before the final additional path-error regression was added;
-  the complete final CLI suite of 31 tests then covered that additional case and
-  its one-line production correction. Required CI runs the final suite.
-- Package/server: 309 passed plus 382 subtests in 35.93 seconds. The 926 existing
-  deprecation warnings remain visible. Node clients: 79 passed.
-- The original producer generated both schema-1 and schema-2 reports from the
-  bundled synthetic fixture. Each preserved one skipped window. Guarded
-  inspections correctly returned match/exit 0 for the original bytes and
-  mismatch/exit 1 for a copy with one added newline, with 0600 diagnostic HTML.
-  Original fixture/report bytes, report identities and summaries were unchanged.
-  These synthetic checks make no market-performance claim.
-- All 16 execution-fingerprinted modules and the three original research
-  contract/producer source files are byte-identical to v40.
-- Fresh independent whole-increment review found no Critical or Important issue.
-  It reproduced one Minor error-classification discrepancy: a looping fixture
-  parent was reported as an output error only when HTML was requested. The new
-  guarded test first failed on that subcase. The narrow correction preserves
-  initial output binding and defers fixture-alias resolution until the fixture
-  check. The reviewer independently reran all 31 final CLI tests in 8.539 seconds
-  and closed the finding. No Critical, Important or Minor finding remains.
+- Initial related baseline: 106 tests passed before implementation.
+- TDD: shared input 11 new tests, snapshot capture two new tests, data inspector
+  13 new tests, renderer seven new tests and data CLI 11 new tests were exercised
+  before their features existed. Missing-feature failures were observed.
+- Final focused suites: reader 23, data inspector 13, shared input 11, renderer
+  27, legacy CLI 31 and new data CLI 11; all 116 passed. A no-site-packages
+  `python -S` run passed all 35 new input/data/CLI tests.
+- Before extraction, captured 12 deterministic producer report/evaluator-trace
+  baselines spanning both schemas, decimal strings, floats, missing defaults,
+  shifted metadata and synthetic annotated imports. After extraction all were
+  exactly equal, excluding only report generation time.
+- Full development regression: 1,003 tests passed in 207.793 seconds.
+- Package/server: 309 tests and 382 subtests passed in 45.33 seconds, with the
+  same 926 existing deprecation warnings. Node clients: 79 passed.
+- Actual original-producer demos generated schema-1/schema-2 reports from the
+  bundled synthetic source and a schema-2 synthetic provenance-bearing source.
+  Ten guarded inspections correctly distinguished originals, newline-only byte
+  changes, a different market and invalid OHLC. All HTML was 0600; original
+  report/source bytes, identity and summary were preserved. These synthetic
+  examples do not establish market performance or real-provider acquisition.
+- Default/hash-only subprocesses retain the original ban on data/execution
+  imports. The explicit path permits only existing pure data/provenance
+  definitions; acquisition entry points are replaced with fail-fast guards,
+  alongside research/runner/strategy/configuration import bans and network/DNS/
+  SQLite audit guards. Importing a definition is not invoking acquisition.
+- All 16 execution-fingerprinted source modules, `research_report.py` and
+  `quant_research.py` are byte-identical to v41. The two intended producer/loader
+  entry-point delegations are verified by exact output and AST comparisons.
+- Fresh independent whole-increment review found no Critical, Important or Minor
+  finding. It independently passed 146 distinct focused tests, reran data tests
+  without site packages, and proved by AST comparison that loader statements,
+  original preflight order and post-preflight evaluation statements are retained.
 
-Actual desktop/mobile browser visual QA remains unverified. The earlier Browser
-connection was unavailable and the cloud browser rejected the local-file
-protocol. That boundary was not bypassed with localhost or another surface.
-Automated markup/content/CSP tests do not establish actual responsive, print,
-font or accessibility-interaction behavior.
+Actual desktop/mobile browser visual QA remains unverified. The earlier browser
+connection was unavailable and the local-file protocol was refused. No localhost,
+alternate browser or automation workaround was used. Markup/content/CSP tests do
+not establish rendered fonts, responsiveness, print or accessibility interaction.
 
-## Retained capabilities and claim boundaries
+## Retained boundaries and capabilities
 
-The v40 read-only standalone research snapshot still preserves exact original
-decimal strings, all candidates/windows, losses, skips and schema-2 fixed-selection
-1x/2x/3x cost diagnostics. Each window uses independent capital; summary means are
-arithmetic, not portfolio compounding. Skipped windows lack measured test results.
-Marked holdings are not fully realized cash and do not imply a forced final sale.
-Risk-stop flags are not measured maximum drawdown.
+A data match means the observed bytes were accepted by the producer's input rules
+under this report's configuration and the five metadata values agree. A shorter
+otherwise well-formed source may have no complete window and be invalid before
+metadata comparison; large sources may exceed work/robustness budgets. This is
+not general acceptance under arbitrary research settings.
 
-`python tools/paper_study.py check DIRECTORY --html NEW_FILE` retains its separate
-saved study/account audit and completion-receipt semantics. Earlier legacy
-empty-signal-ID and filled-checkpoint compatibility corrections, required server
-CI and offline installation build prerequisites are retained.
+A newline-only change can be byte mismatch plus data matched. Recorded byte
+identity can also coexist with invalid input. Neither byte nor data consistency
+authenticates a provider, proves price truth, reproduces saved performance or
+attests execution. Ordinary metadata checks are not authenticated atomic file
+snapshots. Later source changes do not update an exported document; its displayed
+report generation time remains the original report's time.
 
-A file match means only that the local bytes observed during the check hash to
-the value recorded in this report. It does not authenticate the provider, validate
-prices, reproduce execution, attest the producing code revision, or verify a
-market-study receipt. Ordinary metadata checks are not an authenticated atomic
-snapshot. Later source changes do not update an exported HTML document; the
-shown report generation time is still the original report's timestamp.
-
-No main merge, deployment, brokerage credentials/orders or live enablement was
-added. The original producer, report schema, dashboard, execution and recovery
-contracts remain unchanged. Earlier unrelated local-only KIS/UI packages are
-not assumed integrated. Keep personal input data and results outside Git; only
-synthetic examples were used in this continuation.
+Research windows retain independent capital and arithmetic means, skipped windows
+lack measured results, marked holdings are not fully realized cash, and risk-stop
+flags are not measured maximum drawdown. The separate `paper_study.py check`
+receipt/account audit and all existing recovery/order-safety behavior remain.
+Earlier unrelated local-only KIS/UI packages are not assumed integrated.
+Only synthetic data was used here; keep personal inputs and results outside Git.
 
 ## Next useful work
 
-Use the explicit matching command on an operator-selected report and its retained
-local fixture when those files are provided. Preserve the original report and
-producing code revision; do not upgrade a matched digest into an execution claim.
-Desktop/mobile visual checks remain outstanding through an authorized route.
-Further checks of source data validity must be separately specified and must not
-silently fetch data or rerun research inside this inspector.
+The inspector now covers saved-report consistency, byte identity and original
+research-input rules. Prioritize a complete operator workflow using explicitly
+selected local sources/candidates and clear study/research outputs, rather than
+adding duplicate validators. Any source-provider authentication or actual result
+reproduction should be a separately specified operation, never a hidden rerun
+inside this inspector. Authorized desktop/mobile visual QA is still outstanding.
 
 ## Delivery verification
 
-Publish only to the existing development branch with an expected-head,
-fast-forward update and compare the remote Git tree to the tested local tree.
-Keep PR #1 Draft, unmerged and without auto-merge; main stays unchanged.
+Publish the exact tested tree only to the existing feature branch with an
+expected-head fast-forward guard. Keep PR #1 Draft/unmerged with no auto-merge
+and main unchanged. Compare the remote tree with the local verified tree.
 
-This handoff is committed before remote publication and its exact-head CI
-complete. Verify the actual current PR head and its Quant Regression, Order
-Outcome Safety and CI/CD runs. An earlier head's successful workflow does not
-cover later changes. Local checkpoints `d4e8528`, `b1b9647`, `60b4c42`, `6bc96db`
-and `ec5962d` describe work stages, not necessarily the consolidated remote SHA.
+Publication and exact-head CI follow this handoff commit. On resumption, inspect
+the actual current PR head and its Quant Regression, Order Outcome Safety and
+CI/CD runs; previous-head success is not evidence for a later commit. Local
+checkpoints `ad31788`, `d16aa52`, `e6dd140` and `4a0693a` describe work stages;
+connected GitHub delivery may consolidate them into a different remote commit.

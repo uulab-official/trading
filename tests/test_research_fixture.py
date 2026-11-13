@@ -336,6 +336,28 @@ class ResearchFixtureTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 self.module.validate_fixture_check(value, self.expected)
 
+    def test_snapshot_returns_exact_hashed_bytes_from_one_file_open(self):
+        reader = getattr(self.module, 'read_fixture_snapshot', None)
+        self.assertTrue(callable(reader), 'same-observation fixture snapshot reader is missing')
+        opened = []
+        original = os.open
+        def track(path, *args, **kwargs):
+            opened.append(path)
+            return original(path, *args, **kwargs)
+        with patch.object(self.module.os, 'open', side_effect=track):
+            check, raw = reader(self.path, self.expected)
+        self.assertEqual(raw, self.raw)
+        self.assertIs(type(raw), bytes)
+        self.assertEqual(check['actual_sha256'], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(check['size_bytes'], len(raw))
+        self.assertEqual(sum(path == self.path.name for path in opened), 1)
+
+    def test_snapshot_rejects_mutation_before_returning_captured_bytes(self):
+        reader = getattr(self.module, 'read_fixture_snapshot', None)
+        self.assertTrue(callable(reader), 'same-observation fixture snapshot reader is missing')
+        with self.after_first_read(lambda: self.path.write_bytes(b'changed')):
+            self.assert_unavailable(lambda: reader(self.path, self.expected))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -6,45 +6,16 @@ This is endpoint-based independent-window research, not a portfolio simulator.
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN, localcontext
 import hashlib
+from .research_input import prepare_research_input
 from .research_report import (cash_metrics, check_robustness_budget, cost_scenarios,
                               research_identity, robustness_policy, robustness_summary)
 from .research_report import CONTEXT, DEFAULT_CANDIDATES, DEFAULT_SETTINGS, canonical, checked_metrics, experiment, fold_ranges, integer, number, selection, summary, validate_report
 
 def run_research(data, fixture_sha256, *, candidates=None, settings=None, evaluator=None,
                  robustness=False, benchmark_evaluator=None):
-    if type(robustness) is not bool:
-        raise ValueError('robustness must be boolean')
-    if not isinstance(data, dict) or data.get('mode', 'paper') != 'paper':
-        raise ValueError('paper history required')
-    if settings is not None and (not isinstance(settings, dict) or set(settings) - set(DEFAULT_SETTINGS)):
-        raise ValueError('unknown settings')
-    rows = data.get('candles')
-    if not isinstance(rows, list) or not rows:
-        raise ValueError('history required')
-    if any((not isinstance(row, list) or len(row) != 6 for row in rows)):
-        raise ValueError('six-column candles required')
-    if 'data_provenance' in data:
-        from trading_data.upbit_history import validate_market_fixture
-        validate_market_fixture(data)
-    spec = experiment(dict(symbol=data.get('symbol', 'BTC/USDT'), timeframe=data.get('timeframe', '1h'), bars=len(rows), first_bar_ms=rows[0][0], fixture_sha256=fixture_sha256, candidates=DEFAULT_CANDIDATES if candidates is None else candidates, settings={**DEFAULT_SETTINGS, **(settings or {})}))
-    if robustness:
-        check_robustness_budget(spec)
+    spec, clean = prepare_research_input(data, fixture_sha256, candidates=candidates,
+                                         settings=settings, robustness=robustness)
     s = spec['settings']
-    frame = spec['timeframe']
-    duration = int(frame[:-1]) * {'m': 60000, 'h': 3600000, 'd': 86400000, 'w': 604800000}[frame[-1]]
-    clean = []
-    for i, row in enumerate(rows):
-        if not isinstance(row, list) or len(row) != 6:
-            raise ValueError('six-column candles required')
-        timestamp = integer(row[0], 0, 253402300799999)
-        if timestamp != spec['first_bar_ms'] + i * duration:
-            raise ValueError('contiguous chronological bars required')
-        values = [number(str(v)) for v in row[1:]]
-        o, h, l, c, volume = values
-        if min(o, h, l, c) <= 0 or not l <= o <= h or (not l <= c <= h):
-            raise ValueError('invalid OHLC')
-        clean.append((timestamp, *(str(v) for v in values)))
-    clean = tuple(clean)
     evaluate = evaluator or evaluate_with_runner
     engine = {k: s[k] for k in ('initial_balance', 'position_size_pct', 'fee_pct', 'slippage_pct', 'max_daily_loss_pct', 'max_drawdown_pct')}
     engine.update(symbol=spec['symbol'], timeframe=spec['timeframe'])

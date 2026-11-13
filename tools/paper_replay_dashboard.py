@@ -17,6 +17,7 @@ for source in [ROOT/'packages/core', ROOT/'packages/data', ROOT/'packages/strate
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 from trading_bot.replay_report import build_report, read_report, write_report
+from trading_bot.fixture_input import load_fixture
 
 MAX_FIXTURE_BYTES = 32 * 1024 * 1024
 
@@ -43,20 +44,6 @@ def validate_paths(fixture, checkpoint, report):
     return fixture, checkpoint, report
 
 
-
-def load_fixture(raw):
-    """Preserve legacy float semantics; strictly revalidate annotated market files."""
-    from trading_data.upbit_history import decode_json, validate_market_fixture
-    data = decode_json(raw, decimal_numbers=False)
-    if not isinstance(data, dict) or data.get('mode', 'paper') != 'paper':
-        raise ValueError('paper fixture required')
-    candles = data.get('candles')
-    if (not isinstance(candles, list) or not 1 <= len(candles) <= 10000
-            or any(not isinstance(row, list) or len(row) != 6 for row in candles)):
-        raise ValueError('one to 10000 six-column OHLCV rows required')
-    if 'data_provenance' in data:
-        validate_market_fixture(data)
-    return data
 
 def export_replay(fixture, checkpoint, report, **options):
     fixture, checkpoint, report = validate_paths(fixture, checkpoint, report)

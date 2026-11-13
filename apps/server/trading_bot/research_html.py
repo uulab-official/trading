@@ -26,6 +26,12 @@ border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:
 padding:3px 8px;border-radius:5px}.skip{background:#fff3d9;color:var(--amber)}
 .unchecked{background:#eef2f8;color:var(--sub)}.mismatch{background:#fff0ed;color:#92331f}
 .fixture-check .facts{grid-template-columns:repeat(2,minmax(0,1fr))}.fixture-check .note{margin-top:10px}
+.fixture-data-check .note{margin-top:10px}.fixture-data-table{width:100%;border-collapse:collapse;
+table-layout:fixed;margin-top:13px;font-size:11px}.fixture-data-table caption{text-align:left;
+color:var(--sub);margin-bottom:7px}.fixture-data-table th,.fixture-data-table td{text-align:left;
+padding:8px 7px;vertical-align:top;border-bottom:1px solid var(--line);overflow-wrap:anywhere;
+font-variant-numeric:tabular-nums}.fixture-data-table th{font-weight:600}
+.fixture-data-table th:first-child{width:20%}.fixture-data-table th:last-child{width:16%}
 .facts,.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 22px;margin-top:13px}
 .facts>div,.metrics>div{min-width:0}dt{color:var(--sub);font-size:11px}dd{margin:3px 0 0;
 overflow-wrap:anywhere;font-variant-numeric:tabular-nums;font-weight:550}.metrics dd{font-size:12px}
@@ -64,6 +70,10 @@ _ROBUST_SUMMARY = (
     ('mean_strategy_return_pct', '전략 평균 수익률'), ('mean_buy_hold_return_pct', '매수·보유 평균 수익률'),
     ('mean_excess_return_pp', '평균 초과 수익률'), ('worst_strategy_return_pct', '전략 최저 수익률'),
     ('positive_folds', '전략 양수 수익 창'), ('outperformed_benchmark_folds', '매수·보유 초과 창'),
+)
+_FIXTURE_DATA_FIELDS = (
+    ('symbol', '시장 / 평가 통화'), ('timeframe', '봉 간격'), ('bars', '전체 봉 수'),
+    ('first_bar_ms', '첫 포함 봉 · UTC'), ('last_bar_ms', '마지막 포함 봉 · UTC'),
 )
 
 
@@ -210,13 +220,67 @@ def _fixture_comparison(check):
             '이후 파일 변경은 이 스냅샷에 반영되지 않습니다.</p></section>')
 
 
-def render_research_report(report: dict, *, fixture_check=None) -> str:
+def _fixture_data_value(key, value):
+    if key.endswith('_ms'):
+        return _utc(value)
+    return str(value)+(' 개' if key == 'bars' else '')
+
+
+def _fixture_data_comparison(check):
+    """Display shared input-rule acceptance and metadata as a separate claim."""
+    status = 'not_requested' if check is None else check['status']
+    label, style, message = {
+        'not_requested': ('입력 구조 미검사', ' unchecked',
+                          '입력 구조 검사를 요청하지 않았습니다. 파일 해시 대조와 별도로 입력 규칙과 보고서 정보의 일치를 확인하지 않았습니다.'),
+        'matched': ('입력 구조·정보 일치', '',
+                    '같은 관측 바이트가 연구 입력 규칙을 통과했고, 아래 다섯 정보가 보고서와 일치합니다.'),
+        'mismatch': ('보고서 입력 정보 불일치', ' mismatch',
+                     '같은 관측 바이트가 연구 입력 규칙을 통과했지만, 아래 표시된 정보가 보고서와 다릅니다.'),
+        'invalid': ('연구 입력 형식 오류', ' mismatch',
+                    '관측 바이트가 연구 입력 규칙을 통과하지 못했습니다. 확인되지 않은 관측 정보는 표시하지 않습니다.'),
+    }[status]
+    fields = ''
+    if status == 'invalid':
+        fields = ('<p class="note">보고서가 기대하는 입력 정보</p><dl class="facts">'
+                  +''.join(_field('fixture-data-expected-'+key, title,
+                                  _fixture_data_value(key, check['expected'][key]))
+                           for key, title in _FIXTURE_DATA_FIELDS)+'</dl>')
+    elif check is not None:
+        rows = []
+        for key, title in _FIXTURE_DATA_FIELDS:
+            different = key in check['mismatches']
+            cells = ''.join('<td data-field="fixture-data-'+role+'-'+_e(key)+'">'
+                            +_e(_fixture_data_value(key, check[role][key]))+'</td>'
+                            for role in ('expected', 'observed'))
+            rows.append('<tr data-role="fixture-data-row" data-metadata-field="'+_e(key)+'">'
+                        '<th scope="row">'+_e(title)+'</th>'+cells
+                        +'<td><span'+(' class="mismatch"' if different else '')
+                        +' data-field="fixture-data-match-'+_e(key)+'">'
+                        +('불일치' if different else '일치')+'</span></td></tr>')
+        fields = ('<table class="fixture-data-table"><caption>보고서 기대값과 관측 입력 정보</caption>'
+                  '<thead><tr><th scope="col">항목</th><th scope="col">보고서 기대값</th>'
+                  '<th scope="col">관측 입력</th><th scope="col">대조</th></tr></thead><tbody>'
+                  +''.join(rows)+'</tbody></table>')
+    return ('<section class="panel fixture-data-check" data-fixture-data-status="'+_e(status)+'">'
+            '<div class="heading"><h2>연구 입력 구조와 정보</h2><span class="badge'+style
+            +'" data-field="fixture-data-status">'+_e(label)+'</span></div>'
+            '<p class="subtitle">'+_e(message)+'</p>'+fields
+            +'<p class="note">입력 규칙은 저장된 보고서의 후보·설정·스키마를 기준으로 적용합니다. '
+            '이 검사는 데이터 출처와 가격의 사실성, 연구 결과 재현 또는 실제 실행을 증명하지 않습니다.</p></section>')
+
+
+def render_research_report(report: dict, *, fixture_check=None, fixture_data_check=None) -> str:
     """Validate saved-report consistency and project exact values without I/O."""
     report = research_report.validate_report(report)
     spec, summary = report['experiment'], report['summary']
     if fixture_check is not None:
         from .research_fixture import validate_fixture_check
         fixture_check = validate_fixture_check(fixture_check, spec['fixture_sha256'])
+    if fixture_data_check is not None:
+        if fixture_check is None:
+            raise ValueError('fixture_data_requires_byte_check')
+        from .research_fixture_data import validate_fixture_data_check
+        fixture_data_check = validate_fixture_data_check(fixture_data_check, report, fixture_check)
     settings, quote = spec['settings'], spec['symbol'].split('/')[1]
     frame = spec['timeframe']
     duration = int(frame[:-1])*{'m':60000, 'h':3600000, 'd':86400000, 'w':604800000}[frame[-1]]
@@ -260,7 +324,7 @@ def render_research_report(report: dict, *, fixture_check=None) -> str:
             '<p class="subtitle">저장된 구조·식별자·산술의 일관성을 확인했습니다. 데이터 출처와 실제 실행은 '
             '인증하지 않으며, 시장 연구 완료 기록(receipt) 검증을 제공하지 않습니다.</p>'
             '<dl class="facts">'+overview+'</dl></section>'+_fixture_comparison(fixture_check)
-            +'<section class="panel"><h2>공통 조건과 후보</h2>'
+            +_fixture_data_comparison(fixture_data_check)+'<section class="panel"><h2>공통 조건과 후보</h2>'
             '<p class="note">각 창은 독립 자본으로 시작합니다. 아래 후보와 선택은 저장된 보고서 값입니다.</p>'
             '<dl class="facts">'+''.join(assumptions)+'</dl><div class="candidate-list">'
             +''.join(_candidate(c) for c in spec['candidates'])+'</div></section>'

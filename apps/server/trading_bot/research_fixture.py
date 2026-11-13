@@ -53,6 +53,16 @@ def _check_parent(named_parent, canonical_parent, identity):
 
 
 def check_fixture(path, expected_sha256):
+    """Stream a byte comparison without retaining the source contents."""
+    return _observe_fixture(path, expected_sha256, capture=False)[0]
+
+
+def read_fixture_snapshot(path, expected_sha256):
+    """Return the comparison and the exact same bounded, stably observed bytes."""
+    return _observe_fixture(path, expected_sha256, capture=True)
+
+
+def _observe_fixture(path, expected_sha256, *, capture):
     """Hash bounded raw bytes from a stable observed regular file, or fail closed.
 
 The final path component must not be a symlink. An initially resolved parent
@@ -87,6 +97,7 @@ No path or source contents are included in the returned comparison or errors.
                 raise ValueError('file_changed')
 
             digest = hashlib.sha256()
+            chunks = [] if capture else None
             size = 0
             while True:
                 raw = os.read(descriptor, min(_CHUNK_BYTES, MAX_FIXTURE_BYTES + 1 - size))
@@ -96,6 +107,8 @@ No path or source contents are included in the returned comparison or errors.
                 if size > MAX_FIXTURE_BYTES:
                     raise ValueError('file_too_large')
                 digest.update(raw)
+                if chunks is not None:
+                    chunks.append(raw)
 
             if (size != before.st_size or _signature(os.fstat(descriptor)) != signature
                     or _signature(os.stat(named.name, dir_fd=directory, follow_symlinks=False)) != signature):
@@ -103,8 +116,9 @@ No path or source contents are included in the returned comparison or errors.
             _check_parent(named.parent, parent, parent_id)
 
             observed = digest.hexdigest()
-            return dict(status='matched' if observed == expected_sha256 else 'mismatch',
-                        scope='local_fixture_bytes', algorithm='sha256',
-                        expected_sha256=expected_sha256, actual_sha256=observed, size_bytes=size)
+            check = dict(status='matched' if observed == expected_sha256 else 'mismatch',
+                         scope='local_fixture_bytes', algorithm='sha256',
+                         expected_sha256=expected_sha256, actual_sha256=observed, size_bytes=size)
+            return check, b''.join(chunks) if chunks is not None else None
     except (OSError, ValueError, TypeError, RuntimeError):
         raise ValueError('research_fixture_unavailable') from None

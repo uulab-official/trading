@@ -36,6 +36,11 @@ Add `--fixture config/examples/offline_fixture.json` to compare an explicitly
 supplied local file with the report's recorded raw-byte SHA-256. The comparison
 has a separate status: a match exits `0`, a mismatch exits `1` and can still
 produce diagnostic HTML. Without the option, the source file is not opened.
+Add `--validate-fixture` with `--fixture` to apply the original research-input
+rules under the report's candidates/settings/schema and compare its market,
+timeframe, bar count and included first/last timestamps. This uses the same bytes
+as the hash check and reports data acceptance separately; invalid data exits `1`
+with optional diagnostic HTML. See the [input-inspection guide](docs/QUANT_RESEARCH.md#optional-research-input-inspection-v42).
 This is **saved-report consistency checking**; it does not authenticate source
 data or engine execution and has no market-study completion receipt. See
 [QUANT_RESEARCH.md](docs/QUANT_RESEARCH.md#static-research-snapshot-v40) for the

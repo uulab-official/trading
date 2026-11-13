@@ -129,6 +129,75 @@ file paths nor contents are included in the result or HTML. The displayed report
 generation time remains the saved report's original value; later file changes
 do not update a saved snapshot.
 
+### Optional research-input inspection (v42)
+
+Add `--validate-fixture` alongside `--fixture` to apply the **same input rules
+as the original research producer**, using this report's candidates, settings and
+schema. The source is observed once: the hash and parser consume the same bounded
+bytes. The inspector does not reopen the file to parse it, acquire prices, run a
+strategy, evaluate windows or open a paper account.
+
+```bash
+python tools/paper_research_report.py .private/research-001.json \
+  --fixture config/examples/offline_fixture.json --validate-fixture \
+  --html .private/research-001-validated.html
+```
+
+The flag requires an explicit `--fixture`. Without it, report-only and v41
+hash-only JSON remain unchanged; hash-only matching still accepts arbitrary
+bytes and makes no claim that they are a valid research fixture. HTML labels
+unrequested input inspection **입력 구조 미검사**.
+
+The shared loader preserves duplicate-key rejection, legacy JSON float semantics
+and existing imported-provenance checks. The shared research preflight applies
+the original market/timeframe rules, strict integer timestamps and chronological
+continuity, bounded finite positive OHLC and valid ranges, nonnegative volume,
+research history/candidate limits, and window/work/robustness budgets. Existing
+producer and replay entry points delegate to these same extracted functions;
+the numerical rules, failure order and evaluation behavior are retained.
+
+A completed explicit inspection adds a separate `fixture_data_check` object:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `matched`, `mismatch` or `invalid` |
+| `scope` | `research_input_consistency` |
+| `run_id` | The validated saved report's identity |
+| `fixture_sha256` | Actual observed byte hash from `fixture_check` |
+| `expected` | Report symbol, timeframe, bar count, first and last included timestamp |
+| `observed` | The same five fields from accepted input, or `null` when invalid |
+| `mismatches` | Differing keys in fixed order: `symbol`, `timeframe`, `bars`, `first_bar_ms`, `last_bar_ms` |
+| `error` | `null`, or the fixed `research_input_invalid` code |
+
+**입력 구조·정보 일치** means the bytes were accepted under this report's
+configuration and the five metadata fields agree. **보고서 입력 정보 불일치**
+means input acceptance succeeded but some metadata differs. **연구 입력 형식 오류**
+means parsing or input preparation failed; the result contains no partially
+decoded observed metadata. All three preserve the saved report and byte-check
+statuses, identity and metrics.
+
+Acceptance depends on the saved candidates/settings/schema. For example, a
+shorter otherwise well-formed file may have no complete test window under this
+report's settings, producing `invalid` before a count comparison. A larger input
+can exceed the existing research work budget. This is not a general declaration
+that the data is valid for every research setup. The research limit remains
+5,000 bars, even though the generic fixture loader supports up to 10,000.
+
+A formatting-only change can have byte `mismatch` but input `matched`. Conversely,
+a report can record the hash of invalid data: byte `matched` then coexists with
+input `invalid`. Exit `0` requires every explicitly requested check to match.
+Any completed byte/data mismatch or invalid-input diagnostic exits `1`, and can
+still publish a clearly labeled diagnostic HTML. File-observation failures or
+unexpected internal failures exit `2` without a diagnostic file; publication
+uncertainty and interruption retain exits `3` and `130` and take precedence.
+
+No data paths, contents or parser exception details are displayed. Shared data
+and provenance definitions are imported only for explicit input inspection;
+acquisition APIs in that existing module are never invoked. These checks do not
+authenticate a provider, establish price truth, reproduce saved performance or
+attest actual execution. An exported snapshot describes the observed bytes and
+does not change when the source later changes.
+
 ### What is displayed
 
 The Korean report keeps all folds, all training candidates, selected candidates,
@@ -154,6 +223,7 @@ risk exits; equal starting cash does not imply equal exposure or risk.
 | --- | --- | --- |
 | `paper_research_report.py` | Existing research schema, experiment identity, chronological bounds, training selection, internal accounting and summary; optional diagnostics | Source authenticity, an engine rerun, execution attestation, repository revision, or market-study completion receipt |
 | Optional `--fixture LOCAL_FILE` | Exact local bytes against this report's recorded SHA-256, with a separate comparison status | Provider authenticity, data validity, execution attestation or a guarantee against later file changes |
+| Optional `--validate-fixture` | Original research-input rules under the saved configuration; symbol/timeframe/count/first/last metadata | Provider truth, price truth, reproduced performance or actual execution |
 | `paper_study.py check` | The separate saved study/account audit and its existing completion-receipt contract | Walk-forward evaluation or source-provider authenticity merely from a successful receipt |
 
 The HTML status is **연구 보고서 일관성 확인**. The CLI success status is
@@ -175,8 +245,8 @@ the shared publisher. The command never replaces or deletes a final target.
 
 | Exit | Meaning |
 | --- | --- |
-| `0` | Saved-report checks completed; any explicitly requested fixture matched; optional HTML was published |
-| `1` | Saved-report checks completed, but the explicit fixture digest differs; optional diagnostic HTML was published |
+| `0` | Saved-report checks completed; every explicitly requested byte/data check matched; optional HTML was published |
+| `1` | A completed byte/data check mismatched or explicit input inspection found invalid data; optional diagnostic HTML was published |
 | `2` | Invalid/unavailable arguments/report/fixture/output, or a pre-publication failure; JSON contains a bounded error code |
 | `3` | HTML may already exist but publication confirmation failed; preserve and inspect it |
 | `130` | Keyboard interruption; inspect any saved output before retrying with a new filename |

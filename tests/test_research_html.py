@@ -73,6 +73,20 @@ def fixture_check(value, *, matched=True, size=123):
                 size_bytes=size)
 
 
+def fixture_data_check(value, byte_check, *, observed=None, invalid=False):
+    spec = value['experiment']
+    frame = spec['timeframe']
+    duration = int(frame[:-1])*{'m':60000, 'h':3600000, 'd':86400000, 'w':604800000}[frame[-1]]
+    expected = {key: spec[key] for key in ('symbol', 'timeframe', 'bars', 'first_bar_ms')}
+    expected['last_bar_ms'] = spec['first_bar_ms']+(spec['bars']-1)*duration
+    observed = None if invalid else deepcopy(expected if observed is None else observed)
+    mismatches = [] if invalid else [key for key in expected if expected[key] != observed[key]]
+    return dict(status='invalid' if invalid else ('mismatch' if mismatches else 'matched'),
+                scope='research_input_consistency', run_id=value['run_id'],
+                fixture_sha256=byte_check['actual_sha256'], expected=expected, observed=observed,
+                mismatches=mismatches, error='research_input_invalid' if invalid else None)
+
+
 def skip_fold(value, index):
     fold = value['folds'][index]
     fold.update(selected=None, test=None)
@@ -374,11 +388,162 @@ class ResearchHtmlTests(unittest.TestCase):
                              self.render(value, fixture_check=check))
         self.assertEqual((value, check), original)
 
+    def test_default_and_hash_only_paths_explicitly_leave_input_structure_unchecked(self):
+        value = report()
+        for byte_check in (None, fixture_check(value), fixture_check(value, matched=False)):
+            with self.subTest(byte_check=byte_check):
+                page = Document(self.render(value, fixture_check=byte_check))
+                sections = page.root.find(data_fixture_data_status='not_requested')
+                self.assertEqual(len(sections), 1)
+                self.assertEqual(self.field(sections[0], 'fixture-data-status'), '입력 구조 미검사')
+                self.assertEqual(sections[0].find(data_field='fixture-data-observed-symbol'), [])
+                self.assertIn('요청하지 않았', sections[0].text)
+
+    def test_input_metadata_match_can_coexist_with_byte_mismatch_for_both_schemas(self):
+        for value in (report(), robust_report()):
+            byte_check = fixture_check(value, matched=False)
+            data_check = fixture_data_check(value, byte_check)
+            with self.subTest(schema=value['schema_version']):
+                page = Document(self.render(value, fixture_check=byte_check,
+                                            fixture_data_check=data_check))
+                section = page.root.find(data_fixture_data_status='matched')[0]
+                self.assertEqual(self.field(section, 'fixture-data-status'), '입력 구조·정보 일치')
+                self.assertEqual(self.field(page.root, 'fixture-check-status'), '파일 해시 불일치')
+                self.assertEqual(self.field(page.root, 'research-status'), '연구 보고서 일관성 확인')
+                for role in ('expected', 'observed'):
+                    for key in ('symbol', 'timeframe'):
+                        self.assertEqual(self.field(section, f'fixture-data-{role}-{key}'),
+                                         data_check[role][key])
+                    self.assertEqual(self.field(section, f'fixture-data-{role}-bars'),
+                                     str(value['experiment']['bars'])+' 개')
+                    self.assertEqual(self.field(section, f'fixture-data-{role}-first_bar_ms'),
+                                     '1970-01-01T00:00:00.000 UTC')
+                rows = section.find(data_role='fixture-data-row')
+                self.assertEqual([node.attrs['data-metadata-field'] for node in rows],
+                                 ['symbol', 'timeframe', 'bars', 'first_bar_ms', 'last_bar_ms'])
+                for phrase in ('후보', '설정', '스키마', '입력 규칙', '데이터 출처', '가격의 사실성',
+                               '재현', '실제 실행'):
+                    self.assertIn(phrase, section.text)
+                self.assertEqual(len(page.root.find(data_role='training-score')),
+                                 sum(len(fold['train_scores']) for fold in value['folds']))
+                self.assertEqual(len(page.root.find(data_role='cost-scenario')),
+                                 3*len(value['folds']) if value['schema_version'] == 2 else 0)
+
+    def test_differing_metadata_fields_have_ordered_exact_values_and_textual_markers(self):
+        value = report()
+        byte_check = fixture_check(value, matched=False)
+        observed = dict(symbol='ETH/USDT', timeframe='1h', bars=61,
+                        first_bar_ms=3600000, last_bar_ms=219600000)
+        data_check = fixture_data_check(value, byte_check, observed=observed)
+        page = Document(self.render(value, fixture_check=byte_check, fixture_data_check=data_check))
+        section = page.root.find(data_fixture_data_status='mismatch')[0]
+        self.assertEqual(self.field(section, 'fixture-data-status'), '보고서 입력 정보 불일치')
+        self.assertEqual(self.field(section, 'fixture-data-observed-symbol'), 'ETH/USDT')
+        self.assertEqual(self.field(section, 'fixture-data-observed-bars'), '61 개')
+        self.assertEqual(self.field(section, 'fixture-data-observed-first_bar_ms'),
+                         '1970-01-01T01:00:00.000 UTC')
+        self.assertEqual(self.field(section, 'fixture-data-observed-last_bar_ms'),
+                         '1970-01-03T13:00:00.000 UTC')
+        for row in section.find(data_role='fixture-data-row'):
+            key = row.attrs['data-metadata-field']
+            expected = '불일치' if key in data_check['mismatches'] else '일치'
+            self.assertEqual(self.field(row, 'fixture-data-match-'+key), expected)
+        self.assertEqual(self.field(page.root, 'mean_test_return_pct'),
+                         value['summary']['mean_test_return_pct']+' %')
+
+    def test_invalid_input_has_no_invented_observed_values_even_when_hash_matches(self):
+        value = robust_report()
+        byte_check = fixture_check(value)
+        data_check = fixture_data_check(value, byte_check, invalid=True)
+        page = Document(self.render(value, fixture_check=byte_check, fixture_data_check=data_check))
+        section = page.root.find(data_fixture_data_status='invalid')[0]
+        self.assertEqual(self.field(section, 'fixture-data-status'), '연구 입력 형식 오류')
+        self.assertEqual(self.field(page.root, 'fixture-check-status'), '파일 해시 일치')
+        self.assertIn('관측 정보', section.text)
+        self.assertIn('표시하지 않습니다', section.text)
+        for key in data_check['expected']:
+            self.assertEqual(section.find(data_field='fixture-data-observed-'+key), [])
+        self.assertEqual(self.field(section, 'fixture-data-expected-bars'), '90 개')
+        self.assertEqual(len(page.root.find(data_role='cost-scenario')), 6)
+
+    def test_data_context_requires_matching_report_and_byte_context_and_strict_fields(self):
+        value = report()
+        byte_check = fixture_check(value, matched=False)
+        valid = fixture_data_check(value, byte_check)
+        with self.assertRaises(ValueError):
+            self.render(value, fixture_data_check=valid)
+        cases = [False, [], {}, dict(valid, run_id='b'*64),
+                 dict(valid, fixture_sha256='a'*64), dict(valid, scope='provider_authenticated'),
+                 dict(valid, status='mismatch'), dict(valid, mismatches=['symbol']),
+                 dict(valid, error='PRIVATE_DETAILS'), dict(valid, path='/private/hidden')]
+        foreign_expected = deepcopy(valid)
+        foreign_expected['expected']['symbol'] = 'ETH/USDT'
+        cases.append(foreign_expected)
+        invalid_observed = deepcopy(valid)
+        invalid_observed['observed']['bars'] = True
+        cases.append(invalid_observed)
+        wrong_end = deepcopy(valid)
+        wrong_end['observed']['last_bar_ms'] += 1
+        cases.append(wrong_end)
+        injected = deepcopy(valid)
+        injected['observed']['symbol'] = '<script>alert(1)</script>'
+        cases.append(injected)
+        for data_check in cases:
+            with self.subTest(data_check=data_check), self.assertRaises(ValueError):
+                self.render(value, fixture_check=byte_check, fixture_data_check=data_check)
+
+    def test_data_metadata_included_endpoints_keep_exact_utc_milliseconds(self):
+        value = report()
+        value['experiment']['first_bar_ms'] = 253402300799999-59*3600000
+        value['run_id'] = contract.research_identity(value['experiment'])
+        byte_check = fixture_check(value)
+        data_check = fixture_data_check(value, byte_check)
+        page = Document(self.render(value, fixture_check=byte_check, fixture_data_check=data_check))
+        for role in ('expected', 'observed'):
+            self.assertEqual(self.field(page.root, f'fixture-data-{role}-first_bar_ms'),
+                             '9999-12-29T12:59:59.999 UTC')
+            self.assertEqual(self.field(page.root, f'fixture-data-{role}-last_bar_ms'),
+                             '9999-12-31T23:59:59.999 UTC')
+
+    def test_data_projection_has_no_io_fixture_parsing_or_preparation_and_preserves_context(self):
+        from trading_bot import research_fixture, research_fixture_data, fixture_input, research_input
+        value = robust_report()
+        byte_check = fixture_check(value, matched=False)
+        data_check = fixture_data_check(value, byte_check)
+        original = deepcopy((value, byte_check, data_check))
+        # The existing report validator uses JSON internally to copy its saved
+        # values. Forbid fixture parsing/preparation, not that unchanged copy.
+        with patch('builtins.open', side_effect=AssertionError('renderer opened a file')), \
+                patch('os.open', side_effect=AssertionError('renderer opened a descriptor')), \
+                patch('os.stat', side_effect=AssertionError('renderer inspected a file')), \
+                patch('os.lstat', side_effect=AssertionError('renderer inspected a link')), \
+                patch.object(Path, 'open', side_effect=AssertionError('renderer opened a path')), \
+                patch.object(research_fixture, 'read_fixture_snapshot',
+                             side_effect=AssertionError('renderer read input')), \
+                patch.object(research_fixture_data, 'check_fixture_data',
+                             side_effect=AssertionError('renderer checked input')), \
+                patch.object(fixture_input, 'load_fixture',
+                             side_effect=AssertionError('renderer loaded input')), \
+                patch.object(research_input, 'prepare_research_input',
+                             side_effect=AssertionError('renderer prepared input')):
+            first = self.render(value, fixture_check=byte_check, fixture_data_check=data_check)
+            self.assertEqual(first, self.render(value, fixture_check=byte_check,
+                                               fixture_data_check=data_check))
+        self.assertEqual((value, byte_check, data_check), original)
+
     def test_standalone_document_has_no_active_or_external_content(self):
         value = robust_report()
-        for check in (None, fixture_check(value), fixture_check(value, matched=False)):
-            with self.subTest(status=None if check is None else check['status']):
-                page = Document(self.render(value, fixture_check=check))
+        matching, different = fixture_check(value), fixture_check(value, matched=False)
+        observed = dict(fixture_data_check(value, different)['observed'], symbol='ETH/USDT')
+        contexts = ((None, None), (matching, None), (different, None),
+                    (matching, fixture_data_check(value, matching)),
+                    (different, fixture_data_check(value, different)),
+                    (different, fixture_data_check(value, different, observed=observed)),
+                    (matching, fixture_data_check(value, matching, invalid=True)))
+        for check, data_check in contexts:
+            with self.subTest(status=None if check is None else check['status'],
+                              data_status=None if data_check is None else data_check['status']):
+                page = Document(self.render(value, fixture_check=check, fixture_data_check=data_check))
                 self.assertTrue(any(n.tag == 'html' and n.attrs.get('lang') == 'ko' for n in page.nodes))
                 self.assertTrue(any(n.tag == 'style' for n in page.nodes))
                 self.assertFalse({n.tag for n in page.nodes} & {'script', 'link', 'img', 'iframe', 'form', 'object', 'a'})

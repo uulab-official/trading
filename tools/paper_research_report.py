@@ -8,7 +8,7 @@ import sys
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-for part in ('packages/core', 'apps/server'):
+for part in ('packages/core', 'packages/data', 'apps/server'):
     sys.path.insert(0, str(ROOT / part))
 
 
@@ -40,8 +40,12 @@ def main(argv=None):
         parser = _Parser(description=__doc__)
         parser.add_argument('report', help='Existing local schema-1 or schema-2 research JSON')
         parser.add_argument('--fixture', help='Explicit local file to compare by raw-byte SHA-256 (max 32 MiB)')
+        parser.add_argument('--validate-fixture', action='store_true',
+                            help='Also check original research-input rules and report metadata (requires --fixture)')
         parser.add_argument('--html', help='NEW HTML file in an existing owner-private directory')
         args = parser.parse_args(argv)
+        if args.validate_fixture and args.fixture is None:
+            raise ValueError('fixture_required')
 
         failure = 'research_report_output_invalid'
         # Resolve fixture aliases only after the explicit fixture check, so an
@@ -53,15 +57,21 @@ def main(argv=None):
         report = read_report(args.report)
 
         fixture_check = None
+        fixture_data_check = None
         if args.fixture is not None:
             failure = 'research_report_fixture_unavailable'
-            from trading_bot.research_fixture import check_fixture
-            fixture_check = check_fixture(args.fixture, report['experiment']['fixture_sha256'])
+            if args.validate_fixture:
+                from trading_bot.research_fixture_data import check_fixture_data
+                fixture_check, fixture_data_check = check_fixture_data(args.fixture, report)
+            else:
+                from trading_bot.research_fixture import check_fixture
+                fixture_check = check_fixture(args.fixture, report['experiment']['fixture_sha256'])
 
         if output is not None:
             failure = 'research_report_render_failed'
             from trading_bot.research_html import render_research_report
-            document = render_research_report(report, fixture_check=fixture_check).encode('utf-8')
+            document = render_research_report(report, fixture_check=fixture_check,
+                                              fixture_data_check=fixture_data_check).encode('utf-8')
 
             failure = 'research_report_output_invalid'
             target, binding = output
@@ -93,8 +103,11 @@ def main(argv=None):
         html_written=output is not None)
     if fixture_check is not None:
         result['fixture_check'] = fixture_check
+    if fixture_data_check is not None:
+        result['fixture_data_check'] = fixture_data_check
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, allow_nan=False))
-    return 1 if fixture_check is not None and fixture_check['status'] == 'mismatch' else 0
+    return 1 if ((fixture_check is not None and fixture_check['status'] == 'mismatch')
+                 or (fixture_data_check is not None and fixture_data_check['status'] != 'matched')) else 0
 
 
 if __name__ == '__main__':
