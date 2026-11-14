@@ -1,7 +1,9 @@
 # Paper operating checklist and remaining live evidence
 
-The supported path is a local historical paper workflow and a read-only local
-observer. Follow [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md)
+The supported path includes explicit public closed-candle capture, a local
+historical paper workflow and a read-only local observer. Follow
+[MARKET_CAPTURE.md](docs/MARKET_CAPTURE.md) for collection and immutable export,
+and [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md)
 for exact commands, probe contracts, budgets, shutdown, recovery and rollback.
 This checklist replaces the previous credential-and-live-switch deployment recipe.
 No entry below is prechecked as evidence that an operator performed it.
@@ -28,6 +30,16 @@ No entry below is prechecked as evidence that an operator performed it.
 - [ ] Stop the observer using SIGINT/SIGTERM; expected exits are `130`/`143`. Startup/configuration failure is `2`.
 - [ ] Roll back code through a separately prepared exact pinned revision/environment, preserving data/evidence. Do not rewrite manifests, delete unknown intents or apply unverified migrations.
 
+## Public capture operations
+
+- [ ] Select a new private capture, fixed KRW market/unit and explicit retention; run the collector in the foreground.
+- [ ] Check `/api/market-capture` or `market_capture.py check` separately from dashboard readiness. Current data does not prove owner liveness or authorize an order.
+- [ ] Preserve overlap/gap conflicts, terminal provider refusals and interrupted fetching evidence. Resume refuses those states; investigate before starting another capture.
+- [ ] Honor the saved retry cooldown. A stopped collector with a prior retryable error still waits conservatively on resume.
+- [ ] Review window bounds and eviction counters before exporting. Retained candles are a rolling window, not a complete archival record.
+- [ ] Use a new immutable export outside the capture, validate it with the original inspector and select a new historical paper run explicitly.
+- [ ] Record actual provider/network/clock/disk conditions during a future soak. Controlled synthetic and loopback tests are not a provider-availability claim.
+
 ## Evidence still required for any future live service
 
 Configuration completeness is not operational readiness.
@@ -39,7 +51,8 @@ unverified. Dashboard readiness checks readability of local sources only.
 The following require implementation and recorded
 verification before a live service could be assessed:
 
-- [ ] Prospective market-feed continuity, timestamp/freshness handling, gaps and reconnect behavior under real operational conditions.
+- [ ] Real operational verification of the implemented public capture continuity, timestamp/freshness, gaps, cooldown and restart rules; the current evidence is controlled.
+- [ ] Continuous paper strategy/account consumption with a durable cursor, next-open execution semantics and restart reconciliation. Repeating historical replay is not that runtime.
 - [ ] Authoritative broker/account reconciliation, partial fills, ambiguous submission outcomes, idempotence and settlement across restart.
 - [ ] Operational risk controls and stop behavior against actual execution; modeled historical gates do not guarantee a maximum loss.
 - [ ] A reviewed credential/permission boundary and deployment architecture appropriate to the intended service. The current observer is not an authenticated public web server.

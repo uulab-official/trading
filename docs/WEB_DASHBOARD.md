@@ -21,8 +21,9 @@ Do not copy files or rename checkpoints to pretend those contracts agree.
 | `--replay-report` | Validated completed PaperRunner report, never its checkpoint | Replay section at `/`, `/api/replay` |
 | `--research-report` | Validated saved walk-forward research report | `/research.html`, `/api/research` |
 | `--paper-session` | Durable paper-account SQLite observation | `/paper-account.html`, `/paper-orders.html`, `/api/paper-session`, `/api/paper-session/orders`, `/api/paper-session/order` |
+| `--market-capture` | Validated rolling public candle capture directory | `/market-data.html`, `/api/market-capture` |
 | No source flag required | Observer process probe | `/api/liveness` |
-| All explicitly configured sources | Source readability probe | `/api/readiness` |
+| Configured journal/replay/research/paper_session sources | Existing four-source readability probe | `/api/readiness` |
 
 Flags may be combined; missing or invalid sources produce their own unavailable
 response without concealing an independent valid source. Unconfigured probes
@@ -44,6 +45,15 @@ GET/HEAD without query parameters and include only the fixed version-1 local
 paper observer contract, UTC observation time, and for readiness exactly the four
 source statuses. They expose no account identifiers, source paths or metrics.
 `/api/health` remains journal-only; it is not an aggregate readiness alias.
+
+The v45 capture route is independent of those four readiness keys. It accepts
+GET/HEAD without query parameters, returning `200` for any valid observation
+(including stale/blocked/stopped) and `503` for unavailable capture data. Its
+`status` describes separate candle age and successful observation age; a saved
+`running` phase never asserts collector process liveness. Use the capture CLI
+check for a `0` current / `1` valid noncurrent / `2` unavailable decision.
+[MARKET_CAPTURE.md](MARKET_CAPTURE.md) defines the exact limits and lifecycle.
+The observer never starts collection or invokes export, strategy or account work.
 
 Use `python tools/paper_dashboard_check.py --port 8765` for strict direct-loopback
 readiness validation, adding `--liveness` for process response. Exit `0` means

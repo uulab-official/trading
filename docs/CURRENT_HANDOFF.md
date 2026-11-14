@@ -1,231 +1,246 @@
-# Trading continuation handoff — 2026-11-14 (v44)
+# Trading continuation handoff — 2026-11-14 (v45)
 
-## Resume point and supported scope
+## Resume point and delivery scope
 
-Repository: `uulab-official/trading`. Continue on `feat/smc-market-structure`
+Repository: `uulab-official/trading`; existing branch `feat/smc-market-structure`
 and [Draft PR #1](https://github.com/uulab-official/trading/pull/1).
-The verified starting head was v43 `2c3bcf288deb62160c09c85fba195636e8e6afb0`,
-tree `5a20277b14aaf3f1fa7a7597042f80a8c6b6b154`. Remote inspection found no
-divergence, all four prior exact-head runs successful, PR open/Draft and unmerged
-with no auto-merge, and main unchanged at
+The verified v44 starting head was `dd1713276ea5a4580193fca12b62b17bde73e5c5`,
+tree `bb6016aae7e9e4455aa939727eb94a2e38ed74f2`. Main remains
 `a5750019dcd7a980a28783258c06c7ef4706afc1`.
 
-The user requested progress to production quality. This increment addresses
-reproduced resource, observation, file-durability and false-readiness defects in
-the implemented local paper/research workflow. It does not certify a public HTTP
-server, a continuously connected market feed or a live broker runtime. Existing
-feature-branch/Draft PR delivery authorization applies. Main merge, deployment,
-credentials and live execution remain outside this continuation. The clean
-existing feature checkout and installed environment were reused.
+The user requested continued production-quality development. This increment
+implements continuous public-data capture using the existing Upbit integration,
+with an explicit export into the original historical paper workflow. Development,
+testing, feature publication and Draft PR metadata updates continue under the
+existing authorization. Main merge, public deployment, credentials and real
+trading remain outside this delivery. No provider/account requests, broker
+orders or external notifications were made during implementation or testing.
 
-## Delivered v44 implementation
+Independent remote inspection before work and at 2026-11-14T13:09:59Z verified
+unchanged feature/main refs, an open Draft/unmerged PR without auto-merge, and
+unchanged PR title/body. Use actual refs and final-head checks when resuming;
+final publication details are recorded after this handoff commit in the PR and
+ignored local delivery receipt.
 
-### Bounded observer and independent probes
+## Implemented capture contract
 
-The supported dashboard now uses a standard-library bounded runtime with at most
-eight request handlers and an eight-connection backlog. It closes an excess
-connection before spawning another worker. A two-second idle timeout and a
-ten-second absolute connection lifetime also cover trickled request bytes.
-Aggregate headers are capped at 16 KiB and request lines at 4,096 bytes. Parser,
-request and startup errors are sanitized. Existing loopback binding, Host/Origin
-checks, CSP, read-only routes and HTTP/1.0 behavior remain.
+### Storage and continuity
 
-SIGINT/SIGTERM handlers only record shutdown, without acquiring an Event lock.
-The owner checks the request at intervals of at most 0.1 seconds, stops the serving
-thread, closes active sockets, drains workers for at most two seconds and
-restores previous handlers. Repeated close is idempotent. Exit 130 means SIGINT,
-143 SIGTERM, 2 startup/configuration failure and 0 ordinary completion.
+`apps/server/trading_bot/market_capture_store.py` creates a new private POSIX
+capture directory containing `capture.sqlite3` and permanent `.capture.lock`.
+Configuration is frozen: KRW spot market, supported minute unit, initial history
+1–200, retention up to 5,000, and polling interval 5–300 seconds. Resume accepts
+no configuration overrides. Creation never reuses an existing leaf.
 
-`GET`/`HEAD /api/liveness` reads no source and reports only observer process
-responsiveness. `/api/readiness` separately validates configured `journal`,
-`replay`, `research` and `paper_session` sources with the existing readers, once
-per configured source. Every source remains visible as `available`,
-`unavailable` or `not_configured`. All configured sources readable means
-200/`ready`; any failure means 503/`degraded`; no sources means
-503/`not_configured`. Paths, account identifiers, metrics and raw exceptions are
-not returned. Existing `/api/health` remains journal-only.
+Owned 0700 directories, 0600 single-link regular files and nonblocking exclusive
+flock coordinate cooperating writers. Parent, directory, DB and lock identities
+are checked throughout. Fixed application/schema identity and SQLite FULL
+rollback transactions commit candles, provenance, state and counters together.
+The store detects observed replacement; it is not a sandbox against every
+privileged future filesystem race.
+
+The initial batch must match the configured history count. Later batches contain
+at most 200 rows, include the last committed candle and match all retained
+overlap. Missing intervals, revised candles and regressing ends are rejected.
+The collector refuses catch-up beyond 199 new intervals. No gap is filled.
+The original Decimal/provenance validator is reused, with exact five-field
+fixture shape, frozen configuration and retrieval/commit chronology checked
+separately. The existing five-second close margin is a local acceptance policy,
+not provider finality or authenticated market evidence.
+
+Retention is an explicit rolling window. Retained count plus evicted count
+equals accepted total; re-observing an unchanged candle does not count new bars.
+Limits include 5,000 rows, 4,096 metadata bytes, 64 MiB per DB/sidecar, bounded
+text, one million SQLite VM operations and a one-second cooperative observation
+budget. Observers validate one read transaction and reject WAL, extra schema,
+unstable bindings and nonempty journals. Only explicit writer resume can perform
+normal SQLite rollback recovery. Hung OS/filesystem calls cannot be preempted
+by cooperative work budgets.
+
+### Transport, retries and stop/restart
+
+`public_candle_transport.py` provides fixed-host HTTPS candle GETs with normal
+TLS verification, no ambient proxy, credentials, Origin or redirects, and a
+1 MiB response cap. One ten-second monotonic socket-I/O deadline covers TCP
+attempts, TLS, request sends, headers, body and chunk framing. It creates no
+background deadline worker. DNS or hung kernel calls themselves cannot be
+forcibly interrupted, but their elapsed time consumes the same deadline.
+
+The existing Upbit client retains its three-attempt policy and original
+retryable HTTP set. Additive typed errors preserve the final attempt's cooldown
+and distinguish transient transport/rate failures from HTTP 418, hard rejections
+and invalid, ambiguous or over-30-second cooldowns. The existing importer's
+`public_get` transport remains unchanged; only the new collector selects the
+new transport.
+
+The collector never infers retryability from error text. Unknown errors become
+terminal `request_rejected`. Waits check stop intent in chunks of at most 0.1
+seconds. Resume refuses a saved blocked phase, any terminal error even after
+stopped, and an interrupted fetching phase. A saved retryable error waits from
+`updated_at` for at least `max(poll_seconds, 30, backoff)`, because schema1 does
+not persist Retry-After. Inspect uncertain/refused captures before deciding to
+start any new capture; deleting locks or editing metadata is not recovery.
+
+Signal handlers only record intent and previous handlers are restored. A received
+typed failure is persisted before honoring a simultaneous signal. Interruption
+inside acquisition/internal retry without a complete outcome preserves fetching
+uncertainty. A signal on an already-refused resume cannot erase its refusal;
+explicit nonretryability carried by a blocked phase is also retained. A valid
+response arriving after stop intent is discarded. Regressing clocks never become
+clamped successful timestamps; if a trustworthy stop cannot be recorded, prior
+state remains and the observation reports `clock_error`. Saved phase never proves
+collector process liveness.
+
+### CLI, export and local observation
+
+`tools/market_capture.py` provides `run`, `resume`, `check` and `export`.
+Each completed command emits one JSON stdout document with fixed error envelopes.
+
+| Operation | Exit meanings |
+|---|---|
+| Collection | 0 bounded success, 3 acquisition/continuity/clock/resume refusal, 2 invalid input/source/ownership, 4 storage uncertainty, 130/143 signals |
+| Check | 0 current, 1 valid noncurrent, 2 invalid/unavailable |
+| Export | 0 new fixture published, 2 invalid input/source, 4 storage/publication failure |
+
+Bounded success records stopped, so a later check normally exits 1. A retryable
+failure at the poll bound retains retrying and exits 3. Signal exit codes do not
+imply that uncertain or blocked state has been cleared; inspect the observation.
+
+Export reads a validated capture and creates a new original five-field fixture
+outside it, optionally selecting the latest rows, within the original 5,000-bar
+and 4-MiB limits. It recalculates subset count/hash and preserves original
+provenance semantics. It never collects, creates an account, executes a strategy
+or resumes one. Valid stale/stopped captures may be exported as historical data.
+
+Export carries both observed source and destination-parent bindings through the
+publisher's pinned scope before staging/linking and during final confirmation.
+The shared publisher optionally enforces a private owned parent, uses private
+staging/no-clobber linking, syncs file and directory, and preserves possible
+output after uncertain publication. Existing replay/research semantics remain.
+
+The dashboard adds `--market-capture DIRECTORY`, `/market-data.html` and
+GET/HEAD `/api/market-capture`. Valid noncurrent observations return 200;
+unavailable/unconfigured returns 503. Existing readiness schema1 retains exactly
+`journal`, `replay`, `research` and `paper_session`; capture is independent.
+
+Data age measures time since the last committed candle end; observation age
+measures time since successful validation. Current requires saved running, data
+and both ages within bounds. Clock error nulls both ages. The client validates
+exact schema, decimal strings, microsecond chronology and observation identity.
+It coalesces GETs, enforces a five-second/16-KiB request bound, pauses hidden tabs,
+handles page-cache restoration, and preserves previous valid data with an
+explicit warning after failure. It has no execution or credential controls.
+
+## Operator commands
+
+From the repository root, create a new capture and keep it in the foreground:
 
 ```bash
-python apps/dashboard/server.py --paper-session .private/paper-001/account.sqlite --port 8765
-python tools/paper_dashboard_check.py --port 8765 --liveness
-python tools/paper_dashboard_check.py --port 8765 --timeout 5
+mkdir -p .private
+chmod 700 .private
+python tools/market_capture.py run --market KRW-BTC --unit 1 \
+  --history 120 --retention 5000 --poll-seconds 15 \
+  --directory .private/btc-capture-001
 ```
 
-The CLI connects only to fixed `127.0.0.1`, without proxies or redirects. It
-validates the exact bounded JSON contract, status agreement and UTC observation
-time. A total network deadline also stops trickled response headers; response
-bodies are capped at 8,192 bytes. Exits: 0 valid ready/alive, 1 validated degraded
-or not-configured, 2 arguments/transport/protocol/wrong-service failure, 130
-interruption. Readiness asserts readable saved state, not writer liveness,
-market freshness, permission to resume or trading readiness.
+In another terminal:
 
-### Bounded journal observation
+```bash
+python tools/market_capture.py check .private/btc-capture-001
+python apps/dashboard/server.py --market-capture .private/btc-capture-001 --port 8765
+```
 
-The admission journal rejects a DB or any existing WAL/SHM sidecar larger than
-64 MiB, more than 10,000 orders, oversized text/payloads and excess metadata.
-Payload validation uses the original 16,384-byte UTF-8 bound, with a bounded SQL
-projection accounting for UTF-16 databases. It validates the entire bounded order
-set for exact Decimal totals while retaining only the requested order page.
-Audit output remains at most 50 events. Sorting uses the raw source event ID so
-a projection sentinel cannot hide a malformed newest entry.
+Open `http://127.0.0.1:8765/market-data.html` locally. To explicitly run a
+historical snapshot through the original engine:
 
-One read transaction has a 1,000,000 SQLite VM-operation budget and one-second
-cooperative monotonic budget including Python validation. Deep/invalid data and
-budget failures map to generic `JournalUnavailable`, with no partial totals.
-Native readonly SQLite WAL access can change SHM coordination bytes; logical DB
-and WAL data are not mutated. These limits cannot preempt a hung kernel call.
+```bash
+python tools/market_capture.py export .private/btc-capture-001 \
+  --output .private/btc-snapshot-001.json
+python tools/paper_market.py inspect .private/btc-snapshot-001.json
+python tools/paper_market.py run .private/btc-snapshot-001.json \
+  --directory .private/btc-paper-001
+python tools/paper_audit.py .private/btc-paper-001/run
+```
 
-### Stable report inputs and confirmed publication
+Every destination must be new. Preserve failed captures and possible outputs.
+Full lifecycle, storage and JSON contracts: [MARKET_CAPTURE.md](MARKET_CAPTURE.md).
+The [paper operations runbook](PRODUCTION_PAPER_OPERATIONS.md),
+[dashboard guide](WEB_DASHBOARD.md), README and production checklist agree on
+this separate collection lifecycle and explicit historical execution handoff.
 
-A shared dependency-free local I/O module now pins file and named-parent
-identity, rejects final symlinks/special files, uses nonblocking/no-follow file
-descriptors and bounds reads. Replay/research retain their original 8 MiB/2 MiB
-report limits and validators. Quant research fixture/candidate reads are bounded
-to 32 MiB/16,384 bytes and preserve original raw-byte identity and input rules.
+## Independent review and verification
 
-Report publication writes private 0600 staged bytes, fsyncs the file, uses a
-descriptor-anchored no-clobber link, checks publication identity, fsyncs the
-parent and confirms the final observation. Existing output is preserved.
-Research equal-report collision resolution stays inside the original parent
-binding through staging cleanup and final confirmation, preserving the original
-generation timestamp and bytes. Replay retains its original collision refusal.
+The implementation checkpoint was `2ef5c2e`. Fresh whole-increment review found
+two Important issue families, both reproduced before repair:
 
-If a link may have published but final confirmation fails,
-`ReportPublicationUncertain` preserves any output and emits a fixed diagnostic:
-inspect saved state explicitly; never automatically rerun or repair. Original
-research I/O exit 3 and replay export I/O exit 4 remain. Failed replay export can
-already have advanced its checkpoint, so preserve both checkpoint and report.
+1. Signal/refusal/uncertain-resume state loss. Repairs `e344a2b` and `e2b6c00`
+   preserve received refusal, interrupted acquisition, prior resume refusal,
+   explicit nonretryability and signal-plus-regressed-clock outcomes.
+2. Export source/destination substitution between validation and publication.
+   Repair `e2b6c00` carries bindings into publication checks. Tests cover source
+   relocation into the output parent, relocation while the output parent keeps
+   its inode/path, and uncertain source movement after a link may have published.
 
-### Truthful configuration and operations documentation
+Independent recheck on `e2b6c001acad2d7ee2043dd5ed1e65260b1929da` reran original
+reproductions and 14 targeted methods. Both families are closed: refused resumes
+made zero provider calls; uncertain state remained; replaced destinations were
+refused before creation; source snapshots were preserved. No remaining Critical,
+Important or Minor finding was reported. Separate store review also repaired
+an observed DB substitution during SQLite connect before any initialization
+write; foreign DB bytes remain unchanged.
 
-`is_live_configuration_complete()` retains the former settings-only predicate.
-Legacy `is_production_ready()` always returns false in this revision. Config
-CLI validate/show distinguish settings completeness from unverified runtime/feed/
-broker readiness while preserving validation exits. Synthetic credentials in
-tests are inert; no credential discovery or provider connection is involved.
+Final local gates after the production repairs:
 
-[PRODUCTION_PAPER_OPERATIONS.md](PRODUCTION_PAPER_OPERATIONS.md) documents exact
-create/audit/status/probe commands, source/runtime limits, explicit historical
-recovery, quiescent backup and pinned-code rollback. README, dashboard/research/
-replay guides and the production checklist agree on this supported path.
-Legacy Rust/Compose/monitor deployment remains separate and unvalidated here.
-The checklist does not mark operator, browser, soak or live gates complete.
+| Gate | Result |
+|---|---|
+| Development unittest discovery | 1,200 passed in 112.433 seconds |
+| Package/server pytest | 309 passed plus 382 subtests in 15.06 seconds |
+| Dependency-free Node clients | 103 passed in 324.890 milliseconds |
+| Python 3.10 syntax target | All 14 changed Python files parse |
+| Execution compatibility | All 16 fingerprinted source files byte-identical to v44 |
 
-## Verification in this continuation
+The pytest run retains 926 existing datetime deprecation warnings. Syntax checks
+are not substituted for actual supported-runtime CI. Original account/recovery
+and imported fixture schemas are unchanged. New tests run in the existing CI
+matrices without removing any required gate.
 
-| Final local regression | Result |
-| --- | --- |
-| Development unittest | 1,109 passed in 107.476 seconds |
-| Package/server pytest | 309 tests and 382 subtests passed in 14.25 seconds; 926 existing deprecation warnings |
-| Node clients | 79 passed in 209.008 milliseconds |
+A network-forbidden synthetic 90-bar capture/export/original durable MA replay
+produced 10 simulated fills, ended `completed_halted`, and passed
+`verified_completion` audit. The export SHA matched the original inspector and
+frozen source; capture bytes were unchanged. Actual Python JSON passed the JS
+client validator. A post-review export reproduced identical fixture bytes without
+rerunning the completed account. Private receipts are in the ignored execution
+ledger. This is controlled integration evidence, not provider-soak or profit
+validation.
 
-These full gates ran on the final production code after both the collision-parent
-and signal-lock repairs. A subsequent one-line test-only signal argument
-portability correction passed all 15 runtime methods and the deterministic
-signal cases under a simulated legacy enum string representation. Exact-head CI
-verifies the final test tree across supported interpreters. Complete
-base-to-final-working-tree whitespace checks also passed.
+## Remaining production evidence and engineering
 
-- New isolated operations suites cover 22 journal, 15 runtime, 9 readiness,
-  11 probe and 25 report-I/O test methods. Six configuration tests cover complete
-  settings without a production-ready claim. Real sockets/subprocesses,
-  filesystem fault injection and actual SQLite databases are used.
-- Runtime/readiness/probe behavior was demonstrated RED before implementation.
-  Added startup resource-failure and repeated-close regressions also failed
-  before correction. A real SQLite alias-ordering regression failed before the
-  raw-ID ordering fix. Journal UTF-16 and payload/metadata/work bounds passed.
-- The initial report-helper import RED was supplemented by behavior-level RED
-  against the original reader/writer: final symlink acceptance and absent parent
-  fsync. Original report/research behavior remains covered by 189 tests.
-- Independent whole-increment review identified one Important/P2 collision-parent
-  race. Two real EEXIST/cleanup replacement tests failed before the fix; stable
-  equal and conflicting collisions were retained. The narrow repair's 214
-  report/replay/research tests passed. No execution-core change was needed.
-- The independent reviewer then verified all four collision regressions and
-  closed the finding. Final review has no Critical/Important/Minor findings and
-  no declined-to-judge items, within the documented local scope.
-- Initial exact-head Quant CI on `b0bda93` exposed a SIGINT timeout on Python 3.10
-  and TCP reset observations on 3.10/3.11. Investigation independently reproduced
-  a real signal-handler deadlock locally: `Event.set` reentered the condition
-  lock held by the interrupted owner in `Event.wait`. The failed CI process has
-  no captured stack, so its particular timeout is not proved to have that cause.
-  Both forced SIGINT/SIGTERM cases failed before the lock-free handler repair.
-  The original four-second subprocess deadlines remain; a closed socket accepts
-  either EOF or TCP RST. Runtime/readiness/probe then passed 35 methods, and
-  independent review passed both signal methods with no remaining finding.
-  On checkpoint `9938e82`, the original shutdown test passed actual Python 3.10;
-  the new deterministic test instead exposed the pre-3.11 enum string format.
-  Passing `str(int(signum))` fixes the test subprocess argument without changing
-  production code, deadlines or assertions.
-- All 16 execution-fingerprinted source files remain byte-identical to v43.
-  Engine, arithmetic, strategy and account/recovery identities are unchanged.
-  Changed Python sources parse with Python 3.10 grammar; local runtime is 3.12.
-- A 10,000-order journal measured about 0.05 seconds and 450,000 VM operations;
-  a two-row projection used 11,733 Python-traced peak bytes. This is one measured
-  fixture, not a throughput or service-level guarantee.
-- Guarded original-engine export separately produced 12 replay fills and two
-  evaluated research folds. Actual directory-fsync failure preserved replay and
-  checkpoint, called the original runner once and returned export exit 4.
-- The integrated synthetic operating demonstration reused its completed account,
-  verified its completion audit, exported a two-fill replay and configured all
-  four observer sources. Ready and liveness exited 0; corrupting only research
-  produced degraded exit 1 while the other three stayed available; restoration
-  returned ready 0; SIGTERM returned 143; the closed port produced probe exit 2.
-  All recorded source/account/checkpoint bytes were unchanged and account/report
-  modes were 0600. External network was prohibited by a loopback-only audit guard.
-- The demonstration initially passed `min_training_fills=0`, correctly refused by
-  the original minimum of 1 before output. Only that demo argument was corrected.
-  Its resulting six research folds were all skipped; readiness validation does
-  not infer selection, execution or profitability from a readable report.
-- New suites are wired into existing Python 3.10/3.11/3.12 isolated CI and
-  3.10/3.12 original-engine integration. Existing package coverage, server tests,
-  order-safety gates and Docker/offline Rust CLI gates are preserved.
+Continuous public-data collection is implemented. Continuous strategy/account
+consumption remains separate work: it needs a durable consumption cursor,
+strategy/risk state and next-open execution/recovery semantics. The original
+engine still consumes an explicit frozen historical fixture; repeating that
+replay is not a streaming execution service.
 
-## Retained boundaries and next useful work
+Real-provider/network/clock/disk soak, actual service deployment/rollback, shared-IP
+operational measurement, alert delivery and backup/restore drills remain
+unverified. Broker-authoritative reconciliation, credentials and real execution
+are not present. Legacy live/Rust/Compose components are not an integrated
+verified service. `is_production_ready()` remains false.
 
-Observed local descriptor/metadata checks are not authenticated storage or a
-sandbox against a privileged writer changing files after the final observation.
-Fsync confirmation does not guarantee every hardware/filesystem failure mode.
-Bounded application work does not prove sustained service capacity. Readiness
-reflects independent saved-source readability; a halted account can be readable.
-Historical recovery still requires its original compatible frozen execution and
-explicit operator action. No automatic recovery, restart or order resubmission
-was added.
+Actual browser visual/accessibility QA remains unverified. The prior unavailable
+browser/refused local-file boundary was not bypassed; HTTP, Node and structural
+tests are not visual inspection. No Windows/all-filesystem certification,
+cryptographic provider authenticity or profitability is claimed.
 
-Actual desktop/mobile/print/accessibility browser QA remains unverified. The
-prior browser path was unavailable and local-file access was refused; no
-localhost/alternate-browser workaround was used. HTTP and structural tests are
-not visual QA. No long-duration soak, Windows/other-filesystem certification,
-prospective feed, broker-authoritative reconciliation or live trading is claimed.
+Design: [v45 spec](superpowers/specs/2026-11-14-market-capture-design.md).
+Plan: [v45 plan](superpowers/plans/2026-11-14-market-capture.md).
 
-The next production milestone requires an explicit supported runtime/provider
-architecture, live-market timestamps and reconnect/gap handling, authoritative
-broker/account reconciliation, and controlled deployment/monitoring/soak evidence.
-The legacy Python/Rust/Compose paths cannot be treated as one integrated service
-without that work. Build on the original durable outcomes and explicit recovery
-contracts; do not create parallel account/strategy validators or infer live
-readiness from settings or historical simulation. Actual visual QA still needs
-an authorized available browser path.
+## Final publication discipline
 
-Design: [v44 spec](superpowers/specs/2026-11-14-production-operations-design.md).
-Plan: [v44 plan](superpowers/plans/2026-11-14-production-operations.md).
-
-## Delivery verification
-
-Publish only to the existing feature branch with an expected-head fast-forward
-check and compare the remote tree with the verified local tree. Keep PR #1
-Draft/open/unmerged with no auto-merge and main unchanged.
-
-The initial published v44 checkpoint was `b0bda932eb1d5eae6fe2e7e53e633ec7dc4b371c`.
-Its failed Quant jobs prompted the signal repair above; it is not a completed
-delivery. The signal repair checkpoint was
-`9938e82d5b5c5358d2a7bd29b7848da4c903e431`; the final test-portability correction
-follows as its non-force child, preserving the earlier v43 and v44 history.
-
-Final publication and exact-head CI follow this handoff commit. On resumption, inspect
-the actual PR head and its Quant Regression, Order Outcome Safety and CI/CD runs;
-previous-head success is not evidence for a later commit. Local implementation
-checkpoint `718e9b4` precedes the reviewed collision fix `8d3d74c` and handoff; connected GitHub
-publication may consolidate local history into a different remote commit.
-Final delivery results are recorded in the current PR description, head-filtered
-checks and ignored local delivery receipt.
+This handoff precedes feature publication. Publish the exact tested tree through
+an expected-head non-force update, preserving local checkpoint history. Verify
+all applicable final-head CI and fresh PR metadata before updating the description.
+Keep PR1 Draft/open/unmerged without auto-merge and main unchanged. Record final
+refs, tree, parent, CI and metadata in the PR and ignored delivery receipt. On
+resumption, inspect actual refs/checks; previous-head success does not verify a
+later commit.

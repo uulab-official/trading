@@ -4,6 +4,7 @@ No real exchange requests or financial-performance assertions. Replay is forbidd
 from making socket/DNS calls and must preserve checkpoint/report identity on retry.
 """
 from datetime import datetime, timedelta, timezone
+import asyncio
 from decimal import Decimal
 import importlib.util
 import json
@@ -75,6 +76,39 @@ class MarketHistoryIntegrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.replay()
         self.assertEqual(self.report.read_bytes(),before)
         self.assertEqual(self.checkpoint.read_bytes(),saved)
+
+    def test_capture_export_runs_original_durable_engine_and_completion_audit(self):
+        from trading_bot.market_capture import collect_capture, export_capture
+        from trading_bot.market_paper_run import inspect_market_input, run_market_replay
+        from trading_bot.durable_paper_audit import audit_durable_replay
+        data=synthetic_market_fixture()
+        now=datetime.fromisoformat(data['data_provenance']['retrieved_at'])
+        class SyntheticClient:
+            def download(self, market, *, unit, count, end):
+                if (market,unit,count,int(end.timestamp()*1000)) != ('KRW-BTC',60,90,
+                        data['data_provenance']['end_exclusive_ms']):
+                    raise AssertionError('collector did not request the expected historical window')
+                return data
+        directory=self.root/'capture'; output=self.root/'captured.json'; bundle=self.root/'bundle'
+        with patch('socket.socket.connect',side_effect=AssertionError('network forbidden')), \
+             patch('socket.create_connection',side_effect=AssertionError('network forbidden')), \
+             patch('socket.getaddrinfo',side_effect=AssertionError('DNS forbidden')):
+            result=collect_capture(directory, config=dict(market='KRW-BTC',unit_minutes=60,
+                bootstrap_bars=90,retention_bars=100,poll_seconds=60), max_polls=1,
+                client=SyntheticClient(),clock=lambda:now,sleep=lambda _:None)
+            self.assertEqual(result['exit_code'],0)
+            before={p.name:p.read_bytes() for p in directory.iterdir()}
+            exported=export_capture(directory,output)
+            inspected=inspect_market_input(output,clock=lambda:now)
+            self.assertEqual(inspected['source_sha256'],exported['fixture_sha256'])
+            run=asyncio.run(run_market_replay(output,directory=bundle,clock=lambda:now,
+                config_options=dict(strategy='ma_cross',fast_period=3,slow_period=5)))
+            audit=asyncio.run(audit_durable_replay(bundle/'run'))
+        self.assertEqual(run['status'],'completed_halted')
+        self.assertEqual(audit['status'],'verified_completion')
+        self.assertFalse(run['live_enabled'])
+        self.assertEqual(before,{p.name:p.read_bytes() for p in directory.iterdir()})
+        self.assertEqual(output.read_bytes(),(bundle/'source.json').read_bytes())
 
 
 if __name__=='__main__':unittest.main()

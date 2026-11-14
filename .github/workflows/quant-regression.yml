@@ -28,6 +28,7 @@ jobs:
           python -m py_compile apps/server/trading_bot/research_html.py apps/server/trading_bot/research_fixture.py tools/paper_research_report.py
           python -m py_compile apps/server/trading_bot/fixture_input.py apps/server/trading_bot/research_input.py apps/server/trading_bot/research_fixture_data.py
           python -m py_compile apps/dashboard/runtime.py tools/paper_dashboard_check.py apps/server/trading_bot/local_report_io.py
+          python -m py_compile packages/data/trading_data/public_candle_transport.py apps/server/trading_bot/market_capture_store.py apps/server/trading_bot/market_capture.py tools/market_capture.py
       - name: Run isolated regression suite
         run: |
           python -m unittest discover -s tests -p 'test_smc_structure.py' -v
@@ -53,6 +54,9 @@ jobs:
           python -m unittest discover -s tests -p 'test_upbit_history.py' -v
           python -m unittest discover -s tests -p 'test_market_provenance.py' -v
           python -m unittest discover -s tests -p 'test_upbit_import_cli.py' -v
+          python -m unittest discover -s tests -p 'test_public_candle_transport.py' -v
+          python -m unittest discover -s tests -p 'test_market_retry_policy.py' -v
+          python -m unittest discover -s tests -p 'test_market_capture*.py' -v
           python -m unittest discover -s tests -p 'test_quant_research.py' -v
           python -m unittest discover -s tests -p 'test_research_cli.py' -v
           python -m unittest discover -s tests -p 'test_research_api.py' -v
@@ -73,7 +77,7 @@ jobs:
         with:
           node-version: '22'
       - name: Verify dependency-free dashboard logic
-        run: node --test tests/dashboard_client.test.mjs tests/replay_client.test.mjs tests/market_provenance_client.test.mjs tests/research_client.test.mjs tests/research_robustness_client.test.mjs
+        run: node --test tests/dashboard_client.test.mjs tests/replay_client.test.mjs tests/market_provenance_client.test.mjs tests/research_client.test.mjs tests/research_robustness_client.test.mjs tests/market_capture_client.test.mjs
 
   replay-integration:
     runs-on: ubuntu-latest

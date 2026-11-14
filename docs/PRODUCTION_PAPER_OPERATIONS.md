@@ -1,4 +1,12 @@
-# Local paper operations runbook (v44)
+# Local paper operations runbook (v45)
+
+The v45 public candle collector has a separate foreground lifecycle and passive
+freshness route. Follow [MARKET_CAPTURE.md](MARKET_CAPTURE.md) to create a new
+rolling capture, inspect continuity/age, stop or explicitly resume it, and export
+an immutable fixture into the original historical workflow below. The four
+source readiness keys and account/recovery meanings in this runbook are unchanged.
+Capture does not itself consume strategies or create an account. Its controlled
+tests are not real-provider soak or continuous execution evidence.
 
 This runbook covers the supported local historical paper runner, saved research
 and read-only observer on a local POSIX filesystem with Python 3.10 or newer.

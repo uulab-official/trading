@@ -65,6 +65,49 @@ data or engine execution and has no market-study completion receipt. See
 [QUANT_RESEARCH.md](docs/QUANT_RESEARCH.md#static-research-snapshot-v40) for the
 complete synthetic example, output permissions and evidence boundaries.
 
+## Continuous public candle capture (v45)
+
+The explicit foreground collector records closed Upbit KRW minute candles in a
+private transactional rolling window. It verifies overlap, rejects gaps and
+revised history, preserves retry/cooldown state across restart, and exposes data
+age separately from the age of the last successful observation. No account or
+strategy is automatically attached to this collector.
+
+```bash
+mkdir -p .private
+chmod 700 .private
+python tools/market_capture.py run --market KRW-BTC --unit 1 \
+  --history 120 --retention 5000 --poll-seconds 15 \
+  --directory .private/market-btc-001
+```
+
+In another terminal, inspect `python tools/market_capture.py check
+.private/market-btc-001` or start `python apps/dashboard/server.py
+--market-capture .private/market-btc-001 --port 8765` and open
+`http://127.0.0.1:8765/market-data.html`. The check exits `0` only for a valid
+current data observation, `1` for a valid noncurrent observation and `2` for
+invalid/unavailable data. Saved phase never proves collector process liveness.
+The existing four-source dashboard readiness remains unchanged.
+
+To hand an explicit historical snapshot to the original paper workflow:
+
+```bash
+python tools/market_capture.py export .private/market-btc-001 \
+  --output .private/market-snapshot-001.json
+python tools/paper_market.py inspect .private/market-snapshot-001.json
+python tools/paper_market.py run .private/market-snapshot-001.json \
+  --directory .private/market-paper-001
+```
+
+Export and run destinations must be new. A window retains at most 5,000 candles;
+evictions are counted and visible, so it is not a complete archive. Stop with
+SIGINT/SIGTERM and preserve all artifacts on errors. Explicit `resume` reuses
+frozen configuration and refuses uncertain in-flight or terminally blocked
+states. See [MARKET_CAPTURE.md](docs/MARKET_CAPTURE.md) for exact limits,
+restart/cooldown decisions, JSON/exit contracts and evidence boundaries.
+Controlled tests cover these paths; real-provider soak and continuous strategy
+execution remain unverified/unimplemented respectively.
+
 ## Verified offline paper workflow
 
 The deterministic offline paper runner is the tested entrypoint for this revision.
@@ -94,8 +137,9 @@ output and documented failure/recovery exit codes; Python callers keep the resul
 dictionary API.
 
 The legacy live/Rust deployment and backtest references linked below
-are not evidence of production readiness. Live market data is explicitly
-unavailable in the restored offline data package; no real trading was validated.
+are not evidence of production readiness. The legacy live-feed adapter remains
+unavailable; the separate explicit public candle collector above does not enable
+that adapter or a broker. No real trading was validated.
 
 ## Local paper operations and configuration truth (v44)
 
@@ -137,9 +181,9 @@ may have occurred but final confirmation fails, preserve files and inspect them;
 do not automatically retry execution or repair evidence. The replay and research
 guides document the same explicit preservation and inspection procedure.
 
-No actual browser visual QA, long-duration soak, continuously connected market
-feed, broker-authoritative reconciliation, public deployment or live trading
-completion is claimed. [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) records
+No actual browser visual QA, long-duration real-provider soak, continuous
+strategy/account execution, broker-authoritative reconciliation, public deployment
+or live trading completion is claimed. [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) records
 the paper operating checks and remaining evidence for any future live service.
 
 ## Project structure and documentation
@@ -153,6 +197,7 @@ verification. Runtime data, accounts, reports and secrets must remain private.
 | Guide | Scope |
 |---|---|
 | [PERSONAL_TRADING_GUIDE.md](PERSONAL_TRADING_GUIDE.md) | Synthetic offline trial and duplicate-free checkpoint resume |
+| [MARKET_CAPTURE.md](docs/MARKET_CAPTURE.md) | Public closed-candle capture, freshness, bounded retention and explicit export |
 | [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md) | Current local paper runbook, probes, shutdown, recovery, backup and rollback |
 | [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) | Paper operating checklist and remaining live-readiness evidence |
 | [WEB_DASHBOARD.md](docs/WEB_DASHBOARD.md) | Current local source/endpoint contracts and legacy-service boundary |

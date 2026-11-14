@@ -96,13 +96,17 @@ def read_regular_bytes(path, *, max_bytes):
         os.close(parent_fd)
 
 
-def publish_new_report(path, body, *, on_exists=None):
+def publish_new_report(path, body, *, on_exists=None, private_parent=False,
+                       validate_destination=None):
     """Publish immutable bytes under a pinned parent and confirm directory sync.
 
     Once linking is attempted an ambiguous error must never become success or a
     retry. The destination is never removed, replaced, or repaired here.
     An optional collision resolver runs while the original parent remains pinned;
     its result is returned only after cleanup and a final parent confirmation.
+    An optional destination validator receives the pinned parent observation
+    before staging, before linking and during final confirmation. It can carry
+    source/destination preconditions across a caller's earlier validated read.
     """
     if not isinstance(body, bytes):
         raise TypeError('report bytes required')
@@ -112,7 +116,21 @@ def publish_new_report(path, body, *, on_exists=None):
     fd = None
     possible_publication = False
     resolved_collision = False
+
+    def check_bindings():
+        _check_parent(path.parent, parent_fd, parent_before)
+        if validate_destination is not None:
+            validate_destination(parent_before)
+            _check_parent(path.parent, parent_fd, parent_before)
+
     try:
+        if private_parent:
+            parent_stat = os.fstat(parent_fd)
+            if (parent_stat.st_uid != os.getuid()
+                    or stat.S_IMODE(parent_stat.st_mode) != 0o700
+                    or path.parent.is_symlink()):
+                raise ValueError('private owned publication parent required')
+        check_bindings()
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
                      | os.O_NONBLOCK | os.O_CLOEXEC, 0o600, dir_fd=parent_fd)
         os.fchmod(fd, 0o600)
@@ -124,7 +142,7 @@ def publish_new_report(path, body, *, on_exists=None):
             view = view[written:]
         staged = os.fstat(fd)
         os.fsync(fd)
-        _check_parent(path.parent, parent_fd, parent_before)
+        check_bindings()
         if (_observation(os.fstat(fd)) != _observation(staged)
                 or _observation(_named_stat(parent_fd, temporary)) != _observation(staged)):
             raise OSError('local staging file changed')
@@ -136,7 +154,7 @@ def publish_new_report(path, body, *, on_exists=None):
             possible_publication = False
             if on_exists is None:
                 raise
-            _check_parent(path.parent, parent_fd, parent_before)
+            check_bindings()
             result = on_exists()
             resolved_collision = True
             return result
@@ -148,12 +166,12 @@ def publish_new_report(path, body, *, on_exists=None):
                 or _observation(_named_stat(parent_fd, path.name)) != _observation(linked)
                 or _observation(_named_stat(parent_fd, temporary)) != _observation(linked)):
             raise OSError('local publication changed')
-        _check_parent(path.parent, parent_fd, parent_before)
+        check_bindings()
         os.unlink(temporary, dir_fd=parent_fd)
         temporary = None
         published = os.fstat(fd)
         os.fsync(parent_fd)
-        _check_parent(path.parent, parent_fd, parent_before)
+        check_bindings()
         if (_observation(os.fstat(fd)) != _observation(published)
                 or _observation(_named_stat(parent_fd, path.name)) != _observation(published)):
             raise OSError('local publication changed')
@@ -176,7 +194,7 @@ def publish_new_report(path, body, *, on_exists=None):
                         raise ReportPublicationUncertain() from error
                     raise
             if resolved_collision:
-                _check_parent(path.parent, parent_fd, parent_before)
+                check_bindings()
         finally:
             if fd is not None:
                 os.close(fd)

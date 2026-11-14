@@ -36,6 +36,20 @@ def _report_reader(filename):
     return module
 
 
+def _market_capture_status(directory):
+    if directory is None:
+        raise ValueError('capture not configured')
+    # This optional observer imports only stdlib/pure market-data modules.
+    import sys
+    root = Path(__file__).resolve().parents[2]
+    for component in ('packages/data', 'apps/server'):
+        path = str(root / component)
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    from trading_bot.market_capture import capture_status
+    return capture_status(directory)
+
+
 def _order_page_query(query):
     if set(query) - {'offset', 'limit', 'status', 'revision', 'digest'}:
         raise ValueError('unsupported page parameter')
@@ -66,7 +80,10 @@ ASSETS = {"/paper-order-contract.mjs": ("paper-order-contract.mjs", "text/javasc
           "/paper-orders.mjs": ("paper-orders.mjs", "text/javascript; charset=utf-8"),
           "/paper-account.html": ("paper-account.html", "text/html; charset=utf-8"),
           "/paper-account.css": ("paper-account.css", "text/css; charset=utf-8"),
-          "/paper-account.mjs": ("paper-account.mjs", "text/javascript; charset=utf-8")}
+          "/paper-account.mjs": ("paper-account.mjs", "text/javascript; charset=utf-8"),
+          "/market-data.html": ("market-data.html", "text/html; charset=utf-8"),
+          "/market-data.css": ("market-data.css", "text/css; charset=utf-8"),
+          "/market-data.mjs": ("market-data.mjs", "text/javascript; charset=utf-8")}
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
        "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'")
 
@@ -76,6 +93,7 @@ class Handler(BaseHTTPRequestHandler):
     replay_path = None
     research_path = None
     paper_session_observer = None
+    market_capture_path = None
     server_version = "UULABLocal"
     sys_version = ""
 
@@ -182,6 +200,15 @@ class Handler(BaseHTTPRequestHandler):
                 if query:
                     raise ValueError("probe parameters are not supported")
                 return self._probe(readiness=route == "/api/readiness")
+            if route == "/api/market-capture":
+                if query:
+                    raise ValueError('capture parameters are not supported')
+                try:
+                    report = _market_capture_status(self.market_capture_path)
+                except (ValueError, OSError, ImportError):
+                    return self.respond(503, {"error": "market_capture_unavailable", "mode": "paper",
+                                              "live_enabled": False, "read_only": True})
+                return self.respond(200, report)
             if route in ASSETS:
                 if query:
                     raise ValueError("asset parameters not supported")
@@ -302,7 +329,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def create_server(journal_path=None, port=8765, *, replay_path=None, research_path=None,
-                  paper_session_path=None, max_connections=8, socket_timeout=2.0,
+                  paper_session_path=None, market_capture_path=None, max_connections=8, socket_timeout=2.0,
                   connection_timeout=10.0):
     if type(port) is not int or not 0 <= port <= 65535:
         raise ValueError("invalid port")
@@ -311,6 +338,7 @@ def create_server(journal_path=None, port=8765, *, replay_path=None, research_pa
     ConfiguredHandler.journal_path = journal_path
     ConfiguredHandler.replay_path = replay_path
     ConfiguredHandler.research_path = research_path
+    ConfiguredHandler.market_capture_path = market_capture_path
     if paper_session_path is not None:
         import sys
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'packages/core'))
@@ -321,9 +349,10 @@ def create_server(journal_path=None, port=8765, *, replay_path=None, research_pa
                              connection_timeout=connection_timeout)
 
 
-def serve(journal_path=None, port=8765, *, replay_path=None, research_path=None, paper_session_path=None):
+def serve(journal_path=None, port=8765, *, replay_path=None, research_path=None, paper_session_path=None,
+          market_capture_path=None):
     with create_server(journal_path, port, replay_path=replay_path, research_path=research_path,
-                       paper_session_path=paper_session_path) as server:
+                       paper_session_path=paper_session_path, market_capture_path=market_capture_path) as server:
         stopped = threading.Event()
         received, failed, previous = [], [], {}
 
@@ -380,6 +409,7 @@ def cli(argv=None):
     parser.add_argument("--replay-report", default=None, help="Existing offline replay result, not a checkpoint")
     parser.add_argument("--research-report", default=None, help="Existing offline walk-forward research report")
     parser.add_argument("--paper-session", default=None, help="Existing durable local paper account; read only")
+    parser.add_argument("--market-capture", default=None, help="Existing public candle capture; read only")
     try:
         args = parser.parse_args(argv)
     except ValueError:
@@ -387,7 +417,8 @@ def cli(argv=None):
         return 2
     try:
         return serve(args.journal, args.port, replay_path=args.replay_report,
-                     research_path=args.research_report, paper_session_path=args.paper_session)
+                     research_path=args.research_report, paper_session_path=args.paper_session,
+                     market_capture_path=args.market_capture)
     except Exception:
         print(json.dumps({"error": "startup_failed"}))
         return 2

@@ -1,7 +1,8 @@
 """Explicit, bounded public OHLCV acquisition; never an order/broker adapter.
 
-Only the import CLI calls this network client. Replay consumes immutable local
-files. Provider metadata is self-reported, not cryptographic authentication.
+Explicit import and capture entry points call this network client. Replay
+consumes immutable local files. Provider metadata is self-reported, not
+cryptographic authentication.
 """
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, DecimalException
@@ -30,7 +31,17 @@ PROVENANCE_FIELDS = {'schema_version', 'provider', 'market', 'unit_minutes',
 
 
 class MarketDataUnavailable(RuntimeError):
-    """Acquisition failed. No partial fixture should be published."""
+    """Acquisition failed; explicit policy is safe for an outer polling loop.
+
+    Legacy callers may still pass only a diagnostic and catch this base class.
+    An unclassified failure is deliberately terminal, with no implied retry.
+    """
+
+    def __init__(self, *args, reason='unavailable', retryable=False, retry_after=0):
+        super().__init__(*args)
+        self.reason = reason
+        self.retryable = retryable
+        self.retry_after = retry_after
 
 
 def _unique_object(pairs):
@@ -183,8 +194,12 @@ class NoRedirect(HTTPRedirectHandler):
         raise HTTPError(newurl, code, 'redirect not permitted', headers, fp)
 
 
-def public_get(url):
-    """The only network boundary: bounded GET with normal TLS verification."""
+def validate_public_url(url):
+    """Validate the fixed public candle endpoint without opening a connection."""
+    # urlsplit silently removes some control/leading whitespace characters.
+    # Requests are generated as ASCII URLs; reject ambiguous raw spellings.
+    if not isinstance(url, str) or not re.fullmatch(r'[\x21-\x7e]+', url):
+        raise ValueError('unsupported public market endpoint')
     parsed = urlsplit(url)
     match = re.fullmatch(r'/v1/candles/minutes/([0-9]+)', parsed.path)
     if parsed.scheme != 'https' or parsed.netloc != 'api.upbit.com' or not match or parsed.fragment:
@@ -194,6 +209,12 @@ def public_get(url):
     if set(query) != {'market', 'count', 'to'} or any(len(v) != 1 for v in query.values()):
         raise ValueError('unsupported market query')
     _market(query['market'][0]); _integer(int(query['count'][0]), 1, 200); parse_end(query['to'][0])
+    return parsed
+
+
+def public_get(url):
+    """Original import network boundary, retained for existing importer callers."""
+    validate_public_url(url)
     request = Request(url, headers={'Accept': 'application/json', 'User-Agent': 'uulab-history/1'}, method='GET')
     with build_opener(NoRedirect()).open(request, timeout=10) as response:
         if response.status != 200 or response.headers.get_content_type() != 'application/json':
@@ -218,20 +239,37 @@ class UpbitHistoryClient:
             except HTTPError as error:
                 code, headers = error.code, error.headers or {}
                 error.close()
-                if code == 418 or code not in {429, 500, 502, 503, 504} or attempt == 2:
-                    raise MarketDataUnavailable('public endpoint rejected request') from None
-                retry = next((v for k, v in headers.items() if k.lower() == 'retry-after'), None)
+                if code == 418:
+                    raise MarketDataUnavailable('public endpoint rejected request',
+                                                reason='rate_blocked') from None
+                if code not in {429, 500, 502, 503, 504}:
+                    raise MarketDataUnavailable('public endpoint rejected request',
+                                                reason='request_rejected') from None
+                cooldowns = [v for k, v in headers.items() if k.lower() == 'retry-after']
+                if len(cooldowns) > 1:
+                    raise MarketDataUnavailable('ambiguous server cooldown; retry manually later',
+                                                reason='cooldown_required') from None
+                retry = cooldowns[0] if cooldowns else None
                 try:
                     delay = float(retry) if retry is not None else float(2 ** attempt)
                 except (ValueError, TypeError):
-                    raise MarketDataUnavailable('unrecognized server cooldown; retry manually later') from None
+                    raise MarketDataUnavailable('unrecognized server cooldown; retry manually later',
+                                                reason='cooldown_required') from None
                 if not math.isfinite(delay) or delay < 0 or delay > 30:
-                    raise MarketDataUnavailable('retry later; server cooldown exceeds this run') from None
-                self._sleep(max(1.0, delay))
+                    raise MarketDataUnavailable('retry later; server cooldown exceeds this run',
+                                                reason='cooldown_required') from None
+                delay = max(1.0, delay)
+                if attempt == 2:
+                    raise MarketDataUnavailable('public endpoint rejected request',
+                                                reason='rate_limited' if code == 429 else 'transport_unavailable',
+                                                retryable=True, retry_after=delay) from None
+                self._sleep(delay)
                 continue
             except (URLError, TimeoutError, OSError):
                 if attempt == 2:
-                    raise MarketDataUnavailable('public market connection unavailable') from None
+                    raise MarketDataUnavailable('public market connection unavailable',
+                                                reason='transport_unavailable', retryable=True,
+                                                retry_after=float(2 ** attempt)) from None
                 self._sleep(float(2 ** attempt))
                 continue
             if not isinstance(body, bytes) or len(body) > MAX_PAGE_BYTES:
