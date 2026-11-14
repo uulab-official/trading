@@ -224,10 +224,66 @@ class DashboardRuntimeTests(unittest.TestCase):
                         self.assertEqual(process.returncode, expected, out + err)
                         self.assertNotIn("Traceback", out + err)
                         client.settimeout(1)
-                        self.assertEqual(client.recv(1), b"")
+                        try:
+                            remaining = client.recv(1)
+                        except ConnectionResetError:
+                            remaining = b""  # Queued/unread bytes can cause TCP RST.
+                        self.assertEqual(remaining, b"")
                     with socket.socket() as reused:
                         reused.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                         reused.bind(("127.0.0.1", port))
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.communicate(timeout=3)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signal and descriptor checks")
+    def test_signal_during_owner_event_wait_does_not_reenter_its_lock(self):
+        # A signal can arrive while Event.wait owns its non-reentrant condition.
+        # Force that real interval in a child so a deadlock remains bounded.
+        script = r'''
+import importlib.util
+import inspect
+import os
+import signal
+import sys
+import threading
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location("signal_wait_subject", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+signum = int(sys.argv[2])
+real_wait = threading.Event.wait
+fired = []
+
+def signal_inside_wait(event, timeout=None):
+    caller = inspect.currentframe().f_back
+    if (not fired and threading.current_thread() is threading.main_thread()
+            and caller.f_code is module.serve.__code__):
+        fired.append(True)
+        with event._cond:
+            os.kill(os.getpid(), signum)
+    return real_wait(event, timeout)
+
+with patch.object(threading.Event, "wait", signal_inside_wait):
+    code = module.serve(port=0)
+assert fired, "signal injection did not execute"
+raise SystemExit(code)
+'''
+        for signum, expected in ((signal.SIGINT, 130), (signal.SIGTERM, 143)):
+            with self.subTest(signum=signum):
+                process = subprocess.Popen(
+                    [sys.executable, "-I", "-c", script, str(SCRIPT), str(signum)],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                )
+                try:
+                    try:
+                        out, err = process.communicate(timeout=4)
+                    except subprocess.TimeoutExpired:
+                        self.fail("signal handler reentered the owner wait lock")
+                    self.assertEqual(process.returncode, expected, out + err)
+                    self.assertNotIn("Traceback", out + err)
                 finally:
                     if process.poll() is None:
                         process.kill()

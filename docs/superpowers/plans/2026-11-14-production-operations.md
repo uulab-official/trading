@@ -25,6 +25,7 @@
 - A file or parent changes between observation and publication: failure cannot become reported success.
 - Very large or deeply nested database values: no partial complete-looking totals or uncaught tracebacks.
 - Complete-looking live settings: no runtime-ready assertion from configuration alone.
+- A signal interrupts the owner's wait while its condition lock is held: the handler cannot reenter that lock.
 
 ## Task 1: Bound journal observation
 
@@ -58,6 +59,7 @@
 
 - [x] Write actual socket/subprocess tests for 8-worker cap, slot reuse, idle/trickle expiry, signal shutdown and port reuse; run RED.
 - [x] Implement runtime limits and clean signal ownership/restoration without same-thread shutdown deadlock.
+- [x] Reproduce and repair signal-time wait-lock reentrancy; accept TCP EOF or RST while retaining process deadlines and port-release assertions.
 - [x] Write configured-source readiness and no-source-access liveness tests, malformed/foreign requests, HEAD and sanitized errors; run RED.
 - [x] Implement additive routes using original readers once per configured source; preserve old /api/health.
 - [x] Write CLI integration tests for ready/degraded/unavailable/wrong contract, proxy bypass, bounded response and flags; run RED.

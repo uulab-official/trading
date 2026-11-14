@@ -34,7 +34,9 @@ Aggregate request headers are capped at 16 KiB and request lines at 4,096 bytes;
 parser errors never echo arbitrary target/method/version text. Repeated close
 calls must not restart the two-second request-worker drain budget.
 
-SIGINT/SIGTERM handlers only record a stop request. A serving thread runs the
+SIGINT/SIGTERM handlers only record a stop request and never acquire an Event
+lock that may be held by the interrupted owner. The owner observes the request
+through waits bounded to 0.1 seconds. A serving thread runs the
 accept loop; the owner stops it from another thread, closes active sockets,
 and waits at most 2 seconds for request workers. All request work is read-only.
 Restore prior signal handlers. Return 130/143 for the respective signals, 2 for

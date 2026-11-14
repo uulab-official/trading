@@ -30,7 +30,8 @@ Aggregate headers are capped at 16 KiB and request lines at 4,096 bytes. Parser,
 request and startup errors are sanitized. Existing loopback binding, Host/Origin
 checks, CSP, read-only routes and HTTP/1.0 behavior remain.
 
-SIGINT/SIGTERM handlers only request shutdown. The owner stops the serving
+SIGINT/SIGTERM handlers only record shutdown, without acquiring an Event lock.
+The owner checks the request at intervals of at most 0.1 seconds, stops the serving
 thread, closes active sockets, drains workers for at most two seconds and
 restores previous handlers. Repeated close is idempotent. Exit 130 means SIGINT,
 143 SIGTERM, 2 startup/configuration failure and 0 ordinary completion.
@@ -114,14 +115,14 @@ The checklist does not mark operator, browser, soak or live gates complete.
 
 | Final local regression | Result |
 | --- | --- |
-| Development unittest | 1,108 passed in 105.174 seconds |
-| Package/server pytest | 309 tests and 382 subtests passed in 14.84 seconds; 926 existing deprecation warnings |
-| Node clients | 79 passed in 316.302 milliseconds |
+| Development unittest | 1,109 passed in 107.476 seconds |
+| Package/server pytest | 309 tests and 382 subtests passed in 14.25 seconds; 926 existing deprecation warnings |
+| Node clients | 79 passed in 209.008 milliseconds |
 
-These final gates ran after the collision-parent repair. Complete
+These final gates ran after both the collision-parent and signal-lock repairs. Complete
 base-to-final-working-tree whitespace checks also passed.
 
-- New isolated operations suites cover 22 journal, 14 runtime, 9 readiness,
+- New isolated operations suites cover 22 journal, 15 runtime, 9 readiness,
   11 probe and 25 report-I/O test methods. Six configuration tests cover complete
   settings without a production-ready claim. Real sockets/subprocesses,
   filesystem fault injection and actual SQLite databases are used.
@@ -139,6 +140,15 @@ base-to-final-working-tree whitespace checks also passed.
 - The independent reviewer then verified all four collision regressions and
   closed the finding. Final review has no Critical/Important/Minor findings and
   no declined-to-judge items, within the documented local scope.
+- Initial exact-head Quant CI on `b0bda93` exposed a SIGINT timeout on Python 3.10
+  and TCP reset observations on 3.10/3.11. Investigation independently reproduced
+  a real signal-handler deadlock locally: `Event.set` reentered the condition
+  lock held by the interrupted owner in `Event.wait`. The failed CI process has
+  no captured stack, so its particular timeout is not proved to have that cause.
+  Both forced SIGINT/SIGTERM cases failed before the lock-free handler repair.
+  The original four-second subprocess deadlines remain; a closed socket accepts
+  either EOF or TCP RST. Runtime/readiness/probe then passed 35 methods, and
+  independent review passed both signal methods with no remaining finding.
 - All 16 execution-fingerprinted source files remain byte-identical to v43.
   Engine, arithmetic, strategy and account/recovery identities are unchanged.
   Changed Python sources parse with Python 3.10 grammar; local runtime is 3.12.
@@ -198,7 +208,12 @@ Publish only to the existing feature branch with an expected-head fast-forward
 check and compare the remote tree with the verified local tree. Keep PR #1
 Draft/open/unmerged with no auto-merge and main unchanged.
 
-Publication and exact-head CI follow this handoff commit. On resumption, inspect
+The initial published v44 checkpoint was `b0bda932eb1d5eae6fe2e7e53e633ec7dc4b371c`.
+Its failed Quant jobs prompted the signal repair above; it is not a completed
+delivery. Publish the corrected tree as a non-force child of that head, preserving
+the earlier verified v43 parent and the initial v44 history.
+
+Final publication and exact-head CI follow this handoff commit. On resumption, inspect
 the actual PR head and its Quant Regression, Order Outcome Safety and CI/CD runs;
 previous-head success is not evidence for a later commit. Local implementation
 checkpoint `718e9b4` precedes the reviewed collision fix `8d3d74c` and handoff; connected GitHub

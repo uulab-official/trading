@@ -330,7 +330,8 @@ def serve(journal_path=None, port=8765, *, replay_path=None, research_path=None,
         def on_signal(signum, frame):
             if not received:
                 received.append(signum)
-            stopped.set()
+            # Event.set takes a non-reentrant lock that this signal may have
+            # interrupted inside Event.wait. Only record the request here.
 
         def run():
             try:
@@ -349,7 +350,8 @@ def serve(journal_path=None, port=8765, *, replay_path=None, research_path=None,
             worker.start()
             started = True
             print(f"Read-only paper dashboard: http://127.0.0.1:{server.server_port}", flush=True)
-            stopped.wait()
+            while not received and not stopped.wait(.1):
+                pass
         except KeyboardInterrupt:
             received.append(signal.SIGINT)
         finally:
