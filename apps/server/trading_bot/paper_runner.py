@@ -107,7 +107,10 @@ class PaperRunner:
             with locked_checkpoint(checkpoint_path) as canonical_path:
                 return await self._run(fixture, checkpoint_path=canonical_path, stop_after=stop_after)
 
-    async def _run(self, fixture, *, checkpoint_path=None, stop_after=None, return_state=False):
+    async def _run(self, fixture, *, checkpoint_path=None, stop_after=None, return_state=False, _session=None):
+        # Internal opt-in backend for the new-run orchestrator, never checkpoint restore.
+        if _session is not None and (checkpoint_path is not None or stop_after is not None or return_state):
+            raise ValueError("Durable paper operation cannot restore or partially replay a checkpoint")
         candles = []
         duration = CandleBuffer(timeframe=self.config.timeframe).duration_ms
         for row in fixture:
@@ -148,14 +151,15 @@ class PaperRunner:
             state = expected
             exchange = PaperExchange.from_snapshot(expected["exchange"])
         else:
-            exchange = PaperExchange(initial_balance=config.initial_balance, fee_pct=config.fee_pct, slippage_pct=config.slippage_pct, quote_currency=quote_currency)
+            exchange = (_session.exchange if _session is not None else
+                        PaperExchange(initial_balance=config.initial_balance, fee_pct=config.fee_pct, slippage_pct=config.slippage_pct, quote_currency=quote_currency))
         cursor = state["next_index"]
         # Rebuild indicator/cross state from the verified historical prefix.
         # Replayed historical signals are not submitted again.
         for candle in candles[:cursor]:
             strategy.on_candle(candle)
         await exchange.connect()
-        manager = OrderManager(exchange)
+        manager = _session.manager if _session is not None else OrderManager(exchange)
         consumed = 0
         try:
             for index in range(cursor, len(candles)):
@@ -174,6 +178,8 @@ class PaperRunner:
                 pending = state["pending_signal"]
                 if pending is not None:
                     await self._execute_pending(exchange, manager, pending, state)
+                    if _session is not None and await manager.get_open_orders():
+                        raise ValueError("durable_paper_order_requires_reconciliation")
                 exchange.set_price(config.symbol, candle.close, timestamp=candle.timestamp)
                 equity = exchange.get_total_value()
                 daily_start = _decimal(state["daily_start_equity"], positive=False)
@@ -207,7 +213,7 @@ class PaperRunner:
                 "assumptions": config.identity(),
                 "bars_processed": state["next_index"], "cash": str(balances[quote_currency].free),
                 "holdings": {asset: str(balance.free) for asset, balance in balances.items() if asset != quote_currency and balance.free},
-                "equity": str(equity), "total_fees": str(exchange.total_fees),
+                "equity": str(equity), "total_fees": (str(exchange.total_fees) if _session is None else exchange.snapshot()["total_fees"]),
                 "total_return_pct": str((equity - config.initial_balance) / config.initial_balance * 100),
                 "pending_signal": state["pending_signal"], "trades": exchange.snapshot()["trades"],
                 "daily_loss_halted": state["daily_loss_halted"], "drawdown_halted": state["drawdown_halted"],
