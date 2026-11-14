@@ -119,7 +119,11 @@ The checklist does not mark operator, browser, soak or live gates complete.
 | Package/server pytest | 309 tests and 382 subtests passed in 14.25 seconds; 926 existing deprecation warnings |
 | Node clients | 79 passed in 209.008 milliseconds |
 
-These final gates ran after both the collision-parent and signal-lock repairs. Complete
+These full gates ran on the final production code after both the collision-parent
+and signal-lock repairs. A subsequent one-line test-only signal argument
+portability correction passed all 15 runtime methods and the deterministic
+signal cases under a simulated legacy enum string representation. Exact-head CI
+verifies the final test tree across supported interpreters. Complete
 base-to-final-working-tree whitespace checks also passed.
 
 - New isolated operations suites cover 22 journal, 15 runtime, 9 readiness,
@@ -149,6 +153,10 @@ base-to-final-working-tree whitespace checks also passed.
   The original four-second subprocess deadlines remain; a closed socket accepts
   either EOF or TCP RST. Runtime/readiness/probe then passed 35 methods, and
   independent review passed both signal methods with no remaining finding.
+  On checkpoint `9938e82`, the original shutdown test passed actual Python 3.10;
+  the new deterministic test instead exposed the pre-3.11 enum string format.
+  Passing `str(int(signum))` fixes the test subprocess argument without changing
+  production code, deadlines or assertions.
 - All 16 execution-fingerprinted source files remain byte-identical to v43.
   Engine, arithmetic, strategy and account/recovery identities are unchanged.
   Changed Python sources parse with Python 3.10 grammar; local runtime is 3.12.
@@ -210,8 +218,9 @@ Draft/open/unmerged with no auto-merge and main unchanged.
 
 The initial published v44 checkpoint was `b0bda932eb1d5eae6fe2e7e53e633ec7dc4b371c`.
 Its failed Quant jobs prompted the signal repair above; it is not a completed
-delivery. Publish the corrected tree as a non-force child of that head, preserving
-the earlier verified v43 parent and the initial v44 history.
+delivery. The signal repair checkpoint was
+`9938e82d5b5c5358d2a7bd29b7848da4c903e431`; the final test-portability correction
+follows as its non-force child, preserving the earlier v43 and v44 history.
 
 Final publication and exact-head CI follow this handoff commit. On resumption, inspect
 the actual PR head and its Quant Regression, Order Outcome Safety and CI/CD runs;

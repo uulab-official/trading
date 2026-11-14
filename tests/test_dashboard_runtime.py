@@ -274,7 +274,7 @@ raise SystemExit(code)
         for signum, expected in ((signal.SIGINT, 130), (signal.SIGTERM, 143)):
             with self.subTest(signum=signum):
                 process = subprocess.Popen(
-                    [sys.executable, "-I", "-c", script, str(SCRIPT), str(signum)],
+                    [sys.executable, "-I", "-c", script, str(SCRIPT), str(int(signum))],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                 )
                 try:
