@@ -257,13 +257,14 @@ class StudyReportCLITests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         self.assert_source_unchanged()
 
-    def test_html_option_on_run_does_not_create_a_study(self):
+    def test_run_html_with_unavailable_source_does_not_create_a_study(self):
         target = self.root / 'not-created'
         process, result = self.cli('run', self.root / 'unused.json', '--plan',
                                    ROOT / 'config/examples/market-study-plan.json',
                                    '--directory', target, '--html', self.output)
         self.assertEqual(process.returncode, 2)
-        self.assertEqual(result, {'error': 'market_study_arguments_invalid'})
+        self.assertEqual(result, {'error': 'market_study_failed_inspect_directory',
+                                  'phase': 'execution'})
         self.assertFalse(target.exists())
         self.assertFalse(self.output.exists())
 

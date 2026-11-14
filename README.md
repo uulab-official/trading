@@ -10,18 +10,37 @@ MA/RSI candidate studies. [PR #1](https://github.com/uulab-official/trading/pull
 remains Draft. The latest continuation state is in
 [CURRENT_HANDOFF.md](docs/CURRENT_HANDOFF.md).
 
-To inspect an existing study and open its comparison as a private local HTML file:
+To run an explicitly selected local source and candidate plan, then export a fresh
+comparison as a private local HTML file:
 
 ```bash
-python tools/paper_study.py check .private/study-001 \
+python tools/paper_study.py run .private/btc-hourly-001.json \
+  --plan config/examples/market-study-plan.json \
+  --directory .private/study-001 \
   --html .private/study-comparison-001.html
 ```
 
-The output filename must be new, outside the study, in an existing private
-directory. The report retains every planned candidate and shows original audited
-metrics and incomplete/blocked states. This is a static historical simulation
-report; it does not start trading. See [MARKET_PAPER_STUDY.md](docs/MARKET_PAPER_STUDY.md)
-for study creation, explicit assumptions, output permissions and exit codes.
+The source must already use the imported-market fixture format. Both the study
+directory and HTML filename must be new; their parents must already exist, and
+the HTML parent must be owned by you with permissions `0700`. HTML stays outside
+the study. This command
+executes the original paper study once, inspects it afresh and exports that
+inspection. Its JSON keeps the original execution and later inspection separate;
+the outer status describes the inspection. Plain `run` remains unchanged.
+
+To inspect an existing study and export another comparison without executing it:
+
+```bash
+python tools/paper_study.py check .private/study-001 \
+  --html .private/study-comparison-002.html
+```
+
+The report retains every planned candidate and shows original audited metrics
+and incomplete/blocked states. It is a static historical simulation snapshot.
+After any execution or reporting failure, preserve the study and any HTML, then
+use this explicit `check` command with a new report filename; execution is never
+retried automatically. See [MARKET_PAPER_STUDY.md](docs/MARKET_PAPER_STUDY.md)
+for the workflow JSON, assumptions, output permissions and exit codes.
 
 Saved walk-forward research has a separate read-only snapshot command:
 

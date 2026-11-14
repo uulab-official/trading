@@ -1,6 +1,7 @@
-# Fixed-plan market paper studies (v38–v39)
+# Fixed-plan market paper studies (v38, v39, v43)
 
 ## Design
+
 Run 2–8 explicitly named MA/RSI candidates on one captured imported historical
 source using the existing market handoff, durable execution and completion audit.
 All capital, sizing, fees, slippage and risk thresholds are explicit shared inputs.
@@ -33,13 +34,15 @@ background scheduler or live enablement. Same-period trials are not out-of-sampl
 validation or proof of profitability. Hashes are not authenticated provenance.
 
 ## Implementation contract
+
 Python 3.10+, stdlib, POSIX private local storage. 2–8 candidates; 1–5000 input bars;
 4 MiB source; 64 KiB plan; <=20,000 candidate-bars. Labels: [a-z][a-z0-9_-]{0,31}.
 Common numeric values are finite decimal STRINGS, with <=64 coefficient digits,
 exponents -18..18 and initial capital <=1e18. Original configuration validation
 still applies. Repeated effective strategy settings are rejected.
 
-CLI: paper_study.py run FILE --plan FILE --directory NEW, or check DIRECTORY.
+CLI: `paper_study.py run FILE --plan FILE --directory NEW [--html NEW_FILE]`,
+or `check DIRECTORY [--html NEW_FILE]`.
 Stdout: one JSON report/error; stderr: diagnostics. Exit 0 verified study receipt;
 4 incomplete/confirmation attention; 2 blocked/invalid/unavailable; 3 publication
 uncertain or original halt unconfirmed; 130/143 cooperative interruption. Error
@@ -47,11 +50,13 @@ responses use fixed codes, never raw paths or account data. Individual runs reta
 existing explicit recovery commands and may leave active saved mode after SIGKILL.
 
 ## Limits
+
 An interruption stops the batch, not a guaranteed liquidation or cancellation of
 an order. Child evidence/DBs remain. No claim of physical-power-loss durability,
 maximum-load throughput, cross-platform support or an independently reviewed system.
 
 ## Usage
+
 Existing repository setup is required; no API key. The acquisition command remains
 separate. Give the study a local file from the existing importer, not a URL.
 
@@ -76,8 +81,9 @@ engine outputs, NOT measured maximum drawdown or loss guarantees.
 configuration, runtime fingerprint and final receipt agreement. A malformed receipt
 blocks the study without removing otherwise inspectable candidate rows. The report
 shows sequential observations, not a simultaneous snapshot; later changes remain
-possible. A run result has `operation=execute_new_study`, `read_only=false`; a check
-result has `operation=inspect_existing_study`, `read_only=true`.
+possible. A plain run result has `operation=execute_new_study`, `read_only=false`;
+a check result has `operation=inspect_existing_study`, `read_only=true`. Their
+existing JSON and exit behavior remain unchanged.
 
 The source file, plan and existing execution-source fingerprint are frozen before
 execution. Each candidate is in `runs/<id>/run/`. A failed candidate halts the loop;
@@ -111,6 +117,75 @@ python tools/paper_overview.py \
 Keep source bundles, comparison JSON and HTML private. The plan/receipt format is
 not signed, and success is consistency checking rather than investment validation.
 
+## Run and export a fresh comparison (v43)
+
+Add `--html` to a new study run to execute once, perform a fresh read-only check
+and publish its comparison:
+
+```bash
+python tools/paper_study.py run .private/btc-hourly-001.json \
+  --plan config/examples/market-study-plan.json \
+  --directory .private/study-002 \
+  --html .private/study-comparison-002.html
+```
+
+Choose a **new study directory** and **new HTML filename**. Both parents must
+already exist; the HTML parent must be owned by the current user and private
+(`0700`). HTML must be outside the study. No parent is created implicitly. The
+new-directory and HTML output checks happen before execution. Source format,
+plan rules, candidate limits and simulation assumptions are unchanged.
+
+Only `run --html` returns this 11-field workflow envelope. Stdout is one JSON
+document; diagnostics go to stderr.
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | `1` |
+| `source` | `market_paper_study_workflow` |
+| `mode` | `paper` |
+| `operation` | `execute_new_study_with_report` |
+| `read_only` | `false`: this invocation executed a new study |
+| `live_enabled` | `false` |
+| `resume_authorized` | `false` |
+| `status` | The fresh inspection's status; determines exit `0`, `4` or `2` |
+| `report_published` | `true` only after confirmed HTML publication |
+| `execution` | The untouched original execution response |
+| `inspection` | The untouched later read-only inspection response used for HTML |
+
+An earlier successful execution and a later incomplete or blocked inspection
+remain separate. For example, a removed or corrupt receipt can produce diagnostic
+HTML with exit `4` or `2`; it is not repaired or reported as verified.
+
+Before export, the inspection must match the execution's source digest, market,
+timeframe, bar count, shared assumptions, baseline and ordered candidate/config/run
+identities. A verified inspection must also match all stable results, including
+account snapshots, input/result hashes and metrics; only top-level and candidate
+observation timestamps and top-level action flags are excluded. A response lacking
+the required identities cannot be exported by this flow. Use a separate `check`
+to inspect it. The private study root is observed immediately after execution and
+rechecked after inspection and before publication. These ordinary change checks
+are not an atomic attestation from directory creation through publication; an
+exact-copy replacement before the first root observation is outside their scope.
+
+Errors on this optional path add a fixed `phase`: `preflight`, `execution`,
+`inspection` or `report_publication`. `market_study_directory_not_new` means the
+requested study directory already exists. `market_study_changed` means the
+execution/inspection binding or observed study identity changed; no comparison is
+published for an unbound result. Other existing fixed error codes and precedence
+remain unchanged. Plain run/check error responses do not gain a phase field.
+
+Execution failure stops the flow immediately, with no automatic inspection,
+retry, receipt repair or deletion. Reporting failure also preserves the study and
+any possibly published HTML. After any failure or interruption, inspect the saved
+study explicitly instead of rerunning its execution:
+
+```bash
+python tools/paper_study.py check .private/study-002
+# To export another observation, choose a new filename.
+python tools/paper_study.py check .private/study-002 \
+  --html .private/study-inspection-002.html
+```
+
 ## Study comparison report (v39)
 
 Export the existing read-only check as a self-contained Korean HTML report:
@@ -136,23 +211,26 @@ exist. The file is published with `0600` permissions. Existing targets, symlink
 targets, source-directory aliases and shared output directories are refused.
 Choose a new filename for each observation; previous reports are never replaced.
 
-`--html` is available only on `check`. It does not execute a study, resume a child,
-repair a receipt or change an account. JSON stdout is still the original inspection
-report, and exit status still describes that inspection:
+`check --html` remains read-only: it does not execute a study, resume a child,
+repair a receipt or change an account. Its JSON stdout is still the original
+inspection report. Both HTML paths use the same report renderer and publication
+rules; `run --html` adds the explicit execution flow described above.
 
 | Exit | Meaning with `--html` |
 | --- | --- |
 | `0` | Study and receipt verified; HTML published |
 | `4` | Study incomplete or receipt missing; diagnostic HTML published |
-| `2` | Study blocked/unavailable, or invalid output/publication failure |
-| `3` | Output may have been published but publication confirmation failed; retain and inspect it |
-| `130` / `143` | Interrupted; inspect saved output before retrying with a new filename |
+| `2` | Study blocked/unavailable, invalid input/output or binding, or ordinary publication failure |
+| `3` | Publication confirmation uncertain, or original execution halt unconfirmed; retain and inspect evidence |
+| `130` / `143` | Interrupted; retain the study/output and inspect explicitly |
 
-A blocked/unavailable study still gets diagnostic HTML when inspection returns a
-report and the output path is valid. An `error` JSON response means the command
-could not complete its reporting operation; no HTML success is implied. The HTML
-is an observation at the printed time, with sequential per-candidate checks, and
-does not refresh. Run a new check for a new observation.
+A separate `check --html` can publish diagnostic HTML for a blocked/unavailable
+study when inspection returns a report and the output path is valid. The new
+`run --html` flow additionally requires its execution/inspection binding. An
+`error` JSON response means the command could not complete; no HTML success is
+implied, and a file may remain after uncertain publication or interruption.
+The HTML is an observation at the printed time, with sequential per-candidate
+checks, and does not refresh. Run a new check for a new observation.
 
 Risk-stop indicators are the original engine's flags, not measured maximum
 drawdown. Costs are explicit simulation assumptions, not current broker quotes.
