@@ -38,16 +38,35 @@ OHLCV rows and 32 MiB of fixture data are accepted by this exporter.
   final marked equity using the engine's precision/rounding convention. Total P&L
   includes unrealized marked holdings; it is NOT labeled realized P&L. Fees are
   already included in cash and are not deducted twice.
-- Results are published with atomic no-clobber publication only after successful replay and
-  validation, under a cooperating report writer lock. Another experiment requires
-  a new report filename. Identical reruns retain the same report without new fills.
+- Results are published with no-clobber publication only after successful replay
+  and validation, under a cooperating report writer lock. The publisher pins the
+  parent and staging descriptors, fsyncs private `0600` bytes, links without
+  replacing an existing destination, fsyncs the parent and confirms the published
+  file/parent identity. Another experiment requires a new report filename.
+  Ordinary explicit identical exports retain the existing equal report and the
+  original checkpoint prevents duplicate fills; this idempotence does not make
+  an uncertain publication an automatic retry instruction.
 - Input, checkpoint, report and their lock files must be distinct, including
   symlink/hardlink aliases. Existing unrelated/corrupt reports are never overwritten.
-- A publication failure may leave an advanced valid checkpoint, but not a partial
-  report. Rerunning validates that checkpoint and regenerates the same result.
+- A failed export may already have advanced its valid checkpoint. Preserve the
+  checkpoint and every possible report; do not delete evidence or automatically
+  execute again. If linking may have occurred but final confirmation fails,
+  `ReportPublicationUncertain` produces sanitized wording that the report may
+  exist and needs inspection, with CLI exit `4`. No success is claimed, and the
+  publisher never removes, repairs or overwrites the possible final report.
+  Other local I/O failures also exit `4`; invalid input/configuration exits `2`,
+  required-lock contention `3`, interruption `130`, and confirmed success `0`.
+  After inspecting the saved files and resolving the specific failure, any
+  deliberately selected equal export still applies the original checkpoint
+  validation and report-equality rules. A different experiment needs a new
+  destination, not deletion or renaming of the old evidence.
 - The HTTP reader never opens or executes checkpoints. It validates a bounded
   version-1 read model (8 MiB / 10,000 fills maximum), returning the latest 100 fills.
   It uses the server-configured path only; query-selected files and writes are denied.
+  Reports must be bounded regular files with no final-component symlink. Reads
+  use nonblocking/no-follow descriptors and compare descriptor/name metadata and
+  parent identity before and after; detected replacement or change is rejected.
+  These observations are consistency checks, not authenticated filesystem snapshots.
 - Reports with missing, corrupt or inconsistent data return HTTP 503. The UI keeps
   the last valid result with an explicit stale/error notice, never invented zeros.
 
@@ -62,7 +81,9 @@ Accounting consistency and hashes do not authenticate a producer or prove the
 fixture is real market data. Local files must be trusted. The read model is not
 used to authorize trades. This remains local, read-only, offline observation:
 no KIS/Upbit authentication, live feeds, partial-fill settlement, long-running
-broker reconciliation, account control or internet hosting is enabled.
+broker reconciliation, account control or internet hosting is enabled. See the
+[operations runbook](PRODUCTION_PAPER_OPERATIONS.md) for source budgets, probes,
+private files and explicit failure/recovery procedures.
 
 ## Tests
 

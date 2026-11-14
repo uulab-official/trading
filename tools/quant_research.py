@@ -12,6 +12,7 @@ for path in (ROOT / 'packages/core', ROOT / 'packages/data', ROOT / 'packages/st
         sys.path.insert(0, str(path))
 from trading_bot.walk_forward_research import run_research
 from trading_bot.research_report import read_report, write_report, unique_object
+from trading_bot.local_report_io import read_regular_bytes, ReportPublicationUncertain
 MAX_INPUT = 32 * 1024 * 1024
 
 def load_input(raw):
@@ -30,10 +31,7 @@ def validate_paths(source, output):
 
 def export_research(source, output, *, candidates=None, settings=None, robustness=False):
     source, output = validate_paths(source, output)
-    with source.open('rb') as stream:
-        raw = stream.read(MAX_INPUT + 1)
-    if len(raw) > MAX_INPUT:
-        raise ValueError('input too large')
+    raw = read_regular_bytes(source, max_bytes=MAX_INPUT)
     data = load_input(raw)
     result = run_research(data, hashlib.sha256(raw).hexdigest(), candidates=candidates, settings=settings, **({"robustness": True} if robustness else {}))
     return write_report(output, result)
@@ -61,10 +59,7 @@ def main(argv=None):
             raise ValueError('candidate input aliases output')
         if not path.is_file():
             raise ValueError('regular candidate file required')
-        with path.open('rb') as stream:
-            raw = stream.read(16385)
-        if len(raw) > 16384:
-            raise ValueError('candidate file too large')
+        raw = read_regular_bytes(path, max_bytes=16384)
         candidates = json.loads(raw, object_pairs_hook=unique_object)
     report = export_research(source, output, candidates=candidates, settings=args, robustness=robust)
     print(json.dumps({'mode': 'paper', 'status': 'research_available', 'run_id': report['run_id'], 'folds': report['summary']['total_folds']}, allow_nan=False))
@@ -76,6 +71,9 @@ def cli(argv=None):
     except (ValueError, DecimalException, UnicodeError, RecursionError):
         print('Invalid research inputs or existing report. Check history, candidate periods and window sizes; use a new output for a different experiment.', file=sys.stderr)
         return 2
+    except ReportPublicationUncertain:
+        print('Report may have been published; final confirmation failed. Preserve all output and inspect it. Do not rerun automatically.', file=sys.stderr)
+        return 3
     except OSError:
         print('Local file access failed; existing files were not overwritten.', file=sys.stderr)
         return 3

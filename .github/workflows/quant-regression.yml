@@ -27,6 +27,7 @@ jobs:
           python -m py_compile packages/strategy/smc_structure.py packages/strategy/quant_metrics.py packages/strategy/walk_forward.py packages/core/broker_interface.py packages/core/paper_broker.py packages/core/risk_gate.py packages/core/paper_execution.py packages/core/order_lifecycle.py packages/core/order_journal.py apps/dashboard/server.py apps/dashboard/store.py tools/paper_operations_demo.py apps/server/trading_bot/replay_report.py tools/paper_replay_dashboard.py apps/server/trading_bot/research_report.py apps/server/trading_bot/walk_forward_research.py tools/quant_research.py
           python -m py_compile apps/server/trading_bot/research_html.py apps/server/trading_bot/research_fixture.py tools/paper_research_report.py
           python -m py_compile apps/server/trading_bot/fixture_input.py apps/server/trading_bot/research_input.py apps/server/trading_bot/research_fixture_data.py
+          python -m py_compile apps/dashboard/runtime.py tools/paper_dashboard_check.py apps/server/trading_bot/local_report_io.py
       - name: Run isolated regression suite
         run: |
           python -m unittest discover -s tests -p 'test_smc_structure.py' -v
@@ -41,6 +42,11 @@ jobs:
           python -m unittest discover -s tests -p 'test_paper_operations.py' -v
           python -m unittest discover -s tests -p 'test_paper_operations_integration.py' -v
           python -m unittest discover -s tests -p 'test_dashboard_operations.py' -v
+          python -m unittest discover -s tests -p 'test_dashboard_store_limits.py' -v
+          python -m unittest discover -s tests -p 'test_dashboard_runtime.py' -v
+          python -m unittest discover -s tests -p 'test_dashboard_readiness.py' -v
+          python -m unittest discover -s tests -p 'test_dashboard_probe.py' -v
+          python -m unittest discover -s tests -p 'test_report_io_durability.py' -v
           python -m unittest discover -s tests -p 'test_replay_report.py' -v
           python -m unittest discover -s tests -p 'test_replay_export.py' -v
           python -m unittest discover -s tests -p 'test_replay_dashboard_api.py' -v
@@ -88,3 +94,4 @@ jobs:
           python -m unittest discover -s tests -p 'test_market_history_integration.py' -v
           python -m unittest discover -s tests -p 'test_research_engine.py' -v
           python -m unittest discover -s tests -p 'test_robustness_engine.py' -v
+          python -m unittest discover -s tests -p 'test_config_readiness.py' -v

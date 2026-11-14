@@ -132,9 +132,14 @@ class ReportTests(unittest.TestCase):
 
     def test_racing_unrelated_file_is_never_replaced(self):
         real_link = self.m.os.link
-        def racing_link(source, destination):
-            Path(destination).write_text('concurrent unrelated file')
-            return real_link(source, destination)
+        def racing_link(source, destination, **kwargs):
+            fd = self.m.os.open(destination, self.m.os.O_WRONLY | self.m.os.O_CREAT,
+                                0o600, dir_fd=kwargs['dst_dir_fd'])
+            try:
+                self.m.os.write(fd, b'concurrent unrelated file')
+            finally:
+                self.m.os.close(fd)
+            return real_link(source, destination, **kwargs)
         with patch.object(self.m.os, 'link', side_effect=racing_link):
             with self.assertRaises(FileExistsError):
                 self.m.write_report(self.path, self.build())

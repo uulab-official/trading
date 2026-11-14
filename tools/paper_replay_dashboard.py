@@ -18,6 +18,7 @@ for source in [ROOT/'packages/core', ROOT/'packages/data', ROOT/'packages/strate
         sys.path.insert(0, str(source))
 from trading_bot.replay_report import build_report, read_report, write_report
 from trading_bot.fixture_input import load_fixture
+from trading_bot.local_report_io import ReportPublicationUncertain
 
 MAX_FIXTURE_BYTES = 32 * 1024 * 1024
 
@@ -105,6 +106,9 @@ def cli(argv=None):
     except (ValueError, DecimalException):
         print('Invalid replay input, configuration or report destination. Preserve the checkpoint; use distinct paths and a new report filename for another experiment.', file=sys.stderr)
         return 2
+    except ReportPublicationUncertain:
+        print('Report may have been published; final confirmation failed. Preserve the checkpoint and all output and inspect them. Do not rerun automatically.', file=sys.stderr)
+        return 4
     except OSError:
         print('Local file access failed. Preserve the checkpoint and any previous report; verify permissions and retry.', file=sys.stderr)
         return 4

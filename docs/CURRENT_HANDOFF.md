@@ -1,162 +1,196 @@
-# Trading continuation handoff — 2026-11-14 (v43)
+# Trading continuation handoff — 2026-11-14 (v44)
 
-## Resume point
+## Resume point and supported scope
 
 Repository: `uulab-official/trading`. Continue on `feat/smc-market-structure`
 and [Draft PR #1](https://github.com/uulab-official/trading/pull/1).
-The verified starting head was v42 `840eb4895506f835557a07a40d5a2141f248b1cf`,
-tree `4e2ee1f3fbab9e21e2f6f6f3656e0b367d923f82`. Independent remote inspection
-found no divergence, all three exact-head workflows successful, PR open/Draft
-and unmerged with no auto-merge, and main unchanged at
+The verified starting head was v43 `2c3bcf288deb62160c09c85fba195636e8e6afb0`,
+tree `5a20277b14aaf3f1fa7a7597042f80a8c6b6b154`. Remote inspection found no
+divergence, all four prior exact-head runs successful, PR open/Draft and unmerged
+with no auto-merge, and main unchanged at
 `a5750019dcd7a980a28783258c06c7ef4706afc1`.
 
-The user again requested continued implementation. Existing feature-branch
-and Draft PR delivery authorization applies. Main merge, deployment, credentials
-and live execution remain outside this continuation. The existing feature
-checkout and environment were intact and clean.
+The user requested progress to production quality. This increment addresses
+reproduced resource, observation, file-durability and false-readiness defects in
+the implemented local paper/research workflow. It does not certify a public HTTP
+server, a continuously connected market feed or a live broker runtime. Existing
+feature-branch/Draft PR delivery authorization applies. Main merge, deployment,
+credentials and live execution remain outside this continuation. The clean
+existing feature checkout and installed environment were reused.
 
-## Delivered v43 implementation
+## Delivered v44 implementation
 
-```text
-python tools/paper_study.py run SOURCE --plan PLAN --directory NEW_STUDY --html NEW_HTML
+### Bounded observer and independent probes
+
+The supported dashboard now uses a standard-library bounded runtime with at most
+eight request handlers and an eight-connection backlog. It closes an excess
+connection before spawning another worker. A two-second idle timeout and a
+ten-second absolute connection lifetime also cover trickled request bytes.
+Aggregate headers are capped at 16 KiB and request lines at 4,096 bytes. Parser,
+request and startup errors are sanitized. Existing loopback binding, Host/Origin
+checks, CSP, read-only routes and HTTP/1.0 behavior remain.
+
+SIGINT/SIGTERM handlers only request shutdown. The owner stops the serving
+thread, closes active sockets, drains workers for at most two seconds and
+restores previous handlers. Repeated close is idempotent. Exit 130 means SIGINT,
+143 SIGTERM, 2 startup/configuration failure and 0 ordinary completion.
+
+`GET`/`HEAD /api/liveness` reads no source and reports only observer process
+responsiveness. `/api/readiness` separately validates configured `journal`,
+`replay`, `research` and `paper_session` sources with the existing readers, once
+per configured source. Every source remains visible as `available`,
+`unavailable` or `not_configured`. All configured sources readable means
+200/`ready`; any failure means 503/`degraded`; no sources means
+503/`not_configured`. Paths, account identifiers, metrics and raw exceptions are
+not returned. Existing `/api/health` remains journal-only.
+
+```bash
+python apps/dashboard/server.py --paper-session .private/paper-001/account.sqlite --port 8765
+python tools/paper_dashboard_check.py --port 8765 --liveness
+python tools/paper_dashboard_check.py --port 8765 --timeout 5
 ```
 
-The optional `run --html` path now connects explicitly selected local historical
-input and fixed candidate plan to original paper execution, a fresh independent
-inspection and private HTML. The original producer runs exactly once; its returned
-execution response is never passed to the read-only renderer. Plain `run` and
-all `check` results and error payloads retain their existing behavior.
+The CLI connects only to fixed `127.0.0.1`, without proxies or redirects. It
+validates the exact bounded JSON contract, status agreement and UTC observation
+time. A total network deadline also stops trickled response headers; response
+bodies are capped at 8,192 bytes. Exits: 0 valid ready/alive, 1 validated degraded
+or not-configured, 2 arguments/transport/protocol/wrong-service failure, 130
+interruption. Readiness asserts readable saved state, not writer liveness,
+market freshness, permission to resume or trading readiness.
 
-The source still requires the existing imported-market fixture format. The plan
-retains its explicit common assumptions, 2–8 ordered candidates and original work
-limits. The new directory and HTML path are preflighted before execution. HTML
-must be new, outside the study, under an existing owned/private output parent.
-No parent directory is created implicitly.
+### Bounded journal observation
 
-### Separate execution and observation
+The admission journal rejects a DB or any existing WAL/SHM sidecar larger than
+64 MiB, more than 10,000 orders, oversized text/payloads and excess metadata.
+Payload validation uses the original 16,384-byte UTF-8 bound, with a bounded SQL
+projection accounting for UTF-16 databases. It validates the entire bounded order
+set for exact Decimal totals while retaining only the requested order page.
+Audit output remains at most 50 events. Sorting uses the raw source event ID so
+a projection sentinel cannot hide a malformed newest entry.
 
-Only the new path returns an 11-field envelope:
+One read transaction has a 1,000,000 SQLite VM-operation budget and one-second
+cooperative monotonic budget including Python validation. Deep/invalid data and
+budget failures map to generic `JournalUnavailable`, with no partial totals.
+Native readonly SQLite WAL access can change SHM coordination bytes; logical DB
+and WAL data are not mutated. These limits cannot preempt a hung kernel call.
 
-- `schema_version: 1`, `source: market_paper_study_workflow`, `mode: paper`.
-- `operation: execute_new_study_with_report`, `read_only: false`.
-- `live_enabled: false`, `resume_authorized: false`.
-- `status`: fresh inspection status; `report_published: true` after confirmed HTML.
-- `execution`: untouched original execution result.
-- `inspection`: untouched fresh read-only inspection used by the renderer.
+### Stable report inputs and confirmed publication
 
-Stdout remains one JSON document; incidental diagnostics go to stderr. A missing
-or corrupt receipt after execution can therefore retain the earlier execution
-success and show a later incomplete/blocked inspection without relabeling either.
-The outer status and exit follow that inspection after successful publication.
+A shared dependency-free local I/O module now pins file and named-parent
+identity, rejects final symlinks/special files, uses nonblocking/no-follow file
+descriptors and bounds reads. Replay/research retain their original 8 MiB/2 MiB
+report limits and validators. Quant research fixture/candidate reads are bounded
+to 32 MiB/16,384 bytes and preserve original raw-byte identity and input rules.
 
-### Binding and publication
+Report publication writes private 0600 staged bytes, fsyncs the file, uses a
+descriptor-anchored no-clobber link, checks publication identity, fsyncs the
+parent and confirms the final observation. Existing output is preserved.
+Research equal-report collision resolution stays inside the original parent
+binding through staging cleanup and final confirmation, preserving the original
+generation timestamp and bytes. Replay retains its original collision refusal.
 
-The study parent is canonicalized before execution, without resolving a final
-study symlink. The original private-directory helper pins the created root
-immediately after the producer returns. The root is checked after inspection and
-again after rendering, immediately before publication.
+If a link may have published but final confirmation fails,
+`ReportPublicationUncertain` preserves any output and emits a fixed diagnostic:
+inspect saved state explicitly; never automatically rerun or repair. Original
+research I/O exit 3 and replay export I/O exit 4 remain. Failed replay export can
+already have advanced its checkpoint, so preserve both checkpoint and report.
 
-Every exportable inspection must match the executed source digest, symbol,
-timeframe, bar count, common assumptions, baseline and ordered candidate
-IDs/configurations/run references. A minimal unavailable/blocked response lacking
-these identities cannot be attributed to this execution and produces no HTML.
-A later explicit `check` can still produce its generic diagnostic snapshot.
+### Truthful configuration and operations documentation
 
-For `verified_study`, all stable response fields must match too, including account
-snapshots, result/input hashes, metrics, statuses, reasons and boundaries. Only
-observation timestamps and top-level operation/read-only flags are excluded.
-Bound diagnostic responses are allowed to differ in outcome and retain their
-original missing/corrupt-receipt or child-audit diagnostics.
+`is_live_configuration_complete()` retains the former settings-only predicate.
+Legacy `is_production_ready()` always returns false in this revision. Config
+CLI validate/show distinguish settings completeness from unverified runtime/feed/
+broker readiness while preserving validation exits. Synthetic credentials in
+tests are inert; no credential discovery or provider connection is involved.
 
-The former check publication body is shared with the new flow. It retains late
-target/parent checks and the original no-clobber publisher's `expected_parent`
-binding. HTML remains 0600. Existing files, partial studies and uncertain outputs
-are preserved. No engine, inspector, renderer, receipt or input validator was added.
-
-### Errors and interruption
-
-Only new-path errors add a fixed `phase`: `preflight`, `execution`, `inspection`
-or `report_publication`. An existing requested study is
-`market_study_directory_not_new`; a changed/unbound result is
-`market_study_changed`. Raw exception text and private absolute paths are not added.
-
-Exit 0 means fresh verification and confirmed HTML; 4 means a bound incomplete or
-missing-receipt diagnostic; 2 means blocked/input/binding/ordinary output error.
-Original halt and publication uncertainty retain 3; cooperative interruption
-retains 130/143. The original process wrapper owns the entire async sequence,
-including reporting. A received signal after HTML publication still rejects success.
-
-Producer failure stops immediately: no hidden inspection, retry, receipt repair or
-cleanup is started. Reporting failures retain the completed study. Use a separate
-`paper_study.py check DIRECTORY [--html NEW_FILE]` to inspect saved state after a
-failure; individual original child recovery remains explicit.
-
-Usage: [MARKET_PAPER_STUDY.md](MARKET_PAPER_STUDY.md#run-and-export-a-fresh-comparison-v43).
-Design: [v43 spec](superpowers/specs/2026-11-14-study-run-report-design.md).
-Plan: [v43 plan](superpowers/plans/2026-11-14-study-run-report.md).
+[PRODUCTION_PAPER_OPERATIONS.md](PRODUCTION_PAPER_OPERATIONS.md) documents exact
+create/audit/status/probe commands, source/runtime limits, explicit historical
+recovery, quiescent backup and pinned-code rollback. README, dashboard/research/
+replay guides and the production checklist agree on this supported path.
+Legacy Rust/Compose/monitor deployment remains separate and unvalidated here.
+The checklist does not mark operator, browser, soak or live gates complete.
 
 ## Verification in this continuation
 
-- Original study/report/renderer baseline: 63 passed in 18.535 seconds.
-- Eighteen new workflow test methods were run before implementation: 35 failing
-  subcases demonstrated missing support. An initial missing-envelope test error was
-  changed to an explicit assertion before the final RED run.
-- The only original test changed replaces the obsolete unknown-option assertion
-  with supported-option/unavailable-source/no-side-effects behavior.
-- Final focused suites: 81 passed in 25.554 seconds. Fresh independent review
-  repeated all 81 in 26.555 seconds and confirmed 81 unique IDs, zero duplicates.
-- Full development regression: 1,021 tests passed in 106.229 seconds.
-- Package/server: 309 tests and 382 subtests passed in 15.05 seconds, with the same
-  926 existing deprecation warnings. Node clients: 79 passed.
-- Real subprocess SIGTERM after the first saved fill retained one unconfirmed fill,
-  halted first account, no next candidate, no study receipt and no HTML. SIGTERM
-  immediately after HTML publication retained that HTML and returned 143.
-- The signal fixture was corrected from 64 to 100 bars after measuring the original
-  engine: MA has zero fills at 64 bars, so its first fill could not trigger the
-  intended first-candidate interruption. No product behavior or assertion was weakened.
-- A separate guarded original-engine demonstration ran the example's three
-  candidates (MA3/5, MA5/20, RSI14) on 100 synthetic annotated bars. New workflow
-  and subsequent explicit check both returned 0 with matching metrics and 0600
-  HTML. Reusing the study directory returned 2 before execution. Source/plan bytes
-  and the checked study inventory remained unchanged. No network/provider download
-  or performance claim is involved.
-- All 16 execution-fingerprinted sources, study producer/inspector/renderer,
-  research producer/report/CLI sources and existing CI workflows are byte-identical
-  to v42. The only changed production file is `tools/paper_study.py`.
-- Complete base-to-working-tree whitespace and syntax checks passed. Existing CI
-  automatically includes the new `test_order_*.py` suite; required package coverage
-  and separate server lifecycle steps remain unchanged.
-- Fresh independent whole-increment review found no actionable Critical, Important
-  or Minor issue. It read the full diff and original surrounding contracts, ran
-  focused verification, and had no declined-to-judge items.
+| Final local regression | Result |
+| --- | --- |
+| Development unittest | 1,108 passed in 105.174 seconds |
+| Package/server pytest | 309 tests and 382 subtests passed in 14.84 seconds; 926 existing deprecation warnings |
+| Node clients | 79 passed in 316.302 milliseconds |
 
-## Retained boundaries
+These final gates ran after the collision-parent repair. Complete
+base-to-final-working-tree whitespace checks also passed.
 
-The root pin begins after successful execution. Ordinary metadata/content checks
-are not authenticated atomic creation-to-publication evidence; an exact copied
-bundle substituted before the first root observation is outside their guarantee.
-A later change does not update exported HTML. A study remains a sequential,
-historical simulation over independent accounts, with original risk-stop flags,
-no automatic winner selection and no portfolio aggregation.
+- New isolated operations suites cover 22 journal, 14 runtime, 9 readiness,
+  11 probe and 25 report-I/O test methods. Six configuration tests cover complete
+  settings without a production-ready claim. Real sockets/subprocesses,
+  filesystem fault injection and actual SQLite databases are used.
+- Runtime/readiness/probe behavior was demonstrated RED before implementation.
+  Added startup resource-failure and repeated-close regressions also failed
+  before correction. A real SQLite alias-ordering regression failed before the
+  raw-ID ordering fix. Journal UTF-16 and payload/metadata/work bounds passed.
+- The initial report-helper import RED was supplemented by behavior-level RED
+  against the original reader/writer: final symlink acceptance and absent parent
+  fsync. Original report/research behavior remains covered by 189 tests.
+- Independent whole-increment review identified one Important/P2 collision-parent
+  race. Two real EEXIST/cleanup replacement tests failed before the fix; stable
+  equal and conflicting collisions were retained. The narrow repair's 214
+  report/replay/research tests passed. No execution-core change was needed.
+- The independent reviewer then verified all four collision regressions and
+  closed the finding. Final review has no Critical/Important/Minor findings and
+  no declined-to-judge items, within the documented local scope.
+- All 16 execution-fingerprinted source files remain byte-identical to v43.
+  Engine, arithmetic, strategy and account/recovery identities are unchanged.
+  Changed Python sources parse with Python 3.10 grammar; local runtime is 3.12.
+- A 10,000-order journal measured about 0.05 seconds and 450,000 VM operations;
+  a two-row projection used 11,733 Python-traced peak bytes. This is one measured
+  fixture, not a throughput or service-level guarantee.
+- Guarded original-engine export separately produced 12 replay fills and two
+  evaluated research folds. Actual directory-fsync failure preserved replay and
+  checkpoint, called the original runner once and returned export exit 4.
+- The integrated synthetic operating demonstration reused its completed account,
+  verified its completion audit, exported a two-fill replay and configured all
+  four observer sources. Ready and liveness exited 0; corrupting only research
+  produced degraded exit 1 while the other three stayed available; restoration
+  returned ready 0; SIGTERM returned 143; the closed port produced probe exit 2.
+  All recorded source/account/checkpoint bytes were unchanged and account/report
+  modes were 0600. External network was prohibited by a loopback-only audit guard.
+- The demonstration initially passed `min_training_fills=0`, correctly refused by
+  the original minimum of 1 before output. Only that demo argument was corrected.
+  Its resulting six research folds were all skipped; readiness validation does
+  not infer selection, execution or profitability from a readable report.
+- New suites are wired into existing Python 3.10/3.11/3.12 isolated CI and
+  3.10/3.12 original-engine integration. Existing package coverage, server tests,
+  order-safety gates and Docker/offline Rust CLI gates are preserved.
 
-The v42 research inspector still separately supports saved-report consistency,
-optional raw-byte matching and original input-rule inspection. No research run was
-hidden in either inspector, and no new research orchestration was added here.
-Earlier unrelated local-only KIS/UI packages are not assumed integrated.
+## Retained boundaries and next useful work
 
-Actual desktop/mobile browser visual QA remains unverified. The earlier browser
-connection was unavailable and local-file access was refused; no localhost,
-alternate browser or automation workaround was used. Automated structural tests
-do not establish rendered layout, print or accessibility interaction.
+Observed local descriptor/metadata checks are not authenticated storage or a
+sandbox against a privileged writer changing files after the final observation.
+Fsync confirmation does not guarantee every hardware/filesystem failure mode.
+Bounded application work does not prove sustained service capacity. Readiness
+reflects independent saved-source readability; a halted account can be readable.
+Historical recovery still requires its original compatible frozen execution and
+explicit operator action. No automatic recovery, restart or order resubmission
+was added.
 
-## Next useful work
+Actual desktop/mobile/print/accessibility browser QA remains unverified. The
+prior browser path was unavailable and local-file access was refused; no
+localhost/alternate-browser workaround was used. HTTP and structural tests are
+not visual QA. No long-duration soak, Windows/other-filesystem certification,
+prospective feed, broker-authoritative reconciliation or live trading is claimed.
 
-Continue toward an operator workflow for explicitly selected chronological research
-inputs/candidates and saved results, using the original producer and existing
-inspection contracts. Keep research execution explicit and distinct from study
-receipt verification. A new UI should build on working commands; actual visual QA
-still requires an authorized available browser path. Do not duplicate validators
-or infer live-readiness from simulation/report completion.
+The next production milestone requires an explicit supported runtime/provider
+architecture, live-market timestamps and reconnect/gap handling, authoritative
+broker/account reconciliation, and controlled deployment/monitoring/soak evidence.
+The legacy Python/Rust/Compose paths cannot be treated as one integrated service
+without that work. Build on the original durable outcomes and explicit recovery
+contracts; do not create parallel account/strategy validators or infer live
+readiness from settings or historical simulation. Actual visual QA still needs
+an authorized available browser path.
+
+Design: [v44 spec](superpowers/specs/2026-11-14-production-operations-design.md).
+Plan: [v44 plan](superpowers/plans/2026-11-14-production-operations.md).
 
 ## Delivery verification
 
@@ -166,7 +200,8 @@ Draft/open/unmerged with no auto-merge and main unchanged.
 
 Publication and exact-head CI follow this handoff commit. On resumption, inspect
 the actual PR head and its Quant Regression, Order Outcome Safety and CI/CD runs;
-previous-head success is not evidence for a later commit. Local checkpoints
-`a51c2ec` and `38f56e5` describe this work; connected GitHub publication may
-consolidate the local history into a different remote commit. Final delivery
-results are recorded in the current PR description and head-filtered checks.
+previous-head success is not evidence for a later commit. Local implementation
+checkpoint `718e9b4` precedes the reviewed collision fix `8d3d74c` and handoff; connected GitHub
+publication may consolidate local history into a different remote commit.
+Final delivery results are recorded in the current PR description, head-filtered
+checks and ignored local delivery receipt.

@@ -79,10 +79,9 @@ def cmd_validate(args):
             print(f"Telegram: {'enabled' if config.telegram.enabled else 'disabled'}")
             print(f"Strategies: {len([s for s in config.strategies if s.enabled])} active")
             
-            if mgr.is_production_ready():
-                print("\n🚀 Production ready!")
-            else:
-                print("\n⚠️  Not production ready (paper mode or missing settings)")
+            completeness = 'complete' if mgr.is_live_configuration_complete() else 'incomplete'
+            print(f"\nLive configuration: {completeness} (settings only)")
+            print("Operational readiness: unverified (runtime, feed and broker checks required)")
                 
     except FileNotFoundError as e:
         print(f"❌ {e}")
@@ -234,10 +233,9 @@ def cmd_show(args):
                 print(f"   ✅ {strategy.name} ({strategy.type}) - {strategy.symbol}")
         
         print()
-        if mgr.is_production_ready():
-            print("🚀 Status: Production Ready")
-        else:
-            print("⚠️  Status: Development Mode")
+        completeness = 'complete' if mgr.is_live_configuration_complete() else 'incomplete'
+        print(f"Live configuration: {completeness} (settings only)")
+        print("Operational readiness: unverified (runtime, feed and broker checks required)")
             
     except Exception as e:
         print(f"❌ Error: {e}")

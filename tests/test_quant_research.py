@@ -152,8 +152,13 @@ class ResearchTests(unittest.TestCase):
         r = self.run_study()
         path = Path(self.tmp.name) / 'research.json'
 
-        def collision(src, dst):
-            Path(dst).write_text('racer')
+        def collision(src, dst, **kwargs):
+            fd = self.r.os.open(dst, self.r.os.O_WRONLY | self.r.os.O_CREAT,
+                                0o600, dir_fd=kwargs['dst_dir_fd'])
+            try:
+                self.r.os.write(fd, b'racer')
+            finally:
+                self.r.os.close(fd)
             raise FileExistsError()
         with patch.object(self.r.os, 'link', side_effect=collision):
             with self.assertRaises(ValueError):

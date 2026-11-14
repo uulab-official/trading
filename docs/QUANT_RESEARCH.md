@@ -34,6 +34,42 @@ Example candidate file:
 ]
 ```
 
+## JSON research input and publication behavior (v44)
+
+The producing CLI accepts bounded regular local inputs: fixture bytes at most
+32 MiB and an optional candidate file at most 16,384 bytes. Fixture, candidate
+and saved-report reads reject final-component symlinks and special files. They
+use nonblocking/no-follow descriptors, compare file descriptor/name metadata and
+check parent identity before and after reading. Detected file or parent changes
+fail the observation instead of mixing sources. Original JSON, candidate,
+chronology, arithmetic and work validators still apply; the shared bytes supply
+the fixture hash and parsed input. These local metadata checks do not authenticate
+a producer or guarantee an atomic filesystem snapshot.
+
+JSON publication retains no-clobber and equal-report idempotence. The existing
+report must describe the same experiment/results, ignoring only generation time;
+a different experiment needs a new destination and unrelated files are never
+overwritten. The publisher pins parent/staging descriptors, writes private
+`0600` bytes, fsyncs them, links without replacing a destination, fsyncs the
+parent and verifies final file/parent identity. Accepted existing parent
+permissions are unchanged; keep experiment files in operator-private storage.
+
+If publication may have occurred but confirmation fails,
+`ReportPublicationUncertain` causes explicit sanitized wording that the report
+may exist and must be preserved and inspected. The command does not report
+success, repair/remove a possible final file or automatically rerun research.
+The producing `quant_research.py` CLI exits `0` for confirmed success, `2` for
+invalid inputs/settings or a conflicting report, `3` for local I/O failure
+including uncertain JSON publication, and `130` for keyboard interruption.
+Preserve possible outputs after failure/interruption; inspect the saved report
+and resolve the cause before deliberately deciding another operation. Ordinary
+explicit identical exports continue to retain an existing equal report.
+
+The separate static HTML inspector below has its own exit table; its exit `3`
+also requires preservation/inspection, but is not the producing JSON CLI.
+See the [local operations runbook](PRODUCTION_PAPER_OPERATIONS.md) for current
+source/probe budgets, private files and failure handling.
+
 ## Static research snapshot (v40)
 
 Inspect an **existing** research JSON without a dashboard server or another
@@ -53,8 +89,11 @@ python tools/paper_research_report.py .private/research-001.json \
 
 Open the saved HTML on your own computer. It contains its own CSS and needs no
 JavaScript, network assets or API. It is a static observation of the loaded report;
-later source changes do not update it. Choose another output filename to export a
-new snapshot. A private HTML sibling beside the research JSON is allowed.
+later source changes do not update it. Choose another output filename for a
+deliberately requested new snapshot. After any publication-confirmation failure,
+preserve and inspect the possible output before choosing another action; a new
+filename is not an automatic retry. A private HTML sibling beside the research
+JSON is allowed.
 
 For a complete first run using only the repository's **synthetic** fixture:
 
@@ -249,10 +288,12 @@ the shared publisher. The command never replaces or deletes a final target.
 | `1` | A completed byte/data check mismatched or explicit input inspection found invalid data; optional diagnostic HTML was published |
 | `2` | Invalid/unavailable arguments/report/fixture/output, or a pre-publication failure; JSON contains a bounded error code |
 | `3` | HTML may already exist but publication confirmation failed; preserve and inspect it |
-| `130` | Keyboard interruption; inspect any saved output before retrying with a new filename |
+| `130` | Keyboard interruption; preserve and inspect any saved output before deciding another operation |
 
 Errors do not echo invalid report contents, exception details or source paths.
 Do not treat a failed report as an empty account or zero-return experiment.
+A possible HTML publication is retained after confirmation failure; do not
+rerun automatically, remove it or choose a new filename merely to hide failure.
 The HTML interface has automated structure/content tests. Actual desktop/mobile
 browser visual verification for this increment is tracked separately in
 [CURRENT_HANDOFF.md](CURRENT_HANDOFF.md).
@@ -274,7 +315,15 @@ Limits: 5000 contiguous input bars, 8 unique candidates, 24 complete folds, init
 
 The reader checks exact fields, bounds, candidate identities, train-only selection, Decimal accounting relationships, source/configuration hash and summary. These are consistency checks, not a rerun or a cryptographic proof of source/execution. A trusted local producer is required. The experiment ID does not attest the repository revision; retain the code commit alongside reports for reproducibility.
 
-Atomic create-if-absent publication protects unrelated files and races. Report readers reject oversized files, duplicate JSON keys, symlinks and non-regular files. The service reads a fixed operator-supplied report path only; HTTP requests cannot choose files, strategies or execution settings. Existing Host/Origin checks, CSP and no-write routes apply. These are not authentication. Do not expose the server through a public proxy or tunnel.
+Confirmed no-clobber JSON publication protects unrelated files and preserves
+equal-report idempotence; possible publication with failed confirmation is
+reported as uncertain and requires inspection, as described above. The bounded
+2 MiB report reader rejects duplicate JSON keys, final-component symlinks,
+non-regular files and detected file/parent changes around descriptor-based reads.
+The service reads a fixed operator-supplied report path only; HTTP requests cannot
+choose files, strategies or execution settings. Existing Host/Origin checks, CSP
+and no-write routes apply. These are not authentication. Do not expose the server
+through a public proxy or tunnel.
 
 The UI preserves last-good data on a failed refresh, labels unavailable/stale reports and displays amounts as text. Reports/mean returns are historical experiments, not live account balances. No new real-provider network success, brokerage integration, order reconciliation or profitability is implied.
 

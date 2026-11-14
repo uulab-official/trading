@@ -10,7 +10,19 @@ import json
 import os
 from pathlib import Path
 import re
-import tempfile
+
+# The dashboard also loads this module by filename in a stdlib-only process.
+if __package__:
+    from .local_report_io import read_regular_bytes, publish_new_report, ReportPublicationUncertain
+else:
+    import importlib.util
+    _io_spec = importlib.util.spec_from_file_location(
+        '_local_report_io', Path(__file__).with_name('local_report_io.py'))
+    _io_module = importlib.util.module_from_spec(_io_spec)
+    _io_spec.loader.exec_module(_io_module)
+    read_regular_bytes = _io_module.read_regular_bytes
+    publish_new_report = _io_module.publish_new_report
+    ReportPublicationUncertain = _io_module.ReportPublicationUncertain
 
 MAX_REPORT_BYTES = 8 * 1024 * 1024
 MAX_FILLS = 10000
@@ -253,10 +265,7 @@ def _unique_object(pairs):
 def read_report(path):
     if path is None or not Path(path).is_file():
         raise ValueError('regular report file required')
-    with Path(path).open('rb') as stream:
-        raw = stream.read(MAX_REPORT_BYTES + 1)
-    if len(raw) > MAX_REPORT_BYTES:
-        raise ValueError('report too large')
+    raw = read_regular_bytes(path, max_bytes=MAX_REPORT_BYTES)
     try:
         report = json.loads(raw, object_pairs_hook=_unique_object)
         return validate_report(report)
@@ -283,15 +292,5 @@ def write_report(path, report):
     body = json.dumps(normalized, sort_keys=True, ensure_ascii=False, allow_nan=False).encode('utf-8')
     if len(body) > MAX_REPORT_BYTES:
         raise ValueError('report too large')
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=destination.parent, prefix='.replay-', suffix='.tmp', delete=False) as stream:
-            temporary = Path(stream.name)
-            stream.write(body); stream.flush(); os.fsync(stream.fileno())
-        # Atomic create-if-absent: never clobber a file created by an unrelated
-        # writer after the existence check. Both paths are on the same filesystem.
-        os.link(temporary, destination)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    publish_new_report(destination, body)
     return normalized

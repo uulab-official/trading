@@ -10,8 +10,19 @@ import json
 import os
 from pathlib import Path
 import re
-import stat
-import tempfile
+# The dashboard also loads this module by filename in a stdlib-only process.
+if __package__:
+    from .local_report_io import read_regular_bytes, publish_new_report, ReportPublicationUncertain
+else:
+    import importlib.util
+    _io_spec = importlib.util.spec_from_file_location(
+        '_local_report_io', Path(__file__).with_name('local_report_io.py'))
+    _io_module = importlib.util.module_from_spec(_io_spec)
+    _io_spec.loader.exec_module(_io_module)
+    read_regular_bytes = _io_module.read_regular_bytes
+    publish_new_report = _io_module.publish_new_report
+    ReportPublicationUncertain = _io_module.ReportPublicationUncertain
+
 CONTEXT = Context(prec=28)
 MAX_BYTES = 2 * 1024 * 1024
 MAX_WORK = 5000000
@@ -357,16 +368,9 @@ def unique_object(pairs):
 def read_report(path):
     if path is None:
         raise ValueError('report unavailable')
-    p = Path(path)
-    if p.is_symlink() or not p.is_file():
+    if Path(path).is_symlink() or not Path(path).is_file():
         raise ValueError('regular report required')
-    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
-    with os.fdopen(os.open(p, flags), 'rb') as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-            raise ValueError('regular report required')
-        raw = stream.read(MAX_BYTES + 1)
-    if len(raw) > MAX_BYTES:
-        raise ValueError('report too large')
+    raw = read_regular_bytes(path, max_bytes=MAX_BYTES)
     try:
         return validate_report(json.loads(raw, object_pairs_hook=unique_object))
     except (UnicodeError, RecursionError) as error:
@@ -388,18 +392,5 @@ def write_report(path, value):
     body = canonical(normalized).encode()
     if len(body) > MAX_BYTES:
         raise ValueError('report too large')
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=destination.parent, prefix='.research-', suffix='.tmp', delete=False) as stream:
-            temporary = Path(stream.name)
-            stream.write(body)
-            stream.flush()
-            os.fsync(stream.fileno())
-        try:
-            os.link(temporary, destination)
-        except FileExistsError:
-            return existing()
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-    return normalized
+    old = publish_new_report(destination, body, on_exists=existing)
+    return normalized if old is None else old

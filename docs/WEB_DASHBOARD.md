@@ -1,303 +1,82 @@
-# Web Dashboard 구현 범위
-
-## 현재 개인 체험과 대시보드의 경계
-
-현재 검증된 [개인 체험](../PERSONAL_TRADING_GUIDE.md)은 Python CLI의 합성 데이터 재생입니다.
-결과는 표준 출력 JSON, 재시작 상태는 `--checkpoint`로 지정한 JSON 파일입니다.
-다음 웹 화면에 자동으로 연결되지 않습니다.
-
-- `infra/docker/docker-compose.yml`에는 Rust `trading-server` 서비스만 있습니다
-- `infra/docker/Dockerfile`은 Rust 바이너리를 빌드하고 `master` 모드로 시작합니다
-- Rust `apps/server/src/master/web.rs`의 `/api/positions`와 `/api/orders`는
-  현재 빈 배열을 반환합니다. `/api/status`의 `running`은 모의 체결 증거가 아닙니다
-- Python `packages/monitor/web_dashboard.py`는 `/app/data/trading.db`에서
-  `bot:main:portfolio`, `bot:main:positions`, `bot:main:status`를 읽습니다.
-  재생 CLI의 JSON 체크포인트나 임의 봇 ID의 SQLite 체크포인트를 읽는 통합은 없습니다
-- 레거시 Python 봇의 버전 관리 SQLite 상태, Python 대시보드의 고정 키 조회,
-  Rust 상태 저장소는 같은 데이터 계약으로 검증되지 않았습니다
-
-따라서 화면의 빈 목록이나 연결 상태 대신 CLI 결과와 재실행 검사를 확인하세요.
-저장 파일을 서로 복사하거나 이름만 바꾸어 연결하지 마세요.
-
-## 과거 대시보드 설계 참고
-
-아래의 독립 `trading-bot`/`web-dashboard` Compose 구성, 무중단 배포,
-실시간 포트폴리오 화면은 과거 설계·예시입니다. 현재 Compose에 해당 두 서비스가
-구성되어 있지 않으므로 아래 실행 예시만으로 재현되지 않습니다.
-개인 체험 절차나 운영 검증 결과로 사용하지 마세요.
-
-
-## 🌐 개요
-
-트레이딩 봇을 실시간으로 모니터링할 수 있는 웹 대시보드를 제공합니다.
-
-**특징:**
-- ✅ 코어(트레이딩 엔진)와 분리된 독립 서비스
-- ✅ 코어 배포 시에도 웹 대시보드는 중단되지 않음
-- ✅ 실시간 WebSocket으로 1초 단위 업데이트
-- ✅ 모바일/태블릿/PC 어디서나 접속 가능
-- ✅ 읽기 전용으로 안전 (실수로 설정 변경 불가)
-
----
-
-## 🏗️ 아키텍처
-
-```
-Docker Compose
-├── trading-bot (코어)     - 배포 시 재시작됨
-│   └── 상태를 SQLite에 저장
-│
-└── web-dashboard (웹)     - 항상 실행됨 (중단 없음)
-    └── SQLite를 읽기 전용으로 마운트
-```
-
-**배포 시 흐름:**
-1. `./deploy.sh` 실행
-2. trading-bot 컨테이너 중지 → 새 버전 시작
-3. web-dashboard는 그대로 유지 (중단 없음)
-4. 웹 브라우저에서 새로고침만 하면 새로운 데이터 표시
-
----
-
-## 🚀 시작하기
-
-### 1. 실행
-
-```bash
-# 웹 대시보드 포함하여 시작
-docker-compose -f infra/docker/docker-compose.yml up -d
-
-# 확인
-docker-compose ps
-# trading-bot      running
-# web-dashboard    running
-```
-
-### 2. 접속
-
-```
-http://localhost:8080
-또는
-http://<서버IP>:8080
-```
-
-**모바일에서도 접속:**
-- 같은 WiFi에 연결된 경우 서버 IP로 접속
-- 외부에서 접속하려면 포트포워딩 또는 VPN 필요
-
-### 3. 확인사항
-
-웹 대시보드 화면에서 확인할 수 있는 것:
-- **실시간 상태**: 봇 실행/중지 상태
-- **포트폴리오**: 총 자산, 수익률
-- **포지션**: 현재 보유 중인 포지션 목록
-- **PnL**: 실현/미실현 손익
-- **거래 내역**: 최근 체결된 거래
-
----
-
-## 📱 화면 구성
-
-### 메인 대시보드
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ 🤖 Trading Bot Dashboard        Status: ● Running 12:34:56 │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │ Total Balance│  │   Total PnL  │  │ Open Positions│     │
-│  │   $10,234.56 │  │   +$234.56 ▲ │  │      2        │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-│                                                             │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │ Open Positions                                        │  │
-│  ├──────────┬──────┬────────┬───────────┬────────┬───────┤  │
-│  │ Symbol   │ Side │  Size  │   Entry   │ Current│  PnL  │  │
-│  ├──────────┼──────┼────────┼───────────┼────────┼───────┤  │
-│  │ BTC/USDT │ LONG │ 0.05   │ $42,000   │$43,200 │+$60  │  │
-│  │ ETH/USDT │ LONG │ 0.5    │ $2,800    │$2,750  │-$25  │  │
-│  └──────────┴──────┴────────┴───────────┴────────┴───────┘  │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-                                                      ● Connected
-```
-
-### 상태 표시
-
-| 색상 | 의미 |
-|------|------|
-| 🟢 초록색 | 봇 실행 중 (Running) |
-| 🔴 빨간색 | 봇 중지 (Stopped) |
-| 🟡 노란색 | 연결 끊김 (WebSocket disconnect) |
-
----
-
-## ⚡ Zero-Downtime 배포
-
-### 배포 시에도 웹 계속 사용 가능
-
-```bash
-# 1. 배포 전 - 웹 대시보드 확인
-open http://localhost:8080
-# → "Running" 상태 확인
-
-# 2. 배포 실행
-./infra/scripts/deploy.sh v1.1.0
-# → trading-bot만 재시작
-# → web-dashboard는 계속 실행
-
-# 3. 배포 후 - 웹에서 새로고침
-# 브라우저에서 F5 또는 새로고침 버튼
-# → 새 버전의 데이터 표시
-```
-
-**중요:**
-- 배포 중에도 웹 대시보드는 계속 볼 수 있음
-- 다만 배포 중 10-30초간 데이터가 업데이트되지 않음
-- 새로고침하면 새로운 데이터 표시
-
----
-
-## 🔧 고급 설정
-
-### 외부에서 접속하기
-
-**방법 1: 포트포워딩 (집 공유기)**
-```
-공유기 설정 → 포트포워딩
-외부 8080 → 낶부 <서버IP>:8080
-```
-
-**방법 2: ngrok (임시)**
-```bash
-# ngrok 설치 후
-ngrok http 8080
-
-# 출력된 URL로 어디서나 접속
-# https://xxxx.ngrok.io
-```
-
-**방법 3: VPN (안전)**
-- Tailscale, ZeroTier 등 설치
-- VPN 네트워크 내에서 접속
-
-### 비밀번호 보호 (기본 인증 추가)
-
-```yaml
-# docker-compose.yml에 추가
-services:
-  web-dashboard:
-    environment:
-      - AUTH_USERNAME=admin
-      - AUTH_PASSWORD=yourpassword
-```
-
----
-
-## 🐛 문제 해결
-
-### 웹 대시보드가 안 열림
-
-```bash
-# 1. 컨테이너 상태 확인
-docker-compose ps
-
-# 2. 로그 확인
-docker-compose logs web-dashboard
-
-# 3. 포트 충돌 확인
-lsof -i :8080
-
-# 4. 재시작
-docker-compose restart web-dashboard
-```
-
-### 데이터가 안 보임
-
-```bash
-# 1. trading-bot이 실행 중인지 확인
-docker-compose ps
-
-# 2. SQLite 파일 확인
-ls -la data/state.db
-
-# 3. 권한 확인
-docker-compose exec web-dashboard ls -la /app/data/
-
-# 4. 읽기 권한 부여 (필요시)
-chmod 644 data/state.db
-```
-
-### 실시간 업데이트 안 됨
-
-**원인:** WebSocket 연결 문제
-
-**해결:**
-1. 브라우저 새로고침 (F5)
-2. 다른 브라우저 시도 (Chrome, Firefox, Safari)
-3. 방화벽 확인 (WebSocket 포트 8080 허용)
-
----
-
-## 📊 REST API
-
-웹 대시보드는 REST API도 제공합니다:
-
-```bash
-# 현재 상태 조회
-curl http://localhost:8080/api/status
-
-# 거래 내역 조회
-curl http://localhost:8080/api/history?limit=10
-```
-
-**응답 예시:**
-```json
-{
-  "status": "running",
-  "timestamp": "2026-02-12T12:34:56",
-  "portfolio": {
-    "balance": 10000.00,
-    "total_pnl": 234.56
-  },
-  "positions": [
-    {
-      "symbol": "BTC/USDT",
-      "side": "long",
-      "size": 0.05,
-      "entry_price": 42000.00
-    }
-  ]
-}
-```
-
----
-
-## 🔄 WebSocket 실시간 연결
-
-JavaScript 예시:
-```javascript
-const ws = new WebSocket('ws://localhost:8080/ws');
-
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log('Portfolio:', data.data.portfolio);
-  console.log('Positions:', data.data.positions);
-};
-```
-
----
-
-## 📝 요약
-
-| 기능 | 설명 |
-|------|------|
-| **접속** | http://localhost:8080 |
-| **실시간** | 1초 단위 WebSocket 업데이트 |
-| **배포** | 코어 재시작해도 웹은 중단 없음 |
-| **데이터** | SQLite 읽기 전용으로 안전 |
-| **API** | REST + WebSocket 제공 |
-
-**다음 단계:**
-- [PERSONAL_TRADING_GUIDE.md](../PERSONAL_TRADING_GUIDE.md) - 현재 검증된 오프라인 체험
+# Current local dashboard and source contracts
+
+The supported web entrypoint is `apps/dashboard/server.py`, a read-only local
+observer at `http://127.0.0.1:8765`. Follow the
+[operations runbook](PRODUCTION_PAPER_OPERATIONS.md) for exact commands,
+private-file handling, probes, resource limits, lifecycle and recovery.
+The [dashboard README](../apps/dashboard/README.md) has a short synthetic example.
+
+This replaces the obsolete Compose/WebSocket/port-forwarding tutorial. The
+current Compose file starts the separate Rust server; it does not connect the
+Python runner's JSON checkpoint to this observer. Rust `/api/positions` and
+`/api/orders` and the legacy `packages/monitor/web_dashboard.py` use separate
+contracts. Their running/connected display is not paper execution evidence.
+Do not copy files or rename checkpoints to pretend those contracts agree.
+
+## Select local sources explicitly
+
+| CLI flag | Saved source | Views / GET or HEAD endpoints |
+|---|---|---|
+| `--journal` | SQLite admission journal; reservations, not a cash ledger | `/`, `/api/health`, `/api/snapshot`, `/api/orders`, `/api/events` |
+| `--replay-report` | Validated completed PaperRunner report, never its checkpoint | Replay section at `/`, `/api/replay` |
+| `--research-report` | Validated saved walk-forward research report | `/research.html`, `/api/research` |
+| `--paper-session` | Durable paper-account SQLite observation | `/paper-account.html`, `/paper-orders.html`, `/api/paper-session`, `/api/paper-session/orders`, `/api/paper-session/order` |
+| No source flag required | Observer process probe | `/api/liveness` |
+| All explicitly configured sources | Source readability probe | `/api/readiness` |
+
+Flags may be combined; missing or invalid sources produce their own unavailable
+response without concealing an independent valid source. Unconfigured probes
+list sources as `not_configured`; configured unreadable sources are
+`unavailable`. Source routes retain their existing validated schemas and return
+`503` for unavailable data, not fabricated empty accounts. Account page/detail
+preconditions retain their existing `409` changed-observation and `404` missing
+order semantics. The browser can retain its previous good observation only with
+an explicit warning. Dates displayed in KST and refresh/generation timestamps do
+not imply current market prices. Currencies and reservations remain separate.
+
+## Probe and runtime meaning
+
+`/api/liveness` is `alive/200` with `scope=observer_process` and never reads source
+files. `/api/readiness` is `ready/200` only when all configured sources pass their
+existing validators; no configured sources is `not_configured/503`, any failure
+is `degraded/503`. Its scope is `configured_source_readability`. Both accept
+GET/HEAD without query parameters and include only the fixed version-1 local
+paper observer contract, UTC observation time, and for readiness exactly the four
+source statuses. They expose no account identifiers, source paths or metrics.
+`/api/health` remains journal-only; it is not an aggregate readiness alias.
+
+Use `python tools/paper_dashboard_check.py --port 8765` for strict direct-loopback
+readiness validation, adding `--liveness` for process response. Exit `0` means
+valid ready/alive, `1` valid degraded/not_configured, `2` invalid arguments,
+transport/protocol/unexpected response, `130` interruption. No URL, host, proxy or
+redirect options exist. See the runbook for timeout and byte bounds.
+
+The server bounds concurrent handlers to eight, backlog to eight, socket
+inactivity to two seconds and absolute connection lifetime to ten seconds.
+Aggregate headers are capped at 16 KiB and request lines at 4,096 bytes.
+SIGINT/SIGTERM close active sockets and wait at most two seconds for request
+workers, with process exits `130`/`143`. Startup/configuration failure exits `2`.
+Journal/report/account read budgets are source-specific and documented in the
+runbook; finite application work cannot impose a hard deadline on a hung kernel
+or filesystem call. These limits are not public-service or soak certification.
+
+## Security and evidence boundaries
+
+Local Host/Origin/Fetch-Site checks, CSP, no-store responses and write rejection
+remain in force for all routes, including probes. They are not authentication.
+Do not host publicly, use a proxy/tunnel, forward ports or broaden file
+permissions. There are no web execution, recovery, mode-change or broker controls.
+Read-only observation does not claim an owner lease, repair a database or
+normalize an order. SQLite WAL reads may change `-shm` coordination bytes while
+leaving logical database/WAL content unchanged; read-only does not certify
+byte-immutable sidecars. Stored active mode is not owner liveness; a readable account
+is not reconciled with a broker or permission to resume. Actual browser visual
+QA remains unverified for the current release.
+
+Detailed contracts and cumulative workflows:
+
+- [Admission local API](DASHBOARD_LOCAL_API.md) and [journal](ORDER_JOURNAL.md).
+- [Replay reports](PAPER_REPLAY_DASHBOARD.md) and [quant research](QUANT_RESEARCH.md).
+- [Paper account observer](PAPER_SESSION_OBSERVER.md), [order browser](PAPER_ORDER_BROWSER.md) and [order detail](PAPER_ORDER_DETAIL.md).
+- [Historical run](DURABLE_PAPER_RUN.md), [explicit recovery](DURABLE_PAPER_RESUME.md), [preflight](DURABLE_PAPER_PREFLIGHT.md) and [completion audit](DURABLE_PAPER_AUDIT.md).
+- [Study comparison and run-then-report workflow](MARKET_PAPER_STUDY.md), [static research/input inspection](QUANT_RESEARCH.md#optional-research-input-inspection-v42), and [remaining operational evidence](../PRODUCTION_CHECKLIST.md).

@@ -4,20 +4,28 @@ Host/Origin checks mitigate browser-origin attacks; they are not authentication.
 No credential handling, broker connection, order submission or fill simulation.
 """
 import argparse
+from datetime import datetime, timezone
 import importlib.util
 import json
 import re
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import signal
+import threading
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 if __package__:
     from .store import JournalUnavailable, STATUSES, read_snapshot
+    from .runtime import BoundedHTTPServer, HeaderBudgetReader
 else:  # Keep direct script execution and the repository's file-loader tests working.
     _spec = importlib.util.spec_from_file_location("uulab_dashboard_store", Path(__file__).with_name("store.py"))
     _store = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_store)
     JournalUnavailable, STATUSES, read_snapshot = _store.JournalUnavailable, _store.STATUSES, _store.read_snapshot
+    _runtime_spec = importlib.util.spec_from_file_location("uulab_dashboard_runtime", Path(__file__).with_name("runtime.py"))
+    _runtime = importlib.util.module_from_spec(_runtime_spec)
+    _runtime_spec.loader.exec_module(_runtime)
+    BoundedHTTPServer, HeaderBudgetReader = _runtime.BoundedHTTPServer, _runtime.HeaderBudgetReader
 
 def _report_reader(filename):
     # Optional sources are independent; unused readers need not be importable.
@@ -71,6 +79,25 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "UULABLocal"
     sys_version = ""
 
+    def parse_request(self):
+        if len(self.raw_requestline) > 4096:
+            self.command, self.request_version, self.requestline = None, "HTTP/1.0", ""
+            self.send_error(414)
+            return False
+        stream = self.rfile
+        self.rfile = HeaderBudgetReader(stream)
+        try:
+            return super().parse_request()
+        finally:
+            self.rfile = stream
+
+    def send_error(self, code, message=None, explain=None):
+        # Standard parser errors otherwise echo untrusted method/version text.
+        self.close_connection = True
+        if code == 501:
+            return self._deny_write()
+        self.respond(code, {"error": "invalid_request"})
+
     def _allowed_request(self):
         port = self.server.server_port
         allowed = {f"127.0.0.1:{port}", f"localhost:{port}"}
@@ -106,6 +133,38 @@ class Handler(BaseHTTPRequestHandler):
         self._send(status, json.dumps(data, ensure_ascii=False, allow_nan=False).encode("utf-8"),
                    "application/json; charset=utf-8", allow=allow)
 
+    def _probe(self, *, readiness):
+        report = dict(schema_version=1, source="local_paper_dashboard", mode="paper",
+                      read_only=True, live_enabled=False, status="alive",
+                      scope="observer_process", observed_at=datetime.now(timezone.utc).isoformat())
+        if not readiness:
+            return self.respond(200, report)
+        sources = {}
+        readers = (
+            ("journal", self.journal_path is not None, lambda: read_snapshot(self.journal_path)),
+            ("replay", self.replay_path is not None,
+             lambda: _report_reader("replay_report.py").read_report(self.replay_path)),
+            ("research", self.research_path is not None,
+             lambda: _report_reader("research_report.py").read_report(self.research_path)),
+            ("paper_session", self.paper_session_observer is not None,
+             lambda: self.paper_session_observer.read()),
+        )
+        for name, configured, read in readers:
+            if not configured:
+                sources[name] = "not_configured"
+                continue
+            try:
+                read()
+                sources[name] = "available"
+            except Exception:
+                # One failed source cannot suppress another source's observation.
+                sources[name] = "unavailable"
+        configured = [value for value in sources.values() if value != "not_configured"]
+        status = ("not_configured" if not configured else
+                  "degraded" if "unavailable" in configured else "ready")
+        report.update(scope="configured_source_readability", sources=sources, status=status)
+        return self.respond(200 if status == "ready" else 503, report)
+
     def do_GET(self):
         if not self._allowed_request():
             return self.respond(403, {"error": "local_same_origin_required"})
@@ -119,6 +178,10 @@ class Handler(BaseHTTPRequestHandler):
             if any(len(values) != 1 for values in query.values()):
                 raise ValueError("duplicate query")
             route = parsed.path
+            if route in {"/api/liveness", "/api/readiness"}:
+                if query:
+                    raise ValueError("probe parameters are not supported")
+                return self._probe(readiness=route == "/api/readiness")
             if route in ASSETS:
                 if query:
                     raise ValueError("asset parameters not supported")
@@ -219,6 +282,8 @@ class Handler(BaseHTTPRequestHandler):
                                       "mode": "paper", "live_enabled": False, "read_only": True})
         except ValueError:
             return self.respond(400, {"error": "invalid_request"})
+        except Exception:
+            return self.respond(500, {"error": "internal_error"})
 
     def do_HEAD(self):
         self.do_GET()
@@ -236,7 +301,9 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def create_server(journal_path=None, port=8765, *, replay_path=None, research_path=None, paper_session_path=None):
+def create_server(journal_path=None, port=8765, *, replay_path=None, research_path=None,
+                  paper_session_path=None, max_connections=8, socket_timeout=2.0,
+                  connection_timeout=10.0):
     if type(port) is not int or not 0 <= port <= 65535:
         raise ValueError("invalid port")
     class ConfiguredHandler(Handler):
@@ -249,26 +316,82 @@ def create_server(journal_path=None, port=8765, *, replay_path=None, research_pa
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'packages/core'))
         from trading_core.paper_session_observer import PaperSessionObserver
         ConfiguredHandler.paper_session_observer = PaperSessionObserver(paper_session_path)
-    return ThreadingHTTPServer(("127.0.0.1", port), ConfiguredHandler)
+    return BoundedHTTPServer(("127.0.0.1", port), ConfiguredHandler,
+                             max_connections=max_connections, socket_timeout=socket_timeout,
+                             connection_timeout=connection_timeout)
 
 
 def serve(journal_path=None, port=8765, *, replay_path=None, research_path=None, paper_session_path=None):
     with create_server(journal_path, port, replay_path=replay_path, research_path=research_path,
                        paper_session_path=paper_session_path) as server:
-        print(f"Read-only paper dashboard: http://127.0.0.1:{server.server_port}", flush=True)
+        stopped = threading.Event()
+        received, failed, previous = [], [], {}
+
+        def on_signal(signum, frame):
+            if not received:
+                received.append(signum)
+            stopped.set()
+
+        def run():
+            try:
+                server.serve_forever()
+            except Exception:
+                failed.append(True)
+            finally:
+                stopped.set()
+
+        worker = threading.Thread(target=run, name="uulab-dashboard-accept", daemon=True)
+        started = False
         try:
-            server.serve_forever()
+            if threading.current_thread() is threading.main_thread():
+                for signum in (signal.SIGINT, signal.SIGTERM):
+                    previous[signum] = signal.signal(signum, on_signal)
+            worker.start()
+            started = True
+            print(f"Read-only paper dashboard: http://127.0.0.1:{server.server_port}", flush=True)
+            stopped.wait()
         except KeyboardInterrupt:
-            pass
+            received.append(signal.SIGINT)
+        finally:
+            if started:
+                server.shutdown()
+                server.server_close()
+                worker.join(2)
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+        if received:
+            return 128 + received[0]
+        if failed:
+            raise OSError("server_failed")
+        return 0
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise ValueError("invalid_arguments")
+
+
+def cli(argv=None):
+    parser = _Parser(description=__doc__)
     parser.add_argument("--journal", default=None, help="Existing local paper SQLite journal")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--replay-report", default=None, help="Existing offline replay result, not a checkpoint")
     parser.add_argument("--research-report", default=None, help="Existing offline walk-forward research report")
     parser.add_argument("--paper-session", default=None, help="Existing durable local paper account; read only")
-    args = parser.parse_args()
-    serve(args.journal, args.port, replay_path=args.replay_report, research_path=args.research_report,
-          paper_session_path=args.paper_session)
+    try:
+        args = parser.parse_args(argv)
+    except ValueError:
+        print(json.dumps({"error": "invalid_arguments"}))
+        return 2
+    try:
+        return serve(args.journal, args.port, replay_path=args.replay_report,
+                     research_path=args.research_report, paper_session_path=args.paper_session)
+    except Exception:
+        print(json.dumps({"error": "startup_failed"}))
+        return 2
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(cli())

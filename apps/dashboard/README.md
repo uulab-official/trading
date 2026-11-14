@@ -1,49 +1,64 @@
 # Local paper operations dashboard
 
-Read-only views of the SQLite order-admission journal and, optionally, a separate
-completed offline PaperRunner report. No broker credentials, web trading controls,
-live feed or invented account balances. Reservation amounts and replay accounting
-are intentionally never added together.
+A loopback-only, read-only observer for independently configured local admission
+journals, completed offline replay/research reports and durable paper accounts.
+It does not open a broker, execute a strategy, claim a writer lease or combine
+reservation amounts with account balances. Existing Rust and legacy Python
+monitoring services remain separate.
 
-## Admission journal
-
-```bash
-python tools/paper_operations_demo.py --journal /tmp/uulab-paper-demo.sqlite
-python apps/dashboard/server.py --journal /tmp/uulab-paper-demo.sqlite --port 8765
-```
-
-The demo requires a new filename and contains explicitly synthetic reservation
-states, not executions. The UI shows persisted counts, per-currency reservations,
-status filtering/pagination and recent audit events. It retains the last good
-snapshot with a warning when refresh fails. The HTTP reader never migrates a DB.
-
-## Existing runner results
-
-See [the replay integration guide](../../docs/PAPER_REPLAY_DASHBOARD.md) for setup,
-limits and verification. On a local POSIX filesystem with engine dependencies:
+Follow [the operations runbook](../../docs/PRODUCTION_PAPER_OPERATIONS.md) for
+setup, private files, budgets, probe exits, shutdown, recovery and rollback.
+From the repository root, create a new synthetic historical account and observe
+it (existing engine package setup required):
 
 ```bash
-python tools/paper_replay_dashboard.py config/examples/offline_fixture.json \
-  --checkpoint /tmp/uulab-replay-checkpoint.json \
-  --report /tmp/uulab-replay-report.json
-python apps/dashboard/server.py --replay-report /tmp/uulab-replay-report.json --port 8765
+mkdir -p .private
+chmod 700 .private
+python tools/paper_operate.py --demo --resumable --directory .private/paper-001
+python tools/paper_audit.py .private/paper-001
+python apps/dashboard/server.py --paper-session .private/paper-001/account.sqlite --port 8765
 ```
 
-Open `http://127.0.0.1:8765` on the same computer. Both `--journal` and
-`--replay-report` may be provided. A missing source does not make the other source
-unavailable. The bundled replay fixture is synthetic; no return proves profitability.
+In another terminal:
 
-## Security and boundaries
+```bash
+python tools/paper_dashboard_check.py --port 8765 --liveness
+python tools/paper_dashboard_check.py --port 8765
+```
 
-Loopback only. Host/Origin checks, strict CSP, no CORS, no arbitrary file routes and
-no write methods. These are not authentication. Do not expose the server through
-public hosting, a proxy or a tunnel. `live_enabled=false` describes this observer,
-not other processes. Raw checkpoints and request payloads are not served.
+Open `http://127.0.0.1:8765/paper-account.html` or `/paper-orders.html` on the same
+computer. The synthetic demonstration is not real market evidence. Optional
+`--journal`, `--replay-report`, `--research-report` and `--paper-session` may be
+combined; an unavailable source does not hide an available independent source.
 
-`/api/health`, `/api/snapshot`, `/api/orders`, `/api/events` describe the admission
-journal. `/api/replay` describes the separately validated offline report. Dates
-are displayed in KST. Generation/refresh times are not live market timestamps.
+`GET/HEAD /api/liveness` checks only this observer process. `/api/readiness`
+checks explicitly configured local sources through existing validators: all
+available is `ready/200`, none configured is `not_configured/503`, otherwise
+`degraded/503`. Neither takes parameters. Readability does not establish writer
+liveness, current prices, broker reconciliation or recovery permission.
+`/api/health` remains admission-journal-only. Probe CLI exit `0` means validated
+alive/ready, `1` validated not_configured/degraded, `2` invalid arguments or
+transport/protocol failure, `130` interrupted.
 
-The admission journal is still not coordinated with a broker or fill-settlement
-service. Existing Rust/Python account dashboards remain separate. KIS/Upbit feeds,
-authentication, authoritative broker reconciliation and live controls are not enabled.
+Eight handlers, backlog eight, two-second socket inactivity timeout and ten-second
+absolute connection lifetime bound local HTTP use. Capacity exhaustion closes a
+connection. SIGINT/SIGTERM stop the server with exits `130`/`143`; startup failures
+exit `2`. Shutdown closes active sockets and bounds request-worker waiting at two
+seconds. File/SQLite validation budgets and kernel/filesystem limitations are
+specified in the runbook.
+
+Host/Origin/Fetch-Site checks, CSP, no CORS, no arbitrary file routes and rejected
+writes are not authentication. Do not expose this server through hosting, proxy,
+tunnel or port forwarding. `live_enabled=false` describes this observer, not
+other processes. Checkpoints, secrets and raw request payloads are not served.
+Stored modes and generation/refresh times are not market liveness. Missing,
+corrupt, busy, changed or over-budget sources fail closed; the UI may retain the
+last good snapshot only with a warning.
+
+See [the current endpoint guide](../../docs/WEB_DASHBOARD.md),
+[replay integration](../../docs/PAPER_REPLAY_DASHBOARD.md),
+[research](../../docs/QUANT_RESEARCH.md),
+[account observer](../../docs/PAPER_SESSION_OBSERVER.md) and
+[order browser](../../docs/PAPER_ORDER_BROWSER.md). No actual visual QA,
+long-duration soak, live feed, broker reconciliation or public deployment is
+certified by these instructions.
