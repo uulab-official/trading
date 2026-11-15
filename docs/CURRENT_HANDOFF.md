@@ -1,3 +1,27 @@
+# Trading continuation handoff — v51 passive operations monitoring
+
+The v50 final commit `d145be27935c6365169113653f16c97775e0ba5d` passed five PR workflow runs:
+Quant Regression, Order Outcome Safety, CI/CD Pipeline, Verified PAPER Runtime
+and PAPER Host Capability Preflight. The PR remained Draft and main was not merged.
+
+This continuation adds `tools/paper_monitor.py`, focused regression tests,
+three-version CI and [PAPER_MONITOR.md](PAPER_MONITOR.md). The one-shot tool
+executes only three explicit read-only local native status calls and returns a
+bounded JSON status and exit code. A positive service check alone cannot
+certify capture freshness or account status; separately selected checks are
+reported individually. No watcher daemon, notification destination, scheduler,
+restart, provider request, broker order, live activation or production readiness
+claim has been added.
+
+Ten focused tests passed in an isolated local test tree, including the actual
+invalid-service subprocess. The native trading engine, v49 fixed release profile
+and existing account/capture/service modules were left unchanged. Full monorepo
+regression and new-head GitHub CI need their own verified final results; local
+focused tests are not a substitute. Actual operator-host alert delivery and soak
+remain unverified, and `production_ready=false` continues.
+
+---
+
 # Trading continuation handoff — v50 host capability preflight
 
 This increment adds `tools/paper_host_preflight.py`, seven inert host capability
