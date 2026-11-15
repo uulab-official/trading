@@ -140,3 +140,14 @@ The read-only/inert host capability probe is documented in
 - [ ] Verify all seven Linux/filesystem/IPC observations pass. A pass is point-in-time capability evidence **only**, not production, broker, data, or service readiness.
 - [ ] Independently verify actual service start/stop, cgroup and parent-death cleanup, real network/provider/clock/disk soak, alert delivery and disaster recovery before any unattended operation.
 - [ ] Keep the v49 source-release inventory unchanged; this v50 checkout tool is not part of the 55-file v49 runtime archive.
+
+## Read-only PAPER operations monitor (v51)
+
+Follow [PAPER_MONITOR.md](docs/PAPER_MONITOR.md). This is a one-shot inspection;
+no notification delivery, schedule or service restart is created automatically.
+
+- [ ] On the operator host, invoke `tools/paper_monitor.py` with exact absolute service, capture and account paths. Require all three probes for an aggregate observation of worker progress, saved market data and the account.
+- [ ] Check the bounded JSON result and nonzero exit code. A missing, timed-out, malformed or unhealthy native result is not a healthy observation.
+- [ ] Independently connect a reviewed scheduler/alert delivery system and demonstrate delivery, acknowledgement, deduplication, escalation and recovery notifications before claiming operational alerting.
+- [ ] Validate alerting against real host/network/disk/provider faults and record evidence. Local unit tests and CI do not establish operational reliability.
+- [ ] Do not treat an observed `healthy` value as full replay verification, market data authenticity, proof of profitability or production readiness.
