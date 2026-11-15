@@ -151,3 +151,14 @@ no notification delivery, schedule or service restart is created automatically.
 - [ ] Independently connect a reviewed scheduler/alert delivery system and demonstrate delivery, acknowledgement, deduplication, escalation and recovery notifications before claiming operational alerting.
 - [ ] Validate alerting against real host/network/disk/provider faults and record evidence. Local unit tests and CI do not establish operational reliability.
 - [ ] Do not treat an observed `healthy` value as full replay verification, market data authenticity, proof of profitability or production readiness.
+
+## Private monitoring event history (v52)
+
+Follow [PAPER_MONITOR_EVENTS.md](docs/PAPER_MONITOR_EVENTS.md) for the local,
+explicit record/check commands. This component does not send any alert.
+
+- [ ] Persist an actual completed full three-source v51 monitor JSON snapshot to a separate owner-only (0600), non-symlink file; do not submit an incomplete or failed monitor-invocation response as a valid observation.
+- [ ] On a supported local filesystem, create an owner-only 0700 journal directory outside all trading stores. Record an observation and verify a private SQLite WAL history, unique transition sequence and repeated-observation deduplication.
+- [ ] Verify normal-to-fault, fault-detail-change and fault-to-recovery transitions, and test multiple concurrent writers plus init-lock timeout on the intended operator host.
+- [ ] Back up the entire quiescent SQLite monitor journal. No automatic eviction is performed after 10,000 distinct transitions; preserve evidence and explicitly plan capacity management.
+- [ ] Integrate a separate, approved delivery/acknowledgement system. The event history is NOT evidence that any alert was delivered or read; no production readiness follows from it.
