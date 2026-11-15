@@ -50,6 +50,19 @@ def _market_capture_status(directory):
     return capture_status(directory)
 
 
+def _paper_stream_status(directory):
+    if directory is None:
+        raise ValueError('paper stream not configured')
+    import sys
+    root = Path(__file__).resolve().parents[2]
+    for component in ('packages/core', 'packages/data', 'packages/strategy', 'apps/server'):
+        path = str(root / component)
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    from trading_bot.paper_stream import stream_status
+    return stream_status(directory)
+
+
 def _order_page_query(query):
     if set(query) - {'offset', 'limit', 'status', 'revision', 'digest'}:
         raise ValueError('unsupported page parameter')
@@ -94,6 +107,7 @@ class Handler(BaseHTTPRequestHandler):
     research_path = None
     paper_session_observer = None
     market_capture_path = None
+    paper_stream_path = None
     server_version = "UULABLocal"
     sys_version = ""
 
@@ -207,6 +221,15 @@ class Handler(BaseHTTPRequestHandler):
                     report = _market_capture_status(self.market_capture_path)
                 except (ValueError, OSError, ImportError):
                     return self.respond(503, {"error": "market_capture_unavailable", "mode": "paper",
+                                              "live_enabled": False, "read_only": True})
+                return self.respond(200, report)
+            if route == "/api/paper-stream":
+                if query:
+                    raise ValueError('paper stream parameters are not supported')
+                try:
+                    report = _paper_stream_status(self.paper_stream_path)
+                except (ValueError, OSError, ImportError):
+                    return self.respond(503, {"error": "paper_stream_unavailable", "mode": "paper",
                                               "live_enabled": False, "read_only": True})
                 return self.respond(200, report)
             if route in ASSETS:
@@ -329,7 +352,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def create_server(journal_path=None, port=8765, *, replay_path=None, research_path=None,
-                  paper_session_path=None, market_capture_path=None, max_connections=8, socket_timeout=2.0,
+                  paper_session_path=None, market_capture_path=None, paper_stream_path=None,
+                  max_connections=8, socket_timeout=2.0,
                   connection_timeout=10.0):
     if type(port) is not int or not 0 <= port <= 65535:
         raise ValueError("invalid port")
@@ -339,6 +363,7 @@ def create_server(journal_path=None, port=8765, *, replay_path=None, research_pa
     ConfiguredHandler.replay_path = replay_path
     ConfiguredHandler.research_path = research_path
     ConfiguredHandler.market_capture_path = market_capture_path
+    ConfiguredHandler.paper_stream_path = paper_stream_path
     if paper_session_path is not None:
         import sys
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'packages/core'))
@@ -350,9 +375,10 @@ def create_server(journal_path=None, port=8765, *, replay_path=None, research_pa
 
 
 def serve(journal_path=None, port=8765, *, replay_path=None, research_path=None, paper_session_path=None,
-          market_capture_path=None):
+          market_capture_path=None, paper_stream_path=None):
     with create_server(journal_path, port, replay_path=replay_path, research_path=research_path,
-                       paper_session_path=paper_session_path, market_capture_path=market_capture_path) as server:
+                       paper_session_path=paper_session_path, market_capture_path=market_capture_path,
+                       paper_stream_path=paper_stream_path) as server:
         stopped = threading.Event()
         received, failed, previous = [], [], {}
 
@@ -410,6 +436,7 @@ def cli(argv=None):
     parser.add_argument("--research-report", default=None, help="Existing offline walk-forward research report")
     parser.add_argument("--paper-session", default=None, help="Existing durable local paper account; read only")
     parser.add_argument("--market-capture", default=None, help="Existing public candle capture; read only")
+    parser.add_argument("--paper-stream", default=None, help="Existing continuous paper account; read only")
     try:
         args = parser.parse_args(argv)
     except ValueError:
@@ -418,7 +445,7 @@ def cli(argv=None):
     try:
         return serve(args.journal, args.port, replay_path=args.replay_report,
                      research_path=args.research_report, paper_session_path=args.paper_session,
-                     market_capture_path=args.market_capture)
+                     market_capture_path=args.market_capture, paper_stream_path=args.paper_stream)
     except Exception:
         print(json.dumps({"error": "startup_failed"}))
         return 2

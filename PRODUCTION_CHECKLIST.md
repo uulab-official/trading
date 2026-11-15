@@ -1,8 +1,10 @@
 # Paper operating checklist and remaining live evidence
 
-The supported path includes explicit public closed-candle capture, a local
-historical paper workflow and a read-only local observer. Follow
+The supported paths include explicit public closed-candle capture, continuous
+local paper consumption, historical paper workflows and a read-only local
+observer. Follow
 [MARKET_CAPTURE.md](docs/MARKET_CAPTURE.md) for collection and immutable export,
+[CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) for one continuing paper account,
 and [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md)
 for exact commands, probe contracts, budgets, shutdown, recovery and rollback.
 This checklist replaces the previous credential-and-live-switch deployment recipe.
@@ -12,9 +14,9 @@ No entry below is prechecked as evidence that an operator performed it.
 
 - [ ] Record the exact code revision and Python version; use the existing package setup.
 - [ ] Use operator-owned private directories (`0700`) and private files (`0600`). Keep accounts, frozen inputs, reports and evidence out of public delivery.
-- [ ] Select synthetic or explicitly supplied historical input and a **new** run directory; choose `--resumable` at creation if explicit historical recovery is required.
+- [ ] For a historical run, select synthetic or explicitly supplied historical input and a **new** run directory; choose `--resumable` at creation if explicit historical recovery is required. For continuous consumption, follow the separate account checklist below.
 - [ ] Confirm the intended source paths and independent source meanings. Admission reservations are not account balances or replay fills.
-- [ ] Inspect the completed run with `paper_audit.py` and/or persisted account with `paper_session_status.py`; retain failures and all artifacts.
+- [ ] Inspect a historical completed run with `paper_audit.py` and/or its persisted account with `paper_session_status.py`. Continuous accounts use `paper_stream.py check` and the stopped-owner `audit`; retain failures and all artifacts.
 - [ ] Start the observer on `127.0.0.1` only. Do not expose it via public hosting, proxies, tunnels or port forwarding.
 - [ ] Check liveness separately from configured-source readability using `paper_dashboard_check.py`.
 - [ ] Interpret probe exit `0` as valid alive/ready, `1` as validated degraded/not_configured, `2` as arguments/transport/protocol failure, and `130` as interrupted.
@@ -40,6 +42,22 @@ No entry below is prechecked as evidence that an operator performed it.
 - [ ] Use a new immutable export outside the capture, validate it with the original inspector and select a new historical paper run explicitly.
 - [ ] Record actual provider/network/clock/disk conditions during a future soak. Controlled synthetic and loopback tests are not a provider-availability claim.
 
+## Continuous paper account operations (v46)
+
+Follow [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) for complete commands,
+options and fixed exit codes. These are operating checks, not preclaimed results.
+
+- [ ] Start the capture separately, confirm `market_capture.py check` is current, and create a new account outside the capture with `paper_stream.py run --capture CAPTURE --directory ACCOUNT`.
+- [ ] Ensure enough contiguous bootstrap history: at least `max(50, slow_period)` for MA or `max(50, rsi_period + 1)` for RSI, at most 500 bars. Confirm activation starts with cash only and discards every bootstrap signal.
+- [ ] Record frozen source path/physical identity/configuration and the exact runtime/Python version. Creation fixes strategy, cost, risk and polling settings; resume accepts no overrides.
+- [ ] Interpret fills as delayed next-open simulation: the following bar's opening price is learned after it closes. Record model event time separately from observation/commit time.
+- [ ] Check the single account's atomic cursor/account/strategy/risk state with `paper_stream.py check` or GET/HEAD `/api/paper-stream`; keep these observations separate from the unchanged four-source readiness probe and full economic audit.
+- [ ] Preserve freshness, identity and progress refusals. All available retained overlap, up to 5,000 capture rows, is compared against archived bootstrap/events; the 500-bar indicator window is not the overlap verification limit.
+- [ ] Stop the writer and wait for exit before `paper_stream.py audit ACCOUNT`. Audit refuses an active writer. Review `verified_prefix`, preserved errors and source state before explicit `paper_stream.py resume ACCOUNT`.
+- [ ] Allow startup time for mandatory full archived replay on every resume. Resume rechecks the capture after replay and refuses terminal errors regardless of saved phase; never clear a refusal by editing control metadata.
+- [ ] Plan for the 100,000-consumed-bar / 256-MiB account capacity. Evidence is retained, capacity is terminal and there is no automatic archival, migration or account reset.
+- [ ] Record applicable CI results for the published feature head. The configured Python 3.10/3.12/3.13 jobs are coverage targets, not evidence that the current head has already passed them.
+
 ## Evidence still required for any future live service
 
 Configuration completeness is not operational readiness.
@@ -48,13 +66,13 @@ Configuration completeness is not operational readiness.
 settings-validation exit codes and always describes operational readiness as
 unverified. Dashboard readiness checks readability of local sources only.
 
-The following require implementation and recorded
-verification before a live service could be assessed:
+The following still require implementation where absent and recorded
+operational verification before a live service could be assessed:
 
 - [ ] Real operational verification of the implemented public capture continuity, timestamp/freshness, gaps, cooldown and restart rules; the current evidence is controlled.
-- [ ] Continuous paper strategy/account consumption with a durable cursor, next-open execution semantics and restart reconciliation. Repeating historical replay is not that runtime.
+- [ ] Real operational soak and recovery/backup/restore evidence for the implemented continuous paper account, including source-retention loss, frozen-runtime restart, capacity and unconfirmed commit handling. Controlled local tests do not establish unattended service readiness.
 - [ ] Authoritative broker/account reconciliation, partial fills, ambiguous submission outcomes, idempotence and settlement across restart.
-- [ ] Operational risk controls and stop behavior against actual execution; modeled historical gates do not guarantee a maximum loss.
+- [ ] Operational risk controls and stop behavior against actual execution; modeled historical/continuous paper gates do not guarantee a maximum loss.
 - [ ] A reviewed credential/permission boundary and deployment architecture appropriate to the intended service. The current observer is not an authenticated public web server.
 - [ ] Reproducible dependency/build and deployment/rollback evidence for the actual runtime, separate from legacy Docker/Rust scripts.
 - [ ] Long-duration soak, resource measurements, alert delivery, disk-full/backup/restore drills and recovery decisions on the supported operating environment.

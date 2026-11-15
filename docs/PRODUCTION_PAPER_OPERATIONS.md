@@ -1,17 +1,18 @@
-# Local paper operations runbook (v45)
+# Local paper operations runbook (v46)
 
-The v45 public candle collector has a separate foreground lifecycle and passive
-freshness route. Follow [MARKET_CAPTURE.md](MARKET_CAPTURE.md) to create a new
-rolling capture, inspect continuity/age, stop or explicitly resume it, and export
-an immutable fixture into the original historical workflow below. The four
-source readiness keys and account/recovery meanings in this runbook are unchanged.
-Capture does not itself consume strategies or create an account. Its controlled
-tests are not real-provider soak or continuous execution evidence.
+The v46 consumer continues one paper account from the separately operated public
+closed-candle capture. Follow [CONTINUOUS_PAPER.md](CONTINUOUS_PAPER.md) for
+indicator-only activation, atomic account/strategy/risk/cursor commits and full
+archived replay on explicit resume. [MARKET_CAPTURE.md](MARKET_CAPTURE.md)
+describes the capture's foreground lifecycle, freshness and immutable export
+into the original historical workflow. Starting a capture alone creates no account.
 
-This runbook covers the supported local historical paper runner, saved research
-and read-only observer on a local POSIX filesystem with Python 3.10 or newer.
-It does not start a prospective market feed or a broker. No credentials are
-needed. The dashboard binds only to `127.0.0.1`; open it on the same computer.
+This runbook covers continuous and historical local paper operation, saved
+research and the read-only observer on a local POSIX filesystem with Python 3.10
+or newer. Only the explicit capture command contacts the public candle endpoint;
+the consumer uses local saved data and no broker. No credentials are needed.
+Controlled tests are not real-provider soak or deployment evidence.
+The dashboard binds only to `127.0.0.1`; open it on the same computer.
 Host/Origin/Fetch-Site checks, CSP and rejected writes are browser-origin
 protections, not authentication. Public hosting, reverse proxies, tunnels,
 port forwarding and remote account access are outside this operating contract.
@@ -45,6 +46,84 @@ check; `is_production_ready()` always returns `False` in this revision. CLI
 `validate` and `show` report operational readiness as unverified. Neither command
 checks a live feed, broker, account reconciliation or recovery authorization.
 The paper workflow below does not require YAML credentials or Telegram tests.
+
+## Create and continue one paper account
+
+Run a new capture in one terminal and leave it running:
+
+```bash
+python tools/market_capture.py run --market KRW-BTC --unit 1 \
+  --history 120 --retention 5000 --poll-seconds 15 \
+  --directory .private/btc-capture-001
+```
+
+In another terminal, check the source before starting the consumer:
+
+```bash
+python tools/market_capture.py check .private/btc-capture-001
+```
+
+Once the source check returns current/exit `0`, create a new account outside
+the capture directory:
+
+```bash
+python tools/paper_stream.py run --capture .private/btc-capture-001 \
+  --directory .private/btc-stream-001 --strategy ma_cross \
+  --fast-period 3 --slow-period 5 --initial-balance 1000000 --poll-seconds 5
+```
+
+The original MA/RSI strategy warms up using at most 500 contiguous candles,
+requiring at least `max(50, slow_period)` for MA or `max(50, rsi_period + 1)`
+for RSI. All bootstrap signals are discarded. The initial account has cash,
+zero holding/fees/fills and no pending signal. After activation, each bar commits
+the complete account, original strategy/risk state, latest 500-bar indicator
+window, cursor and optional fill atomically in `stream.sqlite3`.
+
+Fills use delayed next-open simulation. The following bar's opening price is
+available only after it closes; model event time is distinct from the later
+`applied_at` observation/commit time. This is not broker execution. Source path,
+physical identity and configuration are frozen; all available retained overlap,
+up to 5,000 capture rows, is compared with the archived bootstrap/events. Stale
+or temporarily unreadable data cannot authorize another economic event.
+
+Use the passive CLI or independent local API while the consumer runs:
+
+```bash
+python tools/paper_stream.py check .private/btc-stream-001
+python apps/dashboard/server.py --paper-stream .private/btc-stream-001 --port 8765
+```
+
+Read `http://127.0.0.1:8765/api/paper-stream`. There is no new browser page;
+the endpoint and check inspect a bounded structural head, not the full economic
+history. They do not prove owner liveness or change the four readiness sources.
+
+Stop the consumer with Ctrl-C/SIGTERM, wait for its exit, and audit its saved
+prefix before deciding whether to resume:
+
+```bash
+python tools/paper_stream.py audit .private/btc-stream-001
+```
+
+Audit refuses an active writer and returns `verified_prefix` on success. After
+reviewing that result and source readiness, explicitly resume:
+
+```bash
+python tools/paper_stream.py resume .private/btc-stream-001
+```
+
+Resume accepts only the directory and optional `--max-polls`; source, strategy,
+cost/risk and polling settings cannot be overridden. It requires the frozen
+module/Python runtime fingerprint and replays every archived event before new
+consumption, then re-reads the capture. A known terminal error remains refused
+regardless of saved phase. No forced reset, automatic migration or replayed fill
+submission is available.
+
+The archive is bounded to 100,000 consumed bars and 256 MiB without financial
+event eviction. Capacity is a preserved terminal result, not automatic archival
+or creation of another account. Storage uncertainty stops the owner immediately;
+preserve the account and use explicit reopen to determine the durable prefix.
+Full commands, status fields and exit codes are in
+[CONTINUOUS_PAPER.md](CONTINUOUS_PAPER.md).
 
 ## Create and inspect one historical account
 
@@ -96,7 +175,8 @@ python tools/paper_dashboard_check.py --port 8765 --timeout 5
 Open `http://127.0.0.1:8765/paper-account.html` or
 `http://127.0.0.1:8765/paper-orders.html` locally. Optional `--journal`,
 `--replay-report` and `--research-report` paths select other independent sources.
-Only explicitly configured sources count toward readiness; an omitted source is
+Only explicitly configured journal/replay/research/paper_session sources count
+toward the existing readiness schema; an omitted source is
 `not_configured`. A missing, changed, busy, oversized, invalid or corrupt
 configured source is unavailable. It does not become zero balances or hide
 another readable source. The UI may retain a previous successful observation
@@ -105,13 +185,15 @@ with an explicit warning; its refresh time is not a market timestamp.
 | Probe | Meaning | HTTP |
 |---|---|---|
 | `/api/liveness` | Observer process responds, `scope=observer_process`, `status=alive`; no source read | `200` |
-| `/api/readiness` | Existing validators can read all configured local sources, `scope=configured_source_readability`, `status=ready` | `200` |
-| `/api/readiness` with no configured source | `status=not_configured` | `503` |
-| `/api/readiness` with any unavailable configured source | `status=degraded`; independent per-source statuses retained | `503` |
+| `/api/readiness` | Existing validators can read every configured source among journal/replay/research/paper_session; `scope=configured_source_readability`, `status=ready` | `200` |
+| `/api/readiness` with none of those four sources configured | `status=not_configured` | `503` |
+| `/api/readiness` with any of those configured sources unavailable | `status=degraded`; independent per-source statuses retained | `503` |
 | `/api/health` | Legacy admission-journal observation only | `200` or `503` |
+| `/api/market-capture` | Independent closed-candle capture observation; not a readiness key | `200` valid current/noncurrent; `503` unavailable |
+| `/api/paper-stream` | Independent bounded continuous-account head observation; not a readiness key or full audit | `200` valid current/noncurrent; `503` unavailable |
 
-The two new probes support GET/HEAD with no parameters. Their schema is version
-`1`, `source=local_paper_dashboard`, `mode=paper`, `read_only=true`,
+The liveness/readiness probes support GET/HEAD with no parameters. Their schema
+is version `1`, `source=local_paper_dashboard`, `mode=paper`, `read_only=true`,
 `live_enabled=false`, with UTC `observed_at`. Readiness lists exactly `journal`,
 `replay`, `research`, `paper_session`, each `available`, `unavailable` or
 `not_configured`. Probes expose no paths, account identifiers, metrics or raw
@@ -152,6 +234,9 @@ its recorded PID; do not kill an unrelated account writer.
 | Research inputs | Fixture at most 32 MiB; candidate file at most 16,384 bytes; original data/strategy rules still apply |
 | Durable paper account | Existing 64 MiB DB / 16 MiB bundle bounds, at most 10,000 orders; WAL and hot journals requiring recovery are refused; details follow the existing bounded page contracts |
 | Durable replay input | At most 4 MiB / 5,000 bars; audit/recovery replays history in memory and is an explicit CLI operation |
+| Public capture | At most 5,000 retained bars and 64 MiB per DB/sidecar; separate data/observation freshness, exact overlap and visible eviction counters |
+| Continuous paper account | At most 100,000 consumed bars and a 256-MiB DB; bounded structural head with a 500-bar indicator window; no financial event eviction |
+| Continuous paper audit/resume | Explicit full archived replay with bounded memory; stopped-owner audit holds a shared lock and refuses an active writer; resume rechecks the source afterward |
 
 Bounded application work cannot guarantee a hard deadline for a hung kernel or
 filesystem call. These are acceptance/resource limits, not demonstrated maximum
@@ -175,7 +260,11 @@ have advanced its checkpoint, so keep both. See the existing
 for their original validators, result schemas and aligned explicit
 failure/inspection guidance.
 
-## Investigate and explicitly recover
+## Investigate and explicitly recover a historical run
+
+These commands apply to the original historical account/recovery schema.
+Continuous accounts use `paper_stream.py check/audit/resume` as described above;
+their `stream.sqlite3` files are not historical `account.sqlite` inputs.
 
 1. Preserve the entire run and any reports after an error. Record process exits
    and the code/Python versions. Do not delete intent, lock, manifest, account,
@@ -222,19 +311,27 @@ maintenance. Back up the **whole quiescent account/run directory**, including
 frozen input, manifest, SQLite and any sidecars, evidence and result, to an
 operator-owned private destination. Keep the original directory and modes.
 Copying only `account.sqlite` from a running writer is not this backup procedure.
+For continuous operation, stop the consumer before full audit/backup and preserve
+its whole directory, including `stream.sqlite3` and permanent `.stream.lock`.
+Stop the capture separately before preserving its complete directory and sidecars.
+The account's frozen source identity remains binding: a copied or relocated capture
+does not become an authorized replacement. Backup/restore drills and a migration
+procedure are still unverified; a copy alone does not establish safe continuation.
 Keep independent report/checkpoint files together with their recorded revision.
 An archive is a separate observation, not a command to resume it or repair it.
 
 Record a known exact commit before upgrading. For rollback, prepare a separate
 checkout/environment at that recorded commit, stop the current observer, and
 start the pinned observer against preserved sources after read-only inspection.
-For historical recovery use the original fingerprint-compatible execution code
-and Python environment. Do not reset/delete data, replace evidence with an older
+For historical recovery and continuous resume, use the original
+fingerprint-compatible execution code and Python environment. Do not reset/delete
+data, replace evidence with an older
 copy, rewrite hashes/manifests, or run schema repair as rollback. A changed source
 or refusal requires investigation. A restored archive is not a new execution
 account. The legacy deployment/rollback scripts are not validated by this runbook.
 
-No actual visual QA, long-duration soak, public deployment, continuously connected
-feed, broker-authoritative reconciliation, Windows/filesystem portability or
+The implemented public capture and continuous consumer have controlled local
+regression coverage. No actual visual QA, long-duration real-provider soak, public
+deployment, broker-authoritative reconciliation, Windows/filesystem portability or
 live trading completion is certified here. Use the remaining evidence checklist
 in [PRODUCTION_CHECKLIST.md](../PRODUCTION_CHECKLIST.md).

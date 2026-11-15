@@ -2,11 +2,14 @@
 
 암호화폐 자동매매 개발 모노레포 · 로컬 모의매매·연구·운영 상태 점검
 
-## Development branch: audited market-history studies
+## Development branch: continuous paper and audited research
 
-`feat/smc-market-structure` extends the original offline workflow with imported
-historical data, durable local paper accounts, explicit recovery/audit and fixed
-MA/RSI candidate studies. [PR #1](https://github.com/uulab-official/trading/pull/1)
+`feat/smc-market-structure` supports continuous local paper consumption from a
+public closed-candle capture, alongside imported historical data, durable
+historical accounts, explicit recovery/audit and fixed MA/RSI candidate studies.
+The v46 consumer keeps one account across polls and verified restarts; its
+operator guide is [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md).
+[PR #1](https://github.com/uulab-official/trading/pull/1)
 remains Draft. The latest continuation state is in
 [CURRENT_HANDOFF.md](docs/CURRENT_HANDOFF.md).
 
@@ -105,12 +108,72 @@ SIGINT/SIGTERM and preserve all artifacts on errors. Explicit `resume` reuses
 frozen configuration and refuses uncertain in-flight or terminally blocked
 states. See [MARKET_CAPTURE.md](docs/MARKET_CAPTURE.md) for exact limits,
 restart/cooldown decisions, JSON/exit contracts and evidence boundaries.
-Controlled tests cover these paths; real-provider soak and continuous strategy
-execution remain unverified/unimplemented respectively.
+Controlled tests cover these paths; real-provider soak remains unverified.
+The separate v46 consumer below explicitly attaches a new paper account to a
+current capture.
+
+## Continuous paper consumption (v46)
+
+Keep the capture above running, and first confirm that its check returns
+`status=current` with exit `0`. Then start a separate consumer in the foreground:
+
+```bash
+python tools/paper_stream.py run \
+  --capture .private/market-btc-001 \
+  --directory .private/stream-btc-001 \
+  --strategy ma_cross --fast-period 3 --slow-period 5 \
+  --initial-balance 1000000 --poll-seconds 5
+```
+
+The new account directory must be outside the capture. Activation warms the
+original MA/RSI strategy with the latest 50–500 eligible contiguous bars and
+discards every bootstrap signal. Initial holding, fills and fees are zero, with
+no pending signal. Each new closed bar atomically saves the account,
+strategy/risk state, indicator window of at most 500 bars, cursor and optional
+fill in a private SQLite account.
+
+This is delayed next-open simulation: a following bar's opening price becomes
+available after that bar closes. Simulated event time differs from the later
+observation/commit time; no broker execution or timely quote is implied.
+The source path, physical identity, configuration and runtime fingerprint are
+frozen. New work requires a current source and consistent overlap across the
+available capture window, up to 5,000 rows, against the account archive.
+
+Observe without advancing the account:
+
+```bash
+python tools/paper_stream.py check .private/stream-btc-001
+python apps/dashboard/server.py --paper-stream .private/stream-btc-001 --port 8765
+```
+
+The local GET/HEAD endpoint is `http://127.0.0.1:8765/api/paper-stream`; no new
+browser page or execution control is added. The four readiness keys remain
+unchanged. Check exit `0` means a current observation, `1` a valid noncurrent
+observation and `2` unavailable; none establishes process liveness or a full audit.
+
+Stop the consumer with SIGINT/SIGTERM and wait for exit before auditing:
+
+```bash
+python tools/paper_stream.py audit .private/stream-btc-001
+```
+
+Audit refuses an active writer. After reviewing a `verified_prefix` result and
+source readiness, resume explicitly with the same source/configuration/runtime:
+
+```bash
+python tools/paper_stream.py resume .private/stream-btc-001
+```
+
+Resume performs full archived replay before consuming a new bar, then rechecks
+the source. Terminal errors remain refused regardless of the saved phase.
+All financial events are retained up to 100,000 consumed bars and a 256 MiB
+database. Capacity is a preserved terminal result; there is no automatic archive
+or account reset. See [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) for exact
+bootstrap requirements, frozen options, recovery decisions and JSON/exit codes.
 
 ## Verified offline paper workflow
 
-The deterministic offline paper runner is the tested entrypoint for this revision.
+For finite fixture-based experiments, use the deterministic offline paper runner.
 Start with the [personal offline trial guide](PERSONAL_TRADING_GUIDE.md) for exact
 commands, expected output, and duplicate-free resume. It uses supplied synthetic
 candles, not an ongoing market-connected paper service. The local observer reads
@@ -141,13 +204,13 @@ are not evidence of production readiness. The legacy live-feed adapter remains
 unavailable; the separate explicit public candle collector above does not enable
 that adapter or a broker. No real trading was validated.
 
-## Local paper operations and configuration truth (v44)
+## Local paper operations and configuration truth (v46)
 
 The supported observer now has separate liveness and configured-source
 readability probes, bounded HTTP handlers/connections and signal-aware shutdown.
 Use [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md) for exact
-local commands, source/read budgets, private files, historical recovery,
-quiescent-directory backup and pinned-code rollback. Start with a new synthetic
+local commands, source/read budgets, private files, continuous and historical
+recovery, quiescent-directory backup and pinned-code rollback. Start with a new synthetic
 account, then keep the observer running in the foreground:
 
 ```bash
@@ -181,9 +244,10 @@ may have occurred but final confirmation fails, preserve files and inspect them;
 do not automatically retry execution or repair evidence. The replay and research
 guides document the same explicit preservation and inspection procedure.
 
-No actual browser visual QA, long-duration real-provider soak, continuous
-strategy/account execution, broker-authoritative reconciliation, public deployment
-or live trading completion is claimed. [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) records
+Continuous paper consumption has controlled local regression coverage. Actual
+browser visual QA, long-duration real-provider soak, broker-authoritative
+reconciliation, public deployment and live trading completion remain unverified.
+[PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) records
 the paper operating checks and remaining evidence for any future live service.
 
 ## Project structure and documentation
@@ -198,6 +262,7 @@ verification. Runtime data, accounts, reports and secrets must remain private.
 |---|---|
 | [PERSONAL_TRADING_GUIDE.md](PERSONAL_TRADING_GUIDE.md) | Synthetic offline trial and duplicate-free checkpoint resume |
 | [MARKET_CAPTURE.md](docs/MARKET_CAPTURE.md) | Public closed-candle capture, freshness, bounded retention and explicit export |
+| [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) | Continuous paper account, indicator-only activation, atomic progress and full-replay resume/audit |
 | [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md) | Current local paper runbook, probes, shutdown, recovery, backup and rollback |
 | [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) | Paper operating checklist and remaining live-readiness evidence |
 | [WEB_DASHBOARD.md](docs/WEB_DASHBOARD.md) | Current local source/endpoint contracts and legacy-service boundary |
@@ -233,7 +298,7 @@ No network/provider activation is needed for synthetic paper operation.
 
 ## License and support
 
-[MIT License](LICENSE). This software supports research and historical paper
-simulation; modeled results and consistency checks do not establish future
+[MIT License](LICENSE). This software supports research and historical/continuous
+paper simulation; modeled results and consistency checks do not establish future
 performance. Report issues at
 [GitHub Issues](https://github.com/uulab-official/trading/issues).
