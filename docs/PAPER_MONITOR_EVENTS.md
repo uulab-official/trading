@@ -42,8 +42,12 @@ the per-check boolean is consistent, and the aggregate status/exit code agrees.
 An optional-service-only monitor run is intentionally **not** accepted into
 this full-coverage history.
 
-The journal keeps one private (0600) SQLite database in an existing private
-0700 directory. With a local WAL/FULL transaction, it stores each observation
+The journal keeps one private (0600) SQLite database and a persistent private
+initialization lock file (`.paper-monitor-init.lock`) in an existing private
+0700 directory. Competing process initializations are serialized, with a bounded
+2-second lock-acquisition budget; the database event transaction remains SQLite
+`BEGIN IMMEDIATE` with WAL and `synchronous=FULL`. Input JSON with duplicate
+keys or a symlink at any input path component is refused. With a local WAL/FULL transaction, it stores each observation
 count and last-observed timestamp atomically with a new state-transition event.
 The signature includes all three check statuses/exit codes, so a change from
 stale to timeout is a new event even if the aggregate stays degraded.
