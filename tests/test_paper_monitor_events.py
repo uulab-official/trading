@@ -143,6 +143,39 @@ class EventTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(json.loads(result.stdout)['status'], 'unavailable')
 
+    def test_duplicate_json_keys_refused(self):
+        raw = json.dumps(observation())
+        self.input.write_text(raw[:-1] + ', "status": "healthy"}')
+        self.input.chmod(0o600)
+        self.assertEqual(self.run_cli('record', '--directory', str(self.root),
+                                      '--input', str(self.input)).returncode, 2)
+
+    def test_symlink_parent_of_input_refused(self):
+        folder = self.root.parent / 'folder'
+        folder.mkdir()
+        target = folder / 'monitor.json'
+        target.write_text(json.dumps(observation()))
+        target.chmod(0o600)
+        alias = self.root.parent / 'linked-folder'
+        alias.symlink_to(folder)
+        self.assertEqual(self.run_cli('record', '--directory', str(self.root),
+                                      '--input', str(alias / 'monitor.json')).returncode, 2)
+
+    def test_concurrent_writers_deduplicate(self):
+        import concurrent.futures
+        self.input.write_text(json.dumps(observation()))
+        self.input.chmod(0o600)
+        def run(_):
+            return self.run_cli('record', '--directory', str(self.root),
+                                '--input', str(self.input))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(run, range(6)))
+        self.assertTrue(all(r.returncode == 0 for r in results),
+                        [(r.returncode, r.stdout, r.stderr) for r in results])
+        state = module._check(self.root / 'paper-monitor-events.sqlite')
+        self.assertEqual(state['observation_count'], 6)
+        self.assertEqual(state['event_count'], 1)
+
     def test_database_private(self):
         self.submit(observation())
         db = self.root / 'paper-monitor-events.sqlite'
