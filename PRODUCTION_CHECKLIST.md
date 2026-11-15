@@ -129,3 +129,14 @@ No live broker connection, credentials, external notification, public deployment
 actual visual QA or soak completion is implied by this checklist or synthetic
 tests. Preserve the evidence and record unresolved findings before deciding any
 future scope.
+
+## Linux PAPER host capability preflight (v50)
+
+The read-only/inert host capability probe is documented in
+[docs/PAPER_HOST_PREFLIGHT.md](docs/PAPER_HOST_PREFLIGHT.md).
+
+- [ ] On the **target host and intended filesystem**, prepare a new dedicated empty private directory (0700) outside accounts, captures and service stores.
+- [ ] Run `python3 -I -S -B tools/paper_host_preflight.py --directory /absolute/private/probe`; retain the JSON result, host details and Python version.
+- [ ] Verify all seven Linux/filesystem/IPC observations pass. A pass is point-in-time capability evidence **only**, not production, broker, data, or service readiness.
+- [ ] Independently verify actual service start/stop, cgroup and parent-death cleanup, real network/provider/clock/disk soak, alert delivery and disaster recovery before any unattended operation.
+- [ ] Keep the v49 source-release inventory unchanged; this v50 checkout tool is not part of the 55-file v49 runtime archive.
