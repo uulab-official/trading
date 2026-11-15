@@ -184,6 +184,38 @@ class EventTests(unittest.TestCase):
         module._record(db, 'healthy', signature)
         self.assertEqual(module._check(db)['event_count'], 1)
 
+    def test_wall_clock_sampled_after_writer_lock(self):
+        from datetime import datetime as real_datetime, timezone
+        db = module._open_database(self.root)
+        _, signature = module._observe(observation())
+        acquired = []
+        original_connect = module._connect
+
+        class Wrapped:
+            def __init__(self, inner):
+                self.inner = inner
+
+            def execute(self, sql, *args):
+                result = self.inner.execute(sql, *args)
+                if sql == 'BEGIN IMMEDIATE':
+                    acquired.append(True)
+                return result
+
+            def close(self):
+                self.inner.close()
+
+        class FakeClock:
+            @staticmethod
+            def now(zone):
+                if not acquired:
+                    raise AssertionError('clock sampled before acquiring write lock')
+                return real_datetime(2026, 11, 15, tzinfo=timezone.utc)
+
+        with mock.patch.object(module, '_connect',
+                               side_effect=lambda path: Wrapped(original_connect(path))), \
+             mock.patch.object(module, 'datetime', FakeClock):
+            self.assertTrue(module._record(db, 'healthy', signature)['event_created'])
+
     def test_database_private(self):
         self.submit(observation())
         db = self.root / 'paper-monitor-events.sqlite'
