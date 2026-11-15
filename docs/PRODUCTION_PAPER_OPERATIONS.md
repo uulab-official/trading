@@ -153,6 +153,11 @@ Full read-only native preflight precedes worker launch. The collector must enter
 its owned loop before the consumer starts. Both workers arm Linux parent-death
 SIGKILL before native runtime entry. No child respawns after a fault. The
 supervisor holds the service lease and signals only its own live process handles.
+Lease admission tolerates a brief health-probe collision with a bounded one-second
+wait, before preflight or worker launch. A still-busy lease or changed binding is
+refused. A previous owner that finishes during the wait can hand over only to
+this explicitly requested invocation, subject to fresh preflight and retained
+attempt checks.
 
 Use `python tools/paper_service.py check .private/btc-service-001` in another
 terminal. It returns current direct-process progress, with

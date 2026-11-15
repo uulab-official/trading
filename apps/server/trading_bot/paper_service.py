@@ -438,7 +438,7 @@ def run_service(directory, *, stop=None):
     received = _intent(stop)
     if received:
         raise ServiceInterrupted(received)
-    with ServiceDirectory(directory, exclusive=True) as owner:
+    with ServiceDirectory(directory, exclusive=True, stop=stop) as owner:
         _check_platform()
         runtime = owner.manifest['runtime']
         if runtime != dict(python=str(Path(sys.executable).absolute()), repository=str(_ROOT),

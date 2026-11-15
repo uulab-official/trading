@@ -68,6 +68,7 @@ until performed on the intended operator host.
 - [ ] Confirm Linux parent-death signals, `/proc/self/fd`, private Unix sockets and supported local filesystem behavior on the actual host. Preserve the compatible interpreter path and checkout.
 - [ ] Stop and confirm exit of consumer then capture; configure a new private service directory from the existing account. Verify the exact source pair and full preflight; do not rebind or create new trading stores through the service.
 - [ ] Run the foreground supervisor explicitly. Verify current challenge-based process progress separately from native data freshness/account audit; a manager's `active` state is insufficient.
+- [ ] Allow the bounded one-second service-lease admission window for transient probe contention. A prior owner may finish during this window; the explicit new invocation still requires fresh native preflight and valid previous cleanup evidence. No native operation or worker is automatically retried.
 - [ ] Exercise ordered SIGINT/SIGTERM shutdown, unexpected child failure, forced cleanup and supervisor death on the target host. Preserve final outcomes and incomplete evidence; no automatic restart is configured.
 - [ ] Review startup/replay, heartbeat and stop budgets against measured host behavior. The configured limits are not worst-case latency or throughput evidence.
 - [ ] Preserve all bounded attempts. Missing/partial results or `cleanup_confirmed=false` block reuse; at 64 attempts, retain the directory and explicitly configure another one after inspecting original native state.

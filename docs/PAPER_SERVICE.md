@@ -105,7 +105,13 @@ child cleanup and retained evidence have been confirmed. In another terminal,
 use `check` below for the current service observation.
 
 Each run acquires the service's exclusive lease and repeats full read-only
-preflight before starting workers. A second owner is refused. This does not
+preflight before starting workers. Admission can wait up to one second for actual
+lock contention, including a brief shared probe from `check`; it preserves held
+path identities and observes stop intent during that wait. A lease still held at
+the deadline is refused. If a prior service finishes within the window, this
+explicit invocation can acquire the lease, then must pass fresh native preflight
+and the previous-attempt evidence checks. No worker or native operation is retried.
+This does not
 make preflight atomic with unrelated operators using the original direct CLIs;
 native writer ownership and resume validation remain authoritative when each
 worker actually opens its source/account.

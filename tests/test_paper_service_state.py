@@ -9,11 +9,15 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import select
+import signal
 import socket
 import sqlite3
 import stat
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -117,6 +121,242 @@ class PaperServiceStateTests(unittest.IsolatedAsyncioTestCase):
             raise
         else:
             probe.close()
+
+    def lease_process(self, body):
+        code = r'''
+import fcntl,json,os,signal,socket,sys,time
+from pathlib import Path
+def forbidden(*args,**kwargs):raise AssertionError('network forbidden')
+socket.create_connection=socket.getaddrinfo=socket.socket.connect=forbidden
+socket.socket.connect_ex=socket.socket.sendto=forbidden
+root=Path(sys.argv[1])
+for part in ('packages/core','packages/data','packages/strategy','apps/server'):
+ sys.path.insert(0,str(root/part))
+from trading_bot import paper_service_state as state
+exec(compile(sys.argv[3],'<service-lease-test>','exec'))
+'''
+        process = subprocess.Popen([sys.executable, '-I', '-B', '-u', '-c', code,
+            str(ROOT), str(self.service), body], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True, bufsize=0)
+        def cleanup():
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=5)
+        self.addCleanup(cleanup)
+        return process
+
+    def lease_line(self, process, expected):
+        ready, _, _ = select.select([process.stdout], [], [], 5)
+        self.assertTrue(ready, 'lease fixture did not reach its barrier')
+        line = process.stdout.readline().decode().strip()
+        self.assertEqual(line, expected, 'lease fixture exited before its barrier')
+
+    def held_service_lease(self):
+        process = self.lease_process(r'''
+with state.ServiceDirectory(sys.argv[2],exclusive=True):
+ print('OWNER_HELD',flush=True)
+ assert os.read(0,1)==b'x'
+print(json.dumps({'released':True}),flush=True)
+''')
+        self.lease_line(process, 'OWNER_HELD')
+        return process
+
+    def release_service_lease(self, process):
+        os.write(process.stdin.fileno(), b'x')
+        output, errors = process.communicate(timeout=5)
+        self.assertEqual(process.returncode, 0, errors.decode())
+        self.assertEqual(json.loads(output), {'released': True})
+
+    async def test_service_admission_survives_actual_owner_probe_shared_lock(self):
+        await self.configure()
+        observer = self.lease_process(r'''
+with state.ServiceDirectory(sys.argv[2]) as owner:
+ actual=owner.check
+ calls=[0]
+ def held_check():
+  actual()
+  calls[0]+=1
+  if calls[0]==2:
+   print('PROBE_HELD',flush=True)
+   assert os.read(0,1)==b'x'
+ owner.check=held_check
+ result=owner.owner_present()
+print(json.dumps({'owner_present':result}),flush=True)
+''')
+        self.lease_line(observer, 'PROBE_HELD')
+        actual = self.module.PrivateDirectory.lock
+        blocked = []
+        def release_probe_after_real_contention(*args, **kwargs):
+            try:
+                return actual(*args, **kwargs)
+            except ValueError as error:
+                if isinstance(error.__cause__, BlockingIOError) and not blocked:
+                    blocked.append(True)
+                    os.write(observer.stdin.fileno(), b'x')
+                raise
+        with patch.object(self.module.PrivateDirectory, 'lock', new=release_probe_after_real_contention):
+            try:
+                with self.module.ServiceDirectory(self.service, exclusive=True) as owner:
+                    self.assertTrue(owner.owner_present())
+            except self.module.ServiceUnavailable:
+                self.fail('an actual short owner_present SH probe must not reject service admission')
+        output, errors = observer.communicate(timeout=5)
+        self.assertEqual(observer.returncode, 0, errors.decode())
+        self.assertEqual(json.loads(output), {'owner_present': False})
+        self.assertTrue(blocked, 'the test must observe real flock contention')
+        self.assertEqual(list((self.service / 'attempts').iterdir()), [])
+
+    async def test_service_admission_long_held_owner_refuses_within_one_second_budget(self):
+        await self.configure()
+        holder = self.held_service_lease()
+        before = self.originals()
+        started = time.monotonic()
+        with self.assertRaises(self.module.ServiceUnavailable):
+            with self.module.ServiceDirectory(self.service, exclusive=True):
+                pass
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, .9)
+        self.assertLess(elapsed, 2.0)
+        with self.module.ServiceDirectory(self.service) as observer:
+            self.assertTrue(observer.owner_present())
+        self.assertEqual(before, self.originals())
+        self.assertEqual(list((self.service / 'attempts').iterdir()), [])
+        self.release_service_lease(holder)
+
+    async def test_service_admission_never_acquires_after_descheduled_deadline(self):
+        await self.configure()
+        holder = self.held_service_lease()
+        monotonic = time.monotonic
+        elapsed = [0.0]
+        waits = []
+        def clock():
+            return monotonic() + elapsed[0]
+        def descheduled(seconds):
+            waits.append(seconds)
+            self.release_service_lease(holder)
+            elapsed[0] += 2.0
+        with patch('time.monotonic', new=clock), patch('time.sleep', new=descheduled):
+            with self.assertRaises(self.module.ServiceUnavailable):
+                with self.module.ServiceDirectory(self.service, exclusive=True):
+                    self.fail('expired admission must not acquire the now-free lease')
+        self.assertEqual(len(waits), 1)
+        self.assertGreater(waits[0], 0)
+        self.assertLessEqual(waits[0], .01)
+        with self.module.ServiceDirectory(self.service, exclusive=True) as owner:
+            self.assertTrue(owner.owner_present())
+        self.assertEqual(list((self.service / 'attempts').iterdir()), [])
+
+    async def test_service_admission_refuses_replaced_lock_without_reopening(self):
+        await self.configure()
+        holder = self.held_service_lease()
+        original = self.service / '.service.lock'
+        moved = self.root / 'original-service-lock'
+        waits = []
+        def replaced(seconds):
+            waits.append(seconds)
+            original.rename(moved)
+            original.write_bytes(b'')
+            original.chmod(0o600)
+        try:
+            with patch('time.sleep', new=replaced):
+                with self.assertRaises(self.module.ServiceUnavailable):
+                    with self.module.ServiceDirectory(self.service, exclusive=True):
+                        pass
+            self.assertEqual(len(waits), 1)
+            self.assertNotEqual(original.stat().st_ino, moved.stat().st_ino)
+            self.assertEqual(original.read_bytes(), b'')
+            self.assertEqual(list((self.service / 'attempts').iterdir()), [])
+            self.release_service_lease(holder)
+        finally:
+            if moved.exists():
+                original.unlink()
+                moved.rename(original)
+
+    async def test_service_admission_does_not_retry_noncontention_lock_errors(self):
+        await self.configure()
+        def forbidden_sleep(seconds):
+            self.fail('noncontention lock failure must not enter admission retry')
+        for error in (OSError(errno.EIO, 'storage fault'), PermissionError(errno.EPERM, 'denied'),
+                      BlockingIOError(errno.EIO, 'not actual would-block contention')):
+            with self.subTest(error=type(error).__name__):
+                with patch.object(self.module.fcntl, 'flock', side_effect=error), \
+                        patch('time.sleep', new=forbidden_sleep):
+                    with self.assertRaises(self.module.ServiceUnavailable):
+                        with self.module.ServiceDirectory(self.service, exclusive=True):
+                            pass
+        self.assertEqual(list((self.service / 'attempts').iterdir()), [])
+        with self.module.ServiceDirectory(self.service, exclusive=True):
+            pass
+
+    async def test_service_admission_actual_sigterm_during_wait_releases_descriptors(self):
+        await self.configure()
+        holder = self.held_service_lease()
+        waiting = self.lease_process(r'''
+received=[]
+signal.signal(signal.SIGTERM,lambda number,frame:received.append(number) if not received else None)
+original=state.PrivateDirectory.lock
+announced=[]
+def contended(*args,**kwargs):
+ try:return original(*args,**kwargs)
+ except ValueError as error:
+  if isinstance(error.__cause__,BlockingIOError) and not announced:
+   announced.append(True)
+   print('WAITING',flush=True)
+  raise
+state.PrivateDirectory.lock=contended
+before=set(os.listdir('/proc/self/fd'))
+try:
+ with state.ServiceDirectory(sys.argv[2],exclusive=True,stop=lambda:received[0] if received else 0):
+  raise AssertionError('signalled admission unexpectedly entered')
+except state.ServiceInterrupted as error:
+ print(json.dumps({'signal':error.signum,'descriptors_released':set(os.listdir('/proc/self/fd'))==before}),flush=True)
+ raise SystemExit(128+error.signum)
+''')
+        self.lease_line(waiting, 'WAITING')
+        waiting.send_signal(signal.SIGTERM)
+        output, errors = waiting.communicate(timeout=5)
+        self.assertEqual(waiting.returncode, 143, errors.decode())
+        self.assertEqual(json.loads(output), {'signal': 15, 'descriptors_released': True})
+        with self.module.ServiceDirectory(self.service) as observer:
+            self.assertTrue(observer.owner_present())
+        self.assertEqual(list((self.service / 'attempts').iterdir()), [])
+        self.release_service_lease(holder)
+
+    async def test_service_admission_actual_signal_after_acquire_releases_new_lease(self):
+        await self.configure()
+        received = []
+        previous = signal.signal(signal.SIGTERM,
+            lambda number, frame: received.append(number) if not received else None)
+        actual = self.module.PrivateDirectory.lock
+        def signalled(*args, **kwargs):
+            result = actual(*args, **kwargs)
+            os.kill(os.getpid(), signal.SIGTERM)
+            return result
+        try:
+            with patch.object(self.module.PrivateDirectory, 'lock', new=signalled):
+                with self.assertRaises(self.module.ServiceInterrupted) as caught:
+                    with self.module.ServiceDirectory(self.service, exclusive=True,
+                            stop=lambda: received[0] if received else 0):
+                        pass
+            self.assertEqual(caught.exception.signum, 15)
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+        self.assertEqual(list((self.service / 'attempts').iterdir()), [])
+        with self.module.ServiceDirectory(self.service, exclusive=True) as owner:
+            self.assertTrue(owner.owner_present())
+
+    async def test_service_admission_stop_contract_is_exact_before_input_io(self):
+        await self.configure()
+        for value in (True, 1, 9, '15'):
+            with self.subTest(value=value), self.assertRaises(self.module.ServiceUnavailable):
+                with self.module.ServiceDirectory(self.service, exclusive=True, stop=lambda: value):
+                    pass
+        for value in (2, 15):
+            with self.subTest(value=value), self.assertRaises(self.module.ServiceInterrupted) as caught:
+                with self.module.ServiceDirectory(self.root / 'missing', exclusive=True, stop=lambda: value):
+                    pass
+            self.assertEqual(caught.exception.signum, value)
+        self.assertEqual(list((self.service / 'attempts').iterdir()), [])
 
     async def test_prepare_replays_real_pair_without_modification(self):
         before = self.originals()

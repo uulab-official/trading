@@ -7,6 +7,7 @@ not privileged changes that coherently replace all local evidence.
 from contextlib import ExitStack, contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
+import errno
 import fcntl
 import hashlib
 import json
@@ -18,6 +19,7 @@ import socket
 import sqlite3
 import stat
 import sys
+import time
 
 from trading_data.upbit_history import parse_end
 from . import paper_stream as stream_runtime
@@ -25,7 +27,7 @@ from . import paper_stream_store as stream_store
 from .paper_stream import _Blocked, _SourceBinding, _Stopped, _verify
 from .paper_backup import _Destination
 from .paper_backup_io import (
-    BackupInterrupted, BackupStorageError, PrivateDirectory, write_file,
+    BackupInterrupted, BackupStorageError, BackupUnavailable, PrivateDirectory, write_file,
 )
 
 MAX_CONFIG_BYTES = 16 * 1024
@@ -450,32 +452,63 @@ def _inventory(directory, limit):
 
 
 class ServiceDirectory:
-    """Hold an immutable service binding, optionally with its exclusive lease."""
+    """Hold immutable bindings; explicit EX admission waits at most one second.
 
-    def __init__(self, directory, *, exclusive=False):
+Only contention on the service lease is retried. Native account/capture owners
+remain immediate refusals, and no attempt or runtime operation begins here.
+"""
+
+    def __init__(self, directory, *, exclusive=False, stop=None):
         self.directory = self.attempts = None
         self._opened = {}
         self.exclusive = exclusive
         self._manifest = None
         with _errors():
             try:
+                _stop(stop)
                 if type(exclusive) is not bool:
                     raise _unavailable()
                 self.directory = PrivateDirectory(directory)
                 self.path = self.directory.path
-                if exclusive:
-                    self.directory.lock('.service.lock', exclusive=True)
-                else:
-                    self.directory.open_file('.service.lock', limit=0)
+                self.directory.open_file('.service.lock', limit=0)
                 self.directory.check_names(_ROOT_NAMES)
                 self._manifest, raw = _read_document(self.directory, 'service.json', MAX_CONFIG_BYTES)
                 _validate_manifest(self._manifest)
                 self.config_sha256 = hashlib.sha256(raw).hexdigest()
                 self.attempts = PrivateDirectory(self.path / 'attempts', expected_parent=_parent(self.directory))
+                if exclusive:
+                    self._acquire_lease(stop)
                 self.check()
+                _stop(stop)
             except BaseException:
                 self.close()
                 raise
+
+    def _acquire_lease(self, stop):
+        deadline = time.monotonic() + 1.0
+        while True:
+            _stop(stop)
+            self._base_check()
+            # Check before attempting, including after a descheduled sleep.
+            if time.monotonic() >= deadline:
+                raise _unavailable()
+            try:
+                self.directory.lock('.service.lock', exclusive=True)
+            except BackupUnavailable as error:
+                cause = error.__cause__
+                if (not isinstance(cause, BlockingIOError)
+                        or cause.errno not in (errno.EAGAIN, errno.EWOULDBLOCK)):
+                    raise
+                self._base_check()
+                _stop(stop)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _unavailable() from error
+                time.sleep(min(.01, remaining))
+            else:
+                _stop(stop)
+                self._base_check()
+                return
 
     @property
     def manifest(self):

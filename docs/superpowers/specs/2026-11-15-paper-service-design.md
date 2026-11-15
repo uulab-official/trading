@@ -32,7 +32,7 @@ external notification, browser operation or service activation during delivery.
 Initial creation of capture/account remains with existing explicit commands.
 Service configuration derives the capture from the account; there is no second
 independently selected capture, arbitrary command, provider URL, strategy override,
-automatic retry, detached daemon or PID-file kill command.
+automatic native-operation retry, detached daemon or PID-file kill command.
 
 ## Interfaces and files
 
@@ -96,6 +96,16 @@ preflight before launching either worker. Account/capture native checks remain
 authoritative on actual resume; this is not atomic exclusion against unrelated
 direct CLI users racing between preflight and launch.
 
+Service EX admission may wait up to one monotonic second for genuine flock
+contention, so a brief observer SH probe cannot spuriously reject startup. It
+retains original root/lock/configuration/attempts bindings and checks stop intent
+before each attempt and after acquisition. No native preflight, attempt allocation
+or child launch occurs during this wait. Other path/storage/configuration errors
+are not retried. A lease still held at the deadline is unavailable. An earlier
+service may finish within the window; this explicit caller then performs fresh
+preflight and the normal previous-attempt checks before proceeding. This is
+admission waiting, not worker or native-operation retry.
+
 ## Attempts and evidence
 
 Attempt directories are consecutive six-digit names 000001..000064 under
@@ -116,7 +126,8 @@ Otherwise refuse with `previous_attempt_unconfirmed`; preserve that service and
 configure a new directory only after inspection and the original pair preflight.
 Observers may still inspect incomplete evidence, without inferring liveness.
 
-PrivateDirectory-backed ServiceDirectory exposes manifest/config_sha256, check,
+PrivateDirectory-backed ServiceDirectory accepts optional numeric-intent `stop`
+during admission and exposes manifest/config_sha256, check,
 owner_present, new_attempt(audit), latest_attempt and context-managed close.
 Attempt exposes path, number, attempt_id, record, directory, check,
 health_address, bind_health_socket and save_result(result, stderr).

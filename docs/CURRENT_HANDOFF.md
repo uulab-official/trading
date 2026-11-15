@@ -63,8 +63,14 @@ Python implementation+major.minor, and fixed policy. Interpreter paths preserve
 a virtual environment's executable name. Policy: startup10..900/default180,
 heartbeat5..120/default30, stop1..60/default15, max_attempts64, auto_restart=false.
 Run requires the recorded current runtime exactly and repeats full preflight
-under the service EX lease before any worker starts. Passive inspection does not
-take a conflicting shared service lock.
+under the service EX lease before any worker starts. Passive inspection holds no
+persistent shared service lease; its brief owner probe can momentarily hold SH.
+EX admission waits up to one monotonic second for genuine flock contention,
+checking the pinned root/lock/config/attempts bindings and numeric stop intent
+before retries and after acquisition. Other errors are not retried. No native
+preflight, attempt or worker starts during this wait. A previous owner that ends
+inside the window can hand over to this explicit invocation, still subject to
+fresh native preflight and previous-attempt validation.
 
 Attempts are consecutive 000001..000064 with unique IDs, no mutable latest
 pointer and no recycling. Before launch, `started.json` (<=16 KiB) is fsynced.
@@ -155,14 +161,27 @@ All28 CLI/unit tests passed after repair (8.571 seconds). The reviewer independe
 ran all19 monitor tests successfully. The final whole-suite result is recorded
 in the table below for the repaired implementation.
 
+The first published candidate `9129927ce678e432da8222b6fba04cfb2b813c3d`
+exposed an admission race in actual-socket Python3.12 CI: two startup tests
+returned unavailable while all other service tests and five other service matrix
+jobs passed. An actual separate-process observer SH barrier reproduced real
+flock errno11 and the resulting refusal. Bounded EX admission repairs that cause;
+there is no native-operation retry. Eight new regressions cover overlap,
+long-held ownership, descheduling beyond the deadline, lock replacement,
+non-contention errors, actual signals during/after acquisition and exact stop
+validation. An independent repair review found no issues and independently ran
+all eight successfully in3.002s. The author's complete46-method state gate passed
+44 methods with the same two local socket-capability skips. The earlier failed
+CI remains recorded and cannot substitute for repaired-head CI.
+
 Final local gates on the repaired implementation:
 
 | Gate | Observed result |
 |---|---|
-| Complete unittest discovery | 1,500 methods: 1,497 passed, three explicit AF_UNIX capability skips; 267.416 s |
-| New service methods, included above | 135 methods: 132 passed, the same three capability skips |
-| Existing package/server pytest | 309 passed + 382 subtests; 926 existing deprecation warnings; 14.32 s |
-| All Node client tests | 103 passed, zero failed/skipped; 350.723358 ms |
+| Complete unittest discovery | 1,508 methods: 1,505 passed, three explicit AF_UNIX capability skips; 274.005 s |
+| New service methods, included above | 143 methods: 140 passed, the same three capability skips |
+| Existing package/server pytest | 309 passed + 382 subtests; 926 existing deprecation warnings; 14.36 s |
+| All Node client tests | 103 passed, zero failed/skipped; 285.247399 ms |
 | Python 3.10 syntax | All 14 new Python files parsed |
 | Frozen runtime compatibility | All 24 execution files byte-identical to v47/v46 |
 | Prior native account/archive compatibility | Existing 120-event account and v47 backup/recovery copies fully verified; bytes unchanged |

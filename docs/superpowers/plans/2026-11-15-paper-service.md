@@ -103,12 +103,23 @@ ignored evidence and exact-tree publication receipts.
 The tracked plan is an immutable prepublication checkpoint. Actual commit/CI
 identities and completion of the last delivery steps are recorded in PR/receipts.
 
-Local integrated service gate: 134 methods, 131 passed and exactly three AF_UNIX
-capability skips, 63.618 seconds. Real process/native tests run with an explicitly
-test-only inert pipe listener when local sockets are prohibited. Linux CI requires
-actual sockets through PAPER_SERVICE_REQUIRE_SOCKET=1; no skipped socket claim
-counts as remote verification. Final repaired whole-suite:1,500 methods,1,497pass,
-3 capability skips,267.416s; package309+382subtests/926warnings14.32s; Node103pass.
-Fresh full review found0Critical/0Important/1Minor; the final-output Minor was
-reproduced in8subcases and repaired, with28CLI tests passing. Remote publication
-and actual-socket final-head CI remain the following receipt-backed steps.
+The final local whole-suite gate ran 1,508 methods in 274.005 seconds: 1,505
+passed and exactly three AF_UNIX capability skips. Its service subset includes
+143 methods: 140 passed and the same three skips. Real process/native tests run
+with an explicitly test-only inert pipe listener when local sockets are
+prohibited. Linux CI requires actual sockets through PAPER_SERVICE_REQUIRE_SOCKET=1;
+no skipped socket claim counts as remote verification. Package/server pytest
+passed 309 tests plus 382 subtests in 14.36 seconds, with 926 existing warnings.
+Node passed all 103 tests with no failures or skips in 285.247399 ms.
+Fresh full review found zero Critical, zero Important and one Minor issue; the
+final-output Minor was reproduced in eight subcases and repaired, with all 28
+CLI tests passing. Remote publication and actual-socket final-head CI remain the
+following receipt-backed steps.
+
+Actual-socket CI on the first candidate9129927 exposed two prelaunch refusals in
+one Python3.12 service job. The SH-probe/EX-admission race was reproduced with an
+actual separate-process probe barrier, then repaired by bounded one-second
+admission before native work. The optional numeric stop callback reaches admission.
+Eight new regressions and independent repair review pass; the failed candidate is
+preserved as evidence. The final repaired-tree whole suite above has passed;
+new-head actual-socket CI is required before final completion.
