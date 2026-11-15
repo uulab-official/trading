@@ -30,6 +30,7 @@ jobs:
           python -m py_compile apps/dashboard/runtime.py tools/paper_dashboard_check.py apps/server/trading_bot/local_report_io.py
           python -m py_compile packages/data/trading_data/public_candle_transport.py apps/server/trading_bot/market_capture_store.py apps/server/trading_bot/market_capture.py tools/market_capture.py
           python -m py_compile apps/server/trading_bot/paper_stream_engine.py apps/server/trading_bot/paper_stream_store.py apps/server/trading_bot/paper_stream.py tools/paper_stream.py
+          python -m py_compile apps/server/trading_bot/paper_backup_io.py apps/server/trading_bot/paper_backup.py tools/paper_backup.py tools/paper_backup_drill.py
       - name: Run isolated regression suite
         run: |
           python -m unittest discover -s tests -p 'test_smc_structure.py' -v
@@ -102,3 +103,5 @@ jobs:
           python -m unittest discover -s tests -p 'test_config_readiness.py' -v
       - name: Verify continuous paper engine, storage, lifecycle and passive routes
         run: python -m unittest discover -s tests -p 'test_continuous_paper*.py' -v
+      - name: Verify private backups and non-executing recovery copies
+        run: python -m unittest discover -s tests -p 'test_paper_backup*.py' -v

@@ -1,4 +1,4 @@
-# Local paper operations runbook (v46)
+# Local paper operations runbook (v47)
 
 The v46 consumer continues one paper account from the separately operated public
 closed-candle capture. Follow [CONTINUOUS_PAPER.md](CONTINUOUS_PAPER.md) for
@@ -6,6 +6,11 @@ indicator-only activation, atomic account/strategy/risk/cursor commits and full
 archived replay on explicit resume. [MARKET_CAPTURE.md](MARKET_CAPTURE.md)
 describes the capture's foreground lifecycle, freshness and immutable export
 into the original historical workflow. Starting a capture alone creates no account.
+
+v47 adds [PAPER_BACKUP.md](PAPER_BACKUP.md): paired quiescent backups, read-only
+full verification and separately verified non-executing recovery copies. These
+preserve the original execution fingerprint, source binding and refusal evidence;
+they do not authorize rollback, source rebinding or restored-account execution.
 
 This runbook covers continuous and historical local paper operation, saved
 research and the read-only observer on a local POSIX filesystem with Python 3.10
@@ -237,6 +242,7 @@ its recorded PID; do not kill an unrelated account writer.
 | Public capture | At most 5,000 retained bars and 64 MiB per DB/sidecar; separate data/observation freshness, exact overlap and visible eviction counters |
 | Continuous paper account | At most 100,000 consumed bars and a 256-MiB DB; bounded structural head with a 500-bar indicator window; no financial event eviction |
 | Continuous paper audit/resume | Explicit full archived replay with bounded memory; stopped-owner audit holds a shared lock and refuses an active writer; resume rechecks the source afterward |
+| Paired backup/recovery bundle | Fixed private four-file layout; at most 256 MiB account + 64 MiB capture payloads and 64 KiB metadata; full archived replay, no-clobber output and no executable account/capture layout |
 
 Bounded application work cannot guarantee a hard deadline for a hung kernel or
 filesystem call. These are acceptance/resource limits, not demonstrated maximum
@@ -305,20 +311,69 @@ fingerprints refuse recovery without a force switch. See
 
 ## Back up and roll back without losing evidence
 
-Stop the writer through its supported shutdown path and confirm it has exited;
-inspect the saved account, including any unconfirmed halt. Stop observers before
+For historical runs, stop the writer through its supported shutdown path and
+confirm it has exited; inspect the saved account, including any unconfirmed halt.
+Stop observers before
 maintenance. Back up the **whole quiescent account/run directory**, including
 frozen input, manifest, SQLite and any sidecars, evidence and result, to an
 operator-owned private destination. Keep the original directory and modes.
 Copying only `account.sqlite` from a running writer is not this backup procedure.
-For continuous operation, stop the consumer before full audit/backup and preserve
-its whole directory, including `stream.sqlite3` and permanent `.stream.lock`.
-Stop the capture separately before preserving its complete directory and sidecars.
-The account's frozen source identity remains binding: a copied or relocated capture
-does not become an authorized replacement. Backup/restore drills and a migration
-procedure are still unverified; a copy alone does not establish safe continuation.
 Keep independent report/checkpoint files together with their recorded revision.
 An archive is a separate observation, not a command to resume it or repair it.
+
+### Continuous account backup and recovery verification
+
+Stop the continuous consumer first, then its bound capture, and confirm both
+processes have exited. Use the original fingerprint-compatible code and Python
+environment. From the repository root:
+
+```bash
+python tools/paper_backup.py create .private/btc-stream-001 \
+  --output .private/btc-backup-001
+python tools/paper_backup.py check .private/btc-backup-001
+python tools/paper_backup.py verify-restore .private/btc-backup-001 \
+  --output .private/btc-recovery-check-001
+```
+
+Each output is a new private `0700` directory with `0600` files. Creation holds
+the actual account/capture locks through full replay and copying; a saved phase
+does not replace process quiescence. Read-only `check` verifies the actual
+archived payloads without scratch extraction or input mutation. `verify-restore`
+copies the exact payloads/manifest and fully verifies the separate copy.
+
+Both outputs retain `.bin` payload names instead of `stream.sqlite3` or
+`capture.sqlite3`. They preserve account state, timestamps, errors and the original
+source binding. A copied or relocated capture is not an authorized replacement.
+Successful verification proves a consistent archived prefix, not the newest state,
+absence of later refusals, permission to roll back or transfer of execution
+authority. Do not rename these payloads into a runnable account or rewrite the
+manifest to admit a different source.
+
+The payload bound is 320 MiB plus at most 64 KiB of metadata per bundle; allow
+additional filesystem overhead and space for both input and recovery copies.
+No existing destination is overwritten. For any failure or interruption, retain
+the inputs and possible output, including partial/unconfirmed files. Backup
+commands return `0` on verified success, `2` on input/ownership/verification
+refusal, `4` on storage uncertainty or unexpected failure, and `130`/`143` on
+interruption. Runtime errors expose a conservative `output_may_exist` flag.
+Read-only verification never repairs a nonempty journal or clears a refusal.
+See [PAPER_BACKUP.md](PAPER_BACKUP.md) for exact schemas and preservation rules.
+
+Run a separate local drill with fresh synthetic inputs and network access
+forbidden:
+
+```bash
+python tools/paper_backup_drill.py --directory .private/paper-backup-drill-001
+```
+
+The drill accepts a new private directory, creates its own capture/account and
+records local backup/recovery evidence. It does not use an existing trading
+account or certify real backup-media transport, hardware durability, executable
+host-disaster recovery or service deployment. Keep automatic restart disabled:
+temporary runtime waits/retries are already explicit, while terminal refusal,
+fingerprint mismatch and uncertain storage require an operator decision.
+
+### Pinned-code rollback
 
 Record a known exact commit before upgrading. For rollback, prepare a separate
 checkout/environment at that recorded commit, stop the current observer, and
@@ -330,8 +385,10 @@ copy, rewrite hashes/manifests, or run schema repair as rollback. A changed sour
 or refusal requires investigation. A restored archive is not a new execution
 account. The legacy deployment/rollback scripts are not validated by this runbook.
 
-The implemented public capture and continuous consumer have controlled local
-regression coverage. No actual visual QA, long-duration real-provider soak, public
-deployment, broker-authoritative reconciliation, Windows/filesystem portability or
-live trading completion is certified here. Use the remaining evidence checklist
+The implemented public capture, continuous consumer and non-executing paired
+backup/recovery workflow have controlled local regression coverage. Real
+backup-media recovery and an executable host-disaster migration remain unverified.
+No actual visual QA, long-duration real-provider soak, service deployment,
+broker-authoritative reconciliation, Windows/filesystem portability or live trading
+completion is certified here. Use the remaining evidence checklist
 in [PRODUCTION_CHECKLIST.md](../PRODUCTION_CHECKLIST.md).

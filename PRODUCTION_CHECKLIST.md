@@ -1,10 +1,11 @@
 # Paper operating checklist and remaining live evidence
 
 The supported paths include explicit public closed-candle capture, continuous
-local paper consumption, historical paper workflows and a read-only local
-observer. Follow
+local paper consumption, verified non-executing backup/recovery bundles,
+historical paper workflows and a read-only local observer. Follow
 [MARKET_CAPTURE.md](docs/MARKET_CAPTURE.md) for collection and immutable export,
 [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) for one continuing paper account,
+[PAPER_BACKUP.md](docs/PAPER_BACKUP.md) for paired backup/recovery verification,
 and [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md)
 for exact commands, probe contracts, budgets, shutdown, recovery and rollback.
 This checklist replaces the previous credential-and-live-switch deployment recipe.
@@ -28,7 +29,7 @@ No entry below is prechecked as evidence that an operator performed it.
 - [ ] Preserve incomplete runs and possible report publications. A publication-confirmation error is not permission to retry automatically.
 - [ ] Use read-only preflight for incomplete opted-in historical runs and audit for completed opted-in runs; neither authorizes execution.
 - [ ] Explicit recovery rechecks original engine/runtime fingerprints and owner locks. Saved-fill reconciliation requires the explicit recovery option after inspection; unknown intents without saved fills stay blocked.
-- [ ] Stop the writer and confirm exit before backing up the whole quiescent directory. Preserve original files, modes and sidecars; copying only a live DB is insufficient.
+- [ ] Stop the writer and confirm exit before preserving the whole quiescent historical directory. Preserve original files, modes and sidecars; copying only a live DB is insufficient. Continuous accounts use the separate paired-backup checks below.
 - [ ] Stop the observer using SIGINT/SIGTERM; expected exits are `130`/`143`. Startup/configuration failure is `2`.
 - [ ] Roll back code through a separately prepared exact pinned revision/environment, preserving data/evidence. Do not rewrite manifests, delete unknown intents or apply unverified migrations.
 
@@ -58,6 +59,20 @@ options and fixed exit codes. These are operating checks, not preclaimed results
 - [ ] Plan for the 100,000-consumed-bar / 256-MiB account capacity. Evidence is retained, capacity is terminal and there is no automatic archival, migration or account reset.
 - [ ] Record applicable CI results for the published feature head. The configured Python 3.10/3.12/3.13 jobs are coverage targets, not evidence that the current head has already passed them.
 
+## Verified backup and recovery checks (v47)
+
+Follow [PAPER_BACKUP.md](docs/PAPER_BACKUP.md). These checks record an operator's
+own execution; implementation and synthetic tests do not pre-complete them.
+
+- [ ] Preserve the exact execution revision and fingerprint-compatible Python environment. A successful archive check does not migrate the original code, source binding or account configuration.
+- [ ] Stop the continuous consumer, then the bound capture, and confirm both processes have exited. `paper_backup.py create ACCOUNT --output NEW_BUNDLE` refuses active owners and never repairs hot journals.
+- [ ] Keep every bundle private (`0700` directory, `0600` files), outside the account/capture, with a new no-clobber output name. Budget for 320 MiB of payload plus up to 64 KiB of metadata per bundle, filesystem overhead and preserved incomplete copies.
+- [ ] Run `paper_backup.py check BUNDLE` in the frozen runtime and record full archived replay, the stream/capture IDs, event count and payload/head digests. A check is read-only and does not assert current data or service readiness.
+- [ ] Run `paper_backup.py verify-restore BUNDLE --output NEW_RECOVERY_BUNDLE`; compare the preserved archive identity and digests. The result contains non-executing `.bin` payloads, not executable account/capture database names.
+- [ ] Treat `execution_authorized=false`, `source_rebinding=false` and `rollback_protection=false` as operating limits. A valid old backup may omit later state or refusals; do not infer latest-state authority or rename payloads into a runnable account.
+- [ ] Preserve original inputs and possible output after exit `2`, `4`, `130` or `143`. Do not clear errors, overwrite partial bundles or delete unknown artifacts as an automatic retry policy.
+- [ ] Run `python tools/paper_backup_drill.py --directory NEW_PRIVATE_DIRECTORY` for a separate synthetic, network-forbidden drill and retain its private evidence. It does not accept an existing trading account or replace a real backup-media/host-disaster exercise.
+
 ## Evidence still required for any future live service
 
 Configuration completeness is not operational readiness.
@@ -70,12 +85,13 @@ The following still require implementation where absent and recorded
 operational verification before a live service could be assessed:
 
 - [ ] Real operational verification of the implemented public capture continuity, timestamp/freshness, gaps, cooldown and restart rules; the current evidence is controlled.
-- [ ] Real operational soak and recovery/backup/restore evidence for the implemented continuous paper account, including source-retention loss, frozen-runtime restart, capacity and unconfirmed commit handling. Controlled local tests do not establish unattended service readiness.
+- [ ] Real operational soak for the implemented continuous paper account, including source-retention loss, frozen-runtime restart, capacity and unconfirmed commit handling. Controlled local backup/recovery verification does not establish unattended service readiness.
+- [ ] Real backup-media transport, retention and recovery evidence on the supported operating environment. Executable host-disaster restore or source migration still needs a reviewed latest-state/retirement/ownership contract; v47 recovery copies do not transfer execution authority.
 - [ ] Authoritative broker/account reconciliation, partial fills, ambiguous submission outcomes, idempotence and settlement across restart.
 - [ ] Operational risk controls and stop behavior against actual execution; modeled historical/continuous paper gates do not guarantee a maximum loss.
 - [ ] A reviewed credential/permission boundary and deployment architecture appropriate to the intended service. The current observer is not an authenticated public web server.
 - [ ] Reproducible dependency/build and deployment/rollback evidence for the actual runtime, separate from legacy Docker/Rust scripts.
-- [ ] Long-duration soak, resource measurements, alert delivery, disk-full/backup/restore drills and recovery decisions on the supported operating environment.
+- [ ] Long-duration soak, resource measurements, alert delivery, real storage-failure drills and deployment/recovery decisions on the supported operating environment.
 - [ ] Actual browser visual/accessibility and end-to-end verification, with results recorded for the supported release.
 - [ ] Explicit scope for OS/filesystem portability and concurrent service ownership.
 

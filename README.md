@@ -9,6 +9,8 @@ public closed-candle capture, alongside imported historical data, durable
 historical accounts, explicit recovery/audit and fixed MA/RSI candidate studies.
 The v46 consumer keeps one account across polls and verified restarts; its
 operator guide is [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md).
+v47 adds [verified PAPER backup and recovery bundles](docs/PAPER_BACKUP.md),
+including a network-forbidden local drill; recovered bundles remain non-executing.
 [PR #1](https://github.com/uulab-official/trading/pull/1)
 remains Draft. The latest continuation state is in
 [CURRENT_HANDOFF.md](docs/CURRENT_HANDOFF.md).
@@ -171,6 +173,41 @@ database. Capacity is a preserved terminal result; there is no automatic archive
 or account reset. See [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) for exact
 bootstrap requirements, frozen options, recovery decisions and JSON/exit codes.
 
+## Verified PAPER backups and recovery checks (v47)
+
+Stop the continuous consumer, then its capture, and confirm both processes have
+exited. Create a paired backup in a new private destination, check its complete
+archived execution, then verify a separately copied recovery bundle:
+
+```bash
+python tools/paper_backup.py create .private/stream-btc-001 \
+  --output .private/backup-btc-001
+python tools/paper_backup.py check .private/backup-btc-001
+python tools/paper_backup.py verify-restore .private/backup-btc-001 \
+  --output .private/recovery-btc-001
+```
+
+Both outputs contain private account/capture `.bin` payloads and verification
+metadata, with `0700` directories and `0600` files. The original code/Python
+fingerprint, source binding, economic state and terminal refusals remain intact.
+Verification replays the complete archive; it does not authorize execution,
+rebind a copied capture, prove this is the latest state, or authorize rollback.
+No executable `stream.sqlite3` or `capture.sqlite3` layout is produced. Preserve
+inputs and possible incomplete outputs after any error or interruption.
+
+To exercise the workflow with its own synthetic capture/account and network
+access forbidden:
+
+```bash
+python tools/paper_backup_drill.py --directory .private/backup-drill-001
+```
+
+Use a new drill destination. The drill creates local evidence and never accepts
+an existing trading account. It does not certify real backup media, an executable
+host-disaster restore, service deployment or live execution. See
+[PAPER_BACKUP.md](docs/PAPER_BACKUP.md) for quiescence, bounds, preservation,
+exit codes and the non-executing recovery contract.
+
 ## Verified offline paper workflow
 
 For finite fixture-based experiments, use the deterministic offline paper runner.
@@ -204,14 +241,15 @@ are not evidence of production readiness. The legacy live-feed adapter remains
 unavailable; the separate explicit public candle collector above does not enable
 that adapter or a broker. No real trading was validated.
 
-## Local paper operations and configuration truth (v46)
+## Local paper operations and configuration truth (v47)
 
 The supported observer now has separate liveness and configured-source
 readability probes, bounded HTTP handlers/connections and signal-aware shutdown.
 Use [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md) for exact
 local commands, source/read budgets, private files, continuous and historical
-recovery, quiescent-directory backup and pinned-code rollback. Start with a new synthetic
-account, then keep the observer running in the foreground:
+recovery, verified continuous-account backup bundles and pinned-code rollback.
+Start with a new synthetic account, then keep the observer running in the
+foreground:
 
 ```bash
 mkdir -p .private
@@ -244,9 +282,11 @@ may have occurred but final confirmation fails, preserve files and inspect them;
 do not automatically retry execution or repair evidence. The replay and research
 guides document the same explicit preservation and inspection procedure.
 
-Continuous paper consumption has controlled local regression coverage. Actual
-browser visual QA, long-duration real-provider soak, broker-authoritative
-reconciliation, public deployment and live trading completion remain unverified.
+Continuous paper consumption and paired backup/recovery verification have
+controlled local regression coverage. Actual browser visual QA, long-duration
+real-provider soak, real backup-media recovery, executable host-disaster migration,
+broker-authoritative reconciliation, service deployment and live trading
+completion remain unverified.
 [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) records
 the paper operating checks and remaining evidence for any future live service.
 
@@ -263,6 +303,7 @@ verification. Runtime data, accounts, reports and secrets must remain private.
 | [PERSONAL_TRADING_GUIDE.md](PERSONAL_TRADING_GUIDE.md) | Synthetic offline trial and duplicate-free checkpoint resume |
 | [MARKET_CAPTURE.md](docs/MARKET_CAPTURE.md) | Public closed-candle capture, freshness, bounded retention and explicit export |
 | [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) | Continuous paper account, indicator-only activation, atomic progress and full-replay resume/audit |
+| [PAPER_BACKUP.md](docs/PAPER_BACKUP.md) | Verified paired backups, read-only full replay, non-executing recovery copies and local drills |
 | [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md) | Current local paper runbook, probes, shutdown, recovery, backup and rollback |
 | [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) | Paper operating checklist and remaining live-readiness evidence |
 | [WEB_DASHBOARD.md](docs/WEB_DASHBOARD.md) | Current local source/endpoint contracts and legacy-service boundary |
