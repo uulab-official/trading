@@ -176,6 +176,14 @@ class EventTests(unittest.TestCase):
         self.assertEqual(state['observation_count'], 6)
         self.assertEqual(state['event_count'], 1)
 
+    def test_db_readonly_uri_encodes_special_path(self):
+        special = self.root.parent / 'private?mode=memory'
+        special.mkdir(mode=0o700)
+        _, signature = module._observe(observation())
+        db = module._open_database(special)
+        module._record(db, 'healthy', signature)
+        self.assertEqual(module._check(db)['event_count'], 1)
+
     def test_database_private(self):
         self.submit(observation())
         db = self.root / 'paper-monitor-events.sqlite'
