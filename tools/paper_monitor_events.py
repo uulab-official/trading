@@ -22,6 +22,11 @@ class Invalid(ValueError):
     pass
 
 
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise Invalid('invalid_arguments')
+
+
 def _private_directory(raw):
     path = Path(raw)
     if not path.is_absolute() or '..' in path.parts:
@@ -42,6 +47,11 @@ def _bounded_json_file(raw):
     path = Path(raw)
     if not path.is_absolute() or '..' in path.parts:
         raise Invalid('invalid_input')
+    current = Path('/')
+    for part in path.parts[1:]:
+        current /= part
+        if stat.S_ISLNK(os.lstat(current).st_mode):
+            raise Invalid('invalid_input')
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
     try:
         info = os.fstat(fd)
@@ -195,7 +205,7 @@ def _check(db):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser = _Parser(add_help=False, allow_abbrev=False)
     parser.add_argument('command', choices=('record', 'check'))
     parser.add_argument('--directory', required=True)
     parser.add_argument('--input')
