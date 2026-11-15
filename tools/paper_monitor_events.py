@@ -13,6 +13,7 @@ from pathlib import Path
 import sqlite3
 import stat
 import time
+from urllib.parse import quote
 
 
 MAX_INPUT = 65536
@@ -229,7 +230,7 @@ def _check(db):
     if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or
             stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.geteuid()):
         raise Invalid('invalid_database')
-    with closing(sqlite3.connect('file:' + str(db) + '?mode=ro', uri=True, timeout=2)) as conn:
+    with closing(sqlite3.connect('file:' + quote(str(db), safe='/') + '?mode=ro', uri=True, timeout=2)) as conn:
         state = conn.execute('SELECT status,observed_at,observations FROM state '
                              'WHERE singleton=1').fetchone()
         if state is None:
