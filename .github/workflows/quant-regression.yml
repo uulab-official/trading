@@ -31,6 +31,7 @@ jobs:
           python -m py_compile packages/data/trading_data/public_candle_transport.py apps/server/trading_bot/market_capture_store.py apps/server/trading_bot/market_capture.py tools/market_capture.py
           python -m py_compile apps/server/trading_bot/paper_stream_engine.py apps/server/trading_bot/paper_stream_store.py apps/server/trading_bot/paper_stream.py tools/paper_stream.py
           python -m py_compile apps/server/trading_bot/paper_backup_io.py apps/server/trading_bot/paper_backup.py tools/paper_backup.py tools/paper_backup_drill.py
+          python -m py_compile apps/server/trading_bot/paper_service.py apps/server/trading_bot/paper_service_state.py apps/server/trading_bot/paper_service_protocol.py apps/server/trading_bot/paper_service_worker.py apps/server/trading_bot/paper_service_unit.py tools/paper_service.py tools/paper_service_worker.py
       - name: Run isolated regression suite
         run: |
           python -m unittest discover -s tests -p 'test_smc_structure.py' -v
@@ -105,3 +106,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_continuous_paper*.py' -v
       - name: Verify private backups and non-executing recovery copies
         run: python -m unittest discover -s tests -p 'test_paper_backup*.py' -v
+      - name: Verify guarded pair supervision with actual Linux health sockets
+        env:
+          PAPER_SERVICE_REQUIRE_SOCKET: '1'
+        run: python -m unittest discover -s tests -p 'test_paper_service*.py' -v

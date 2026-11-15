@@ -7,6 +7,8 @@ on:
       - 'tests/test_order_*.py'
       - 'tests/test_continuous_paper*.py'
       - 'tests/test_paper_backup*.py'
+      - 'tests/test_paper_service*.py'
+      - 'tests/paper_service_fixtures.py'
       - 'tests/paper_account_client.test.mjs'
       - 'tests/paper_orders_client.test.mjs'
       - 'tests/paper_order_detail_client.test.mjs'
@@ -15,9 +17,11 @@ on:
       - 'apps/server/trading_bot/paper_runner.py'
       - 'apps/server/trading_bot/paper_stream*.py'
       - 'apps/server/trading_bot/paper_backup*.py'
+      - 'apps/server/trading_bot/paper_service*.py'
       - 'apps/server/trading_bot/market_capture*.py'
       - 'tools/paper_stream.py'
       - 'tools/paper_backup*.py'
+      - 'tools/paper_service*.py'
       - 'apps/server/trading_bot/durable_paper_run.py'
       - 'apps/server/trading_bot/paper_process.py'
       - 'apps/server/trading_bot/market_paper_run.py'
@@ -46,6 +50,8 @@ on:
       - 'tests/test_order_*.py'
       - 'tests/test_continuous_paper*.py'
       - 'tests/test_paper_backup*.py'
+      - 'tests/test_paper_service*.py'
+      - 'tests/paper_service_fixtures.py'
       - 'tests/paper_account_client.test.mjs'
       - 'tests/paper_orders_client.test.mjs'
       - 'tests/paper_order_detail_client.test.mjs'
@@ -54,9 +60,11 @@ on:
       - 'apps/server/trading_bot/paper_runner.py'
       - 'apps/server/trading_bot/paper_stream*.py'
       - 'apps/server/trading_bot/paper_backup*.py'
+      - 'apps/server/trading_bot/paper_service*.py'
       - 'apps/server/trading_bot/market_capture*.py'
       - 'tools/paper_stream.py'
       - 'tools/paper_backup*.py'
+      - 'tools/paper_service*.py'
       - 'apps/server/trading_bot/durable_paper_run.py'
       - 'apps/server/trading_bot/paper_process.py'
       - 'apps/server/trading_bot/market_paper_run.py'
@@ -104,6 +112,10 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_continuous_paper*.py' -v
       - name: Check private backup ownership and full recovered-prefix verification
         run: python -m unittest discover -s tests -p 'test_paper_backup*.py' -v
+      - name: Check guarded supervisors, parent death and actual Unix health probes
+        env:
+          PAPER_SERVICE_REQUIRE_SOCKET: '1'
+        run: python -m unittest discover -s tests -p 'test_paper_service*.py' -v
 
   paper-account-client:
     runs-on: ubuntu-latest

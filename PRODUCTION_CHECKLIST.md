@@ -5,6 +5,7 @@ local paper consumption, verified non-executing backup/recovery bundles,
 historical paper workflows and a read-only local observer. Follow
 [MARKET_CAPTURE.md](docs/MARKET_CAPTURE.md) for collection and immutable export,
 [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) for one continuing paper account,
+[PAPER_SERVICE.md](docs/PAPER_SERVICE.md) for guarded Linux pair supervision,
 [PAPER_BACKUP.md](docs/PAPER_BACKUP.md) for paired backup/recovery verification,
 and [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md)
 for exact commands, probe contracts, budgets, shutdown, recovery and rollback.
@@ -59,6 +60,19 @@ options and fixed exit codes. These are operating checks, not preclaimed results
 - [ ] Plan for the 100,000-consumed-bar / 256-MiB account capacity. Evidence is retained, capacity is terminal and there is no automatic archival, migration or account reset.
 - [ ] Record applicable CI results for the published feature head. The configured Python 3.10/3.12/3.13 jobs are coverage targets, not evidence that the current head has already passed them.
 
+## Guarded pair supervision (v48)
+
+Follow [PAPER_SERVICE.md](docs/PAPER_SERVICE.md). These checks remain unmarked
+until performed on the intended operator host.
+
+- [ ] Confirm Linux parent-death signals, `/proc/self/fd`, private Unix sockets and supported local filesystem behavior on the actual host. Preserve the compatible interpreter path and checkout.
+- [ ] Stop and confirm exit of consumer then capture; configure a new private service directory from the existing account. Verify the exact source pair and full preflight; do not rebind or create new trading stores through the service.
+- [ ] Run the foreground supervisor explicitly. Verify current challenge-based process progress separately from native data freshness/account audit; a manager's `active` state is insufficient.
+- [ ] Exercise ordered SIGINT/SIGTERM shutdown, unexpected child failure, forced cleanup and supervisor death on the target host. Preserve final outcomes and incomplete evidence; no automatic restart is configured.
+- [ ] Review startup/replay, heartbeat and stop budgets against measured host behavior. The configured limits are not worst-case latency or throughput evidence.
+- [ ] Preserve all bounded attempts. Missing/partial results or `cleanup_confirmed=false` block reuse; at 64 attempts, retain the directory and explicitly configure another one after inspecting original native state.
+- [ ] If using systemd, inspect the generated inactive unit and independently verify installation, service ownership, manager deadlines, restart decisions and rollback. Generation and syntax tests are not host activation evidence.
+
 ## Verified backup and recovery checks (v47)
 
 Follow [PAPER_BACKUP.md](docs/PAPER_BACKUP.md). These checks record an operator's
@@ -86,6 +100,7 @@ operational verification before a live service could be assessed:
 
 - [ ] Real operational verification of the implemented public capture continuity, timestamp/freshness, gaps, cooldown and restart rules; the current evidence is controlled.
 - [ ] Real operational soak for the implemented continuous paper account, including source-retention loss, frozen-runtime restart, capacity and unconfirmed commit handling. Controlled local backup/recovery verification does not establish unattended service readiness.
+- [ ] Host deployment and operating evidence for the implemented Linux pair supervisor: actual Unix socket probes, manager/cgroup cleanup, interruption, attempt retention and manual recovery decisions. Controlled process tests and inactive unit generation do not activate or certify a service.
 - [ ] Real backup-media transport, retention and recovery evidence on the supported operating environment. Executable host-disaster restore or source migration still needs a reviewed latest-state/retirement/ownership contract; v47 recovery copies do not transfer execution authority.
 - [ ] Authoritative broker/account reconciliation, partial fills, ambiguous submission outcomes, idempotence and settlement across restart.
 - [ ] Operational risk controls and stop behavior against actual execution; modeled historical/continuous paper gates do not guarantee a maximum loss.

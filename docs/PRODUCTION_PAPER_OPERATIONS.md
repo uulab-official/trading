@@ -1,4 +1,4 @@
-# Local paper operations runbook (v47)
+# Local paper operations runbook (v48)
 
 The v46 consumer continues one paper account from the separately operated public
 closed-candle capture. Follow [CONTINUOUS_PAPER.md](CONTINUOUS_PAPER.md) for
@@ -12,9 +12,17 @@ full verification and separately verified non-executing recovery copies. These
 preserve the original execution fingerprint, source binding and refusal evidence;
 they do not authorize rollback, source rebinding or restored-account execution.
 
+v48 adds [PAPER_SERVICE.md](PAPER_SERVICE.md): a guarded Linux foreground
+supervisor for one existing account/capture pair, fresh read-only process-health
+checks, bounded private attempts and inactive systemd user-unit generation.
+Configuration and unit generation are inert. Explicit service `run` resumes the
+existing public collector and its local PAPER consumer; it contacts the same
+public endpoint through the unchanged capture runtime.
+
 This runbook covers continuous and historical local paper operation, saved
 research and the read-only observer on a local POSIX filesystem with Python 3.10
-or newer. Only the explicit capture command contacts the public candle endpoint;
+or newer. Only an explicitly started capture, directly or through the supervisor,
+contacts the public candle endpoint;
 the consumer uses local saved data and no broker. No credentials are needed.
 Controlled tests are not real-provider soak or deployment evidence.
 The dashboard binds only to `127.0.0.1`; open it on the same computer.
@@ -129,6 +137,37 @@ or creation of another account. Storage uncertainty stops the owner immediately;
 preserve the account and use explicit reopen to determine the durable prefix.
 Full commands, status fields and exit codes are in
 [CONTINUOUS_PAPER.md](CONTINUOUS_PAPER.md).
+
+## Supervise the existing pair on Linux
+
+Stop and confirm exit of the consumer first, then its collector. Configure a new
+service directory outside both native stores, using the compatible interpreter:
+
+```bash
+python tools/paper_service.py configure .private/btc-stream-001 \
+  --directory .private/btc-service-001
+python tools/paper_service.py run .private/btc-service-001
+```
+
+Full read-only native preflight precedes worker launch. The collector must enter
+its owned loop before the consumer starts. Both workers arm Linux parent-death
+SIGKILL before native runtime entry. No child respawns after a fault. The
+supervisor holds the service lease and signals only its own live process handles.
+
+Use `python tools/paper_service.py check .private/btc-service-001` in another
+terminal. It returns current direct-process progress, with
+`data_readiness=not_assessed`; existing capture/account checks still establish
+their separate data observations. No saved status is substituted for a live
+response. Readiness of the dashboard's four sources is unchanged.
+
+Ctrl-C or SIGTERM starts consumer-first cleanup. Exit `130`/`143` means requested
+cooperative stop without a higher-priority fault, `3` preserves native refusal,
+and `4` means failure/forced/unconfirmed outcome. Inspect private attempt results
+and native states before explicit restart. A missing final result or unconfirmed
+cleanup blocks another run in the same service directory; preserve it and follow
+the investigation/new-configuration procedure in [PAPER_SERVICE.md](PAPER_SERVICE.md).
+Unit generation only writes a reviewed inactive file; manager activation,
+operational soak and host-level recovery remain separate operator work.
 
 ## Create and inspect one historical account
 

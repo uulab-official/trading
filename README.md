@@ -11,6 +11,10 @@ The v46 consumer keeps one account across polls and verified restarts; its
 operator guide is [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md).
 v47 adds [verified PAPER backup and recovery bundles](docs/PAPER_BACKUP.md),
 including a network-forbidden local drill; recovered bundles remain non-executing.
+v48 adds [guarded Linux PAPER supervision](docs/PAPER_SERVICE.md) for the existing
+capture/account pair, fresh process-progress checks, retained attempt evidence
+and an inactive systemd user-unit generator. Explicit startup preserves the
+original account/source bindings; there is no automatic worker restart.
 [PR #1](https://github.com/uulab-official/trading/pull/1)
 remains Draft. The latest continuation state is in
 [CURRENT_HANDOFF.md](docs/CURRENT_HANDOFF.md).
@@ -173,6 +177,34 @@ database. Capacity is a preserved terminal result; there is no automatic archive
 or account reset. See [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) for exact
 bootstrap requirements, frozen options, recovery decisions and JSON/exit codes.
 
+## Supervise an existing PAPER pair (v48)
+
+After stopping the consumer and its exact bound capture and waiting for both
+owners to exit, configure a new private service directory with the same Python
+environment and unchanged execution modules:
+
+```bash
+python tools/paper_service.py configure .private/stream-btc-001 \
+  --directory .private/service-btc-001
+python tools/paper_service.py run .private/service-btc-001
+```
+
+The run remains in the foreground. In another terminal,
+`python tools/paper_service.py check .private/service-btc-001` challenges the
+current supervisor over its private Unix socket. Exit `0` establishes recent
+native owner-loop progress from both direct workers; data freshness and account
+audit remain the separate native checks. SIGINT/SIGTERM stops the consumer first,
+then the capture, and returns `130`/`143` after confirmed cooperative cleanup.
+Failure, missed progress or unexpected child exit ends the pair without respawn.
+
+Linux parent-death guards contain child lifetime if the supervisor dies. Each
+attempt retains bounded private diagnostics and actual child outcomes. Incomplete
+cleanup evidence blocks another attempt in that service directory. Optional
+`unit SERVICE --output NEW_FILE` generates an inactive systemd user unit with
+`Restart=no`; it does not install or activate anything. See
+[PAPER_SERVICE.md](docs/PAPER_SERVICE.md) for operating limits, exact exit codes,
+manual manager workflow and the 64-attempt bound.
+
 ## Verified PAPER backups and recovery checks (v47)
 
 Stop the continuous consumer, then its capture, and confirm both processes have
@@ -241,7 +273,7 @@ are not evidence of production readiness. The legacy live-feed adapter remains
 unavailable; the separate explicit public candle collector above does not enable
 that adapter or a broker. No real trading was validated.
 
-## Local paper operations and configuration truth (v47)
+## Local paper operations and configuration truth (v48)
 
 The supported observer now has separate liveness and configured-source
 readability probes, bounded HTTP handlers/connections and signal-aware shutdown.

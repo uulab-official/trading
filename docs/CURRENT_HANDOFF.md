@@ -1,242 +1,207 @@
-# Trading continuation handoff — 2026-11-15 (v47)
+# Trading continuation handoff — 2026-11-15 (v48)
 
 ## Current scope and delivery
 
 Repository `uulab-official/trading`, feature `feat/smc-market-structure`,
 [Draft PR #1](https://github.com/uulab-official/trading/pull/1).
-Starting feature commit: `846385bd4fa717a5d97c14a79719fad8534b0b7e`, tree
-`a06db23df8f2d8b9625c44d00533fcb7ef9a72d5`. Main remains
+Starting feature commit `0a1fd5579471a8ad8773ae1be38f3ede8b7bcad4`, tree
+`20f1368f708d1e7e089f9e3d712a2bade1ba487a`. Main remains
 `a5750019dcd7a980a28783258c06c7ef4706afc1`.
 
-The user requested continued production-quality work. v46 already implements a
-continuous PAPER account with atomic per-bar persistence, original MA/RSI
-accounting, source continuity refusal and full archived replay before explicit
-resume. This increment adds private paired backups and independent verification
-of recovered archive copies. It does not transfer execution authority.
+The user repeatedly requested production-quality continuation. v46 implemented
+continuous PAPER accounts and v47 added verified paired archives and non-executing
+recovery copies. v48 adds a Linux foreground supervisor for one existing account
+and its exact bound capture, fresh process-progress probes, bounded retained
+attempt evidence and inactive systemd user-unit generation.
 
-Implementation, tests, feature publication and Draft PR title/body updates remain
-authorized. Main merge, deployment, credentials, provider/broker requests, actual
-orders and external notifications are outside this delivery. At turn start an
-independent audit confirmed all prior refs/metadata and four successful v46
-workflows. Read actual refs/PR when continuing; this handoff is an immutable
-pre-publication checkpoint, not a claim about a future commit identity.
+Code, tests, feature publication and Draft title/body updates are authorized.
+Main merge, activation/deployment, credentials, provider/broker requests, live
+orders, external notifications and browser operations are outside this delivery.
+The independent starting audit confirmed 33 previous ref/metadata/CI checks.
+Reread actual refs and PR on continuation: this tracked document is a tested-tree
+checkpoint, not a self-referential future commit identity.
 
-## Critical design decision
+## Compatibility and authority
 
-All 24 modules named by `paper_stream._engine_fingerprint()` must remain byte
-identical to v46. They include both stream and capture runtimes/stores, original
-accounting and strategy code. Editing them would invalidate existing accounts'
-frozen code/runtime fingerprint. New tooling lives in separate modules.
+All 24 files included by `paper_stream._engine_fingerprint()` stay byte-identical
+to v47/v46. The accounting, strategy, stream and capture modules remain unchanged.
+The existing v46 account still verifies 120 events; the previous v47 backup and
+recovery copies still fully verify without changing their bytes. Current Python
+3.12 execution fingerprint is
+`1e2444790777873c87a4f73fb591f544021bf9f1fc9650997f293c45d221e492`.
 
-An account's own physical path is not frozen, but its capture's path, device/inode
-and owner/permission identities are. An executable account copy could therefore
-run independently, while a copied capture cannot become its authorized source.
-An older backup also cannot prove it includes later terminal refusals or account
-progress. The initial original-path restore idea was rejected after independent
-architecture review. This increment provides non-executing recovery evidence;
-executable restore needs a new authority/retirement/rebinding/rollback protocol.
+The supervisor derives its capture from the account manifest. It cannot create,
+rebind, migrate or restore executable stores, override strategy/cost/risk, supply
+an alternate provider URL or run an arbitrary command. Full archived replay and
+native terminal/source rules remain authoritative. A clean process observation
+never grants data or execution readiness. Existing readiness remains false.
 
-## New implementation
+## Implementation map
 
-### Private bounded IO
+| Module | Responsibility |
+|---|---|
+| `paper_service_state.py` | Read-only pair preflight, immutable private configuration, exclusive service lease, bounded no-clobber attempts |
+| `paper_service_protocol.py` | Strict canonical bounded JSON, identities, sequences and latched frame validation |
+| `paper_service_worker.py` | Parent-death guard before native entry, unchanged native stop/sleep adapters, owned/progress/final frames |
+| `paper_service.py` | Fixed child launch, bounded selector loop, cleanup, actual child outcomes and fresh health probe |
+| `paper_service_unit.py` | Private inactive systemd unit, conservative path grammar, final config recheck |
+| `tools/paper_service.py` | Strict configure/run/check/unit CLI with one private JSON result |
+| `tools/paper_service_worker.py` | Fixed internal worker entrypoint; no injection flags |
 
-`paper_backup_io.py` owns the new `BackupUnavailable`, `BackupStorageError`,
-`BackupInterrupted(signum)` errors, exact numeric stop intent, `PrivateDirectory`
-and streaming `file_info`, `copy_file`, `write_file` helpers. Read/write chunks
-are at most 1 MiB. Input/output descriptors and names are pinned to the parent,
-directory and file identity, UID/mode/link count, size and modification metadata.
+### Preflight, configuration and evidence
 
-`PrivateDirectory` requires an owned real parent and an owned 0700 leaf; files
-are 0600 owned single-link regular files. No symlinks, special files or extra
-bundle members. New files/directories are no-clobber. Short writes are completed;
-payloads and newly created empty locks are fsynced and checked. Directory and
-parent flushes confirm publication. Forked handles cannot operate, and closing
-an inherited descriptor never explicitly unlocks its parent's lock.
+Configuration pins the destination parent before full native audit. It holds the
+account audit SH owner then capture SH owner, checks immutable source identity,
+full engine replay, terminal/retry evidence, current capacity, compatible engine
+fingerprint and future saved timestamps. No reader repairs journals or inputs.
+The new service root has exactly `.service.lock`, `service.json` and `attempts`;
+owned directories are 0700 and files 0600/single-link/no-follow.
 
-A coordinator-held destination parent descriptor is acquired before potentially
-long replay. The helper's `expected_parent=(canonical_path, identity)` is checked
-before mkdir, preventing a replacement parent from silently becoming the output.
-All possible output is preserved after partial writes or uncertainty.
+Configuration is canonical and at most 16 KiB. It records a random service ID,
+paper/live-false, original pair bindings, current interpreter path/repository/
+Python implementation+major.minor, and fixed policy. Interpreter paths preserve
+a virtual environment's executable name. Policy: startup10..900/default180,
+heartbeat5..120/default30, stop1..60/default15, max_attempts64, auto_restart=false.
+Run requires the recorded current runtime exactly and repeats full preflight
+under the service EX lease before any worker starts. Passive inspection does not
+take a conflicting shared service lock.
 
-### Paired creation and full checking
+Attempts are consecutive 000001..000064 with unique IDs, no mutable latest
+pointer and no recycling. Before launch, `started.json` (<=16 KiB) is fsynced.
+After child cleanup, bounded capture/stream stderr (<=256 KiB each) and
+`result.json` (<=64 KiB) are published without clobbering, synced and checked.
+Public output follows confirmation; possible partial output is preserved on
+failure. The last attempt must have a valid result, exact-true cleanup_confirmed
+and both stderr files before another attempt is allocated. Otherwise
+previous_attempt_unconfirmed refuses reuse. Inspection plus a new service
+configuration does not bypass original native terminal/preflight rules.
 
-`paper_backup.py` exposes async:
+Physical bindings are rechecked throughout. Configuration retains its newly
+created attempts-directory descriptor through final sync. Attempt allocation
+transfers the originally created directory descriptor into the retained Attempt;
+it never closes then trusts a reopened replacement. Socket inodes and all
+original names are checked while their descriptors remain held.
 
-- `create_backup(account_directory, output, *, stop=None, clock=None)`
-- `check_backup(directory, *, stop=None)`
-- `verify_restore(directory, output, *, stop=None)`
+### Guarded workers and bounded supervision
 
-Create acquires the existing account audit SH lock, then the exact bound capture
-SH lock, nonblocking. Both remain held across original full replay, copying and
-final confirmation. Saved phase is not process liveness: an actual writer is
-refused even when its saved state says stopped. Readers never repair nonempty
-journals or alter source/account metadata.
+Only the fixed Python worker is launched with `-I -B -u`, stdin DEVNULL,
+stdout/stderr pipes, close_fds and a new session. Spawn occurs on the persistent
+main thread. Before native imports/actions, a worker verifies expected parent,
+arms Linux PR_SET_PDEATHSIG(SIGKILL), reads it back, and verifies parent again.
+No saved PID is used as signaling authority. Worker runtime stdout goes to stderr;
+only bounded validated frames are written to stdout.
 
-The source must match the account's frozen physical binding and logical ID/config.
-The bundle preserves exact source/account bytes and control/error states. This
-pairing establishes archived identity/configuration, not freshness or admission
-of new data; source-history conflicts are never cleared by backing up evidence.
+Capture must emit owned before stream launch; stream emits owned after its native
+writer acquisition, full resume replay and first poll. The first native sleep
+callback provides this attestation and calls real sleep with unchanged duration.
+Stop callbacks preserve numeric signal intent and emit progress at most once per
+second. Native cooldown/waiting can be live progress without current market data.
 
-Create reserves a new private output directory, holds its exclusive backup lock,
-copies and fsyncs two payloads, writes canonical bounded metadata, fsyncs the
-directory/parent, verifies the actual copied databases and full economic replay,
-and rechecks original bindings/snapshots. Original bindings and stable content
-are checked again after the final directory/parent sync, before success.
-Directory reservation itself is not
-atomic completed-bundle publication. Incomplete output may remain on failure.
+The supervisor never respawns. Startup/progress deadlines, unexpected exits
+(including0/130/143), invalid protocol and output overflow end the pair. Pipe
+chunks are <=4096 bytes, frames <=2048, frame rate <=32 per second; pending frame
+storage and stderr are bounded. No database reads occur in the monitor loop.
+A read-only same-UID Unix socket handles at most four clients, one second each,
+requests<=256 and responses<=8192. It uses a fresh challenge and current attempt,
+with no cached success or mutable heartbeat file. Held directory FD paths avoid
+long Unix path limits and ancestor redirection.
 
-Check takes a shared backup lock, validates exact layout/metadata/size/hash and
-opens the two fixed binary payloads directly using read-only SQLite connections.
-A small binding adapter lets the unchanged account reader and full `_verify`
-replay operate on `account-database.bin`. No temporary executable layout or
-input repair is used. Capture structure is validated by the original bounded
-reader. Derived metadata is recomputed and compared with exact canonical types.
-Payloads are hashed again after replay and stable identities are rechecked.
+On shutdown the consumer is signaled/reaped before the capture; both outputs
+continue draining. Each has its cooperative grace, then SIGKILL and a separate
+five-second reap budget. A received final frame is given exit grace without
+another signal, preventing restored worker handlers from destroying an already
+reported native refusal. Actual return codes must match final protocol outcomes.
+Forced/unconfirmed cleanup and storage/protocol faults take precedence over
+native refusal and operator signals. Parent-only SIGKILL is contained by the
+kernel guard; abrupt native state remains subject to original preflight rules.
 
-### Fixed inert bundle
+### CLI and inactive unit
 
-Exactly four files, no arbitrary archive extraction:
-
-| Member | Bound |
-|---|---:|
-| `.backup.lock` | empty |
-| `backup.json` | 65,536 bytes |
-| `account-database.bin` | 268,435,456 bytes |
-| `capture-database.bin` | 67,108,864 bytes |
-
-Manifest format `uulab.paper-backup`, integer version 1, mode paper/live false;
-32-hex backup ID; canonical UTC creation time; original paths as provenance;
-account ID, code fingerprint, manifest/state/event-head digests, verified event
-count and exact control; capture ID/config/snapshot digests and exact state;
-payload sizes/SHA-256; explicit non-authority boundaries.
-
-Duplicate keys, extra keys, noncanonical encoding/types, unknown members and
-oversize payloads are refused. Recorded original paths are not followed by check
-or restore verification. Hashes detect corruption/inconsistency; they are not a
-signature or an external latest-state/rollback anchor.
-
-### Recovery copy and operation contract
-
-Verify-restore holds the original bundle's shared lock, fully verifies it, copies
-its exact bytes into another new private bundle, and verifies the actual recovered
-files with full replay. Originals may be absent. Archive IDs and metadata stay
-the same. The output never contains executable stream/capture database/lock
-names. No source binding is rewritten, no account is launched, no old snapshot
-is installed over a current account, and no refusal is normalized away.
-
-Success schema1/source paper_backup_operation includes operation, mode/live/read_only,
-verified_backup or verified_restore status, exit 0, archive/account/capture IDs,
-verified event count, state/event digests, payload sizes/hashes and boundaries:
-full_archived_replay, execution_authorized false, source_rebinding false,
-rollback_protection false, provider_authenticity not_authenticated. Public result
-and fixed errors omit private paths.
-
-## Operator workflow
-
-Use original fingerprint-compatible code/Python on a supported local POSIX
-filesystem. Stop the continuous consumer first, then its bound collector, and
-wait for both processes to exit. Retain their JSON results and any error state.
-
-```bash
-python tools/paper_backup.py create ACCOUNT_DIR --output NEW_BACKUP_DIR
-python tools/paper_backup.py check BACKUP_DIR
-python tools/paper_backup.py verify-restore BACKUP_DIR --output NEW_RECOVERY_DIR
-python tools/paper_backup_drill.py --directory NEW_SYNTHETIC_DRILL_DIR
+```text
+configure ACCOUNT --directory SERVICE [--startup-seconds N --heartbeat-seconds N --stop-seconds N]
+run SERVICE
+check SERVICE
+unit SERVICE --output NEW_FILE
 ```
 
-The backup CLI emits one JSON document. Exit 2 means invalid/unavailable/busy or
-fingerprint/audit refusal; 4 means storage/unconfirmed output; 130/143 signals.
-Creation/recovery failures conservatively report output_may_exist. Handlers only
-record intent and are restored; a storage fault takes priority over a simultaneous
-signal. A signal after a confirmed copy can still report interruption, so preserve
-and inspect output. The synthetic drill follows the same storage-priority rule
-and handles both its own interruptions and the core backup API's typed interruption.
+One JSON on stdout, fixed private errors and numeric first-signal intent. No help
+or argument abbreviation output bypasses the JSON contract. Exit0: configure/unit
+or fresh running probe;1: valid nonrunning/degraded probe;2: unavailable before
+launch/invalid probe;3: policy refusal;4: failed/unconfirmed cleanup/evidence;
+130/143: requested cooperative stop without a higher-priority outcome. A broken
+or full stdout cannot deliver JSON; after cleanup the CLI reports only a fixed
+stderr label where possible and returns4, preserving retained evidence.
 
-The offline drill accepts only a new directory and creates its own synthetic
-inputs. It denies connection/DNS/UDP calls, runs 120 bootstrap plus two 60-bar
-continuations, checks 18 fills against the original engine, stops the owners,
-backs up, temporarily moves only its own original paths, and verifies restored
-binary snapshots/fills/risk/byte hashes. It proves both bundles refuse ordinary
-stream/capture runtime opening. Original generated names are restored on normal
-or error exit. `drill-report.json` is separate from the strict bundle contents.
+The generated unit is never installed or activated. Paths use only conservative
+ASCII absolute characters. Type=simple, Restart=no, KillMode=mixed,
+KillSignal=SIGTERM, SendSIGKILL=yes, SuccessExitStatus="130 143", UMask0077,
+NoNewPrivileges=yes, LimitCORE0, TimeoutStopSec=2*(stop_seconds+5)+5. There is no
+Install section, boot/login activation policy, arbitrary shell or environment
+file. Syntax checking with systemd-analyze is separate from host activation.
 
-Complete guide: [PAPER_BACKUP.md](PAPER_BACKUP.md). Original continuous-account
-semantics remain in [CONTINUOUS_PAPER.md](CONTINUOUS_PAPER.md).
+Complete operator workflow: [PAPER_SERVICE.md](PAPER_SERVICE.md).
+Account semantics: [CONTINUOUS_PAPER.md](CONTINUOUS_PAPER.md).
+Backup semantics: [PAPER_BACKUP.md](PAPER_BACKUP.md).
 
-## Verification and review
+## Verification and review checkpoint
 
-Focused final gates: 38 private-IO methods, 25 coordinator methods,
-10 CLI methods and 7 drill methods (80 new methods), all passed in 69.938 seconds.
-Core first RED was 21
-missing-feature failures. Parent substitution during original/input replay was
-reproduced as two false-success failures and repaired with the held parent and
-expected-parent precondition. Empty lock fsync/identity failures and signal versus
-storage-priority faults have failing-before/passing-after regressions.
+A fresh independent review covered the complete v48 change and reported
+zero Critical, zero Important and one Minor finding. The Minor was reproduced
+in eight actual subprocess cases: full/broken stdout after invalid arguments or
+a completed refusal/failure/interruption. Final output OSError previously returned
+exit1 and exposed a traceback; the repaired CLI closes the failed buffer, emits a
+fixed private stderr label when possible, and returns4 without repeating work.
+All28 CLI/unit tests passed after repair (8.571 seconds). The reviewer independently
+ran all19 monitor tests successfully. The final whole-suite result is recorded
+in the table below for the repaired implementation.
 
-Actual process death during a payload copy leaves a refused incomplete bundle,
-unchanged originals and released owner locks. Additional coverage includes real
-owner contention, preserved terminal reasons, hot-journal refusal, bounded IO,
-short writes, fork ownership, hash/metadata corruption, digest-consistent forged
-cash refused by full replay, exact restore after originals disappear, and actual
-OS signal delivery. No invented live-provider or power-loss result is claimed.
-
-A fresh independent whole-increment review found no Critical findings and two
-Important findings. Both were reproduced and repaired. Moving either original
-directory during final output sync previously yielded false success; creation
-now performs its stable-source check after that sync and preserves possible
-output on refusal. The drill previously classified core `BackupInterrupted` as
-generic failure; it now reports the signal exit code explicitly. Six actual OS
-signal cases (SIGINT/SIGTERM at create/check/verify-restore) pass while the
-simultaneous fsync-failure test still requires exit 4. The final handoff records the repaired local verification below.
-
-Final local results on the repaired implementation:
+Final local gates on the repaired implementation:
 
 | Gate | Observed result |
 |---|---|
-| Complete unittest discovery | 1,365 passed, 208.030 s, no skips |
-| New backup/recovery subset | 80 passed, 69.938 s; included in the complete suite |
-| Existing package/server pytest | 309 passed + 382 subtests, 14.85 s; 926 existing deprecation warnings |
-| All Node client tests | 103 passed, zero failed/skipped, 317.674299 ms |
-| Python 3.10 syntax compatibility | All eight new Python files parsed |
-| Frozen runtime compatibility | All 24 fingerprinted files byte-identical to v46 |
-| Prior v46 account | Full 120-event audit still verified; database bytes unchanged |
-| Standalone repaired offline drill | 120 consumed events, 18 fills, exact original-engine economics |
+| Complete unittest discovery | 1,500 methods: 1,497 passed, three explicit AF_UNIX capability skips; 267.416 s |
+| New service methods, included above | 135 methods: 132 passed, the same three capability skips |
+| Existing package/server pytest | 309 passed + 382 subtests; 926 existing deprecation warnings; 14.32 s |
+| All Node client tests | 103 passed, zero failed/skipped; 350.723358 ms |
+| Python 3.10 syntax | All 14 new Python files parsed |
+| Frozen runtime compatibility | All 24 execution files byte-identical to v47/v46 |
+| Prior native account/archive compatibility | Existing 120-event account and v47 backup/recovery copies fully verified; bytes unchanged |
+| Actual native pair lifecycle | Two runs preserve one account, 2→4→6 events, original full audits and exact economic/event prefix |
+| Actual parent-only SIGKILL | Both native children reaped, both native locks released, databases stable; incomplete attempt cannot be reused |
+| Inactive systemd unit | Actual offline systemd-analyze verification passed; no manager activation |
 
-The final drill independently rechecked original/backup/recovery SHA-256 equality
-for both DB payloads, exact metadata, private modes and the report's archived
-snapshot/fill/risk equivalence. Check and recovered-copy verification succeeded
-with the generated original paths absent. Both bundles refused normal runtime
-opening. This is synthetic local recovery verification, not executable failover
-or maximum-capacity/hardware validation.
+The local environment does not have flake8 installed; strict lint remains an
+actual final-head CI gate. No local lint pass is inferred from compilation.
 
-Exact final-tree publication and CI follow this checkpoint. Their actual results
-are recorded in the PR and ignored receipts.
-Existing optional formatting warnings or external coverage upload failures must
-be reported separately from required test success if observed again.
+Local executor capability: AF_UNIX socket creation returns EPERM. No permission
+escalation or alternate network transport is used. Actual socket tests explicitly
+report that limitation. Coordinator process/signal tests can use a test-only inert
+pipe listener and test observations; they establish no real health-socket result.
+The GitHub Linux service steps set PAPER_SERVICE_REQUIRE_SOCKET=1, making any
+socket capability skip fail the job. All spawned integration interpreters deny
+provider/network operations; synthetic native transport exists in tests only.
 
-## Remaining production work
+Evidence is retained in the ignored v48 progress/task logs. Final CI must include
+actual service socket/probe tests on Python3.10/3.12/3.13, alongside the existing
+account/archive regressions, package/server suite, Node and strict lint/build.
 
-Implemented: continuous PAPER operation, explicit verified resume, paired inert
-backup creation/checking, and repeatable local recovered-copy verification.
+## Remaining production evidence
 
-Remaining: executable account/source migration with authority transfer and
-rollback policy; actual external backup-media and host-disaster recovery;
-real-provider/network/clock/disk soak; supervised service deployment/rollback,
-alert delivery; worst-case 100,000-event replay latency; capacity archival beyond
-100,000 consumed bars/256 MiB; broker-authoritative execution/reconciliation;
-actual browser visual/accessibility inspection. Existing Rust/Compose/deploy
-scripts do not package the continuous Python runtime as a verified service.
+Implemented scope is guarded local PAPER supervision plus previous native
+accounts and inert archive recovery. The following remain outside completed
+operational evidence: actual host service activation/rollback and cgroup behavior;
+real-provider/network/clock/disk soak; alert delivery; external backup media and
+host-disaster exercises; executable source/account migration with authority
+transfer/retirement/rollback policy; worst-case100,000-event replay and capacity
+archival; broker-authoritative execution/reconciliation; browser visual and
+accessibility inspection. Legacy Rust/Compose builds do not package this Python
+service or establish its deployment readiness.
 
-Readiness remains false. Do not infer liveness, current prices, investment
-performance or live execution authorization from a valid archived prefix.
+Keep main and Draft/unmerged/no-auto-merge state. Publish only an exact tested
+tree through expected-head non-force update. Inspect final-head PR and push CI
+jobs/logs; update only guarded title/body; independently reread refs/tree/metadata
+and actual CI. Do not call implementation completion service activation or live
+readiness.
 
-Design: [v47 spec](superpowers/specs/2026-11-15-paper-backup-design.md).
-Plan: [v47 plan](superpowers/plans/2026-11-15-paper-backup.md).
-
-## Publication discipline
-
-Keep main and Draft/unmerged/no-auto-merge state. Publish the exact tested tree
-using an expected-head non-force ref update. Verify all applicable PR and push
-workflows on the published commit, including actual matrix logs and skipped image
-publication/release jobs. Update only PR title/body after fresh comparison with
-the saved metadata baseline, then independently reread refs/tree/metadata/CI.
+Design: [v48 spec](superpowers/specs/2026-11-15-paper-service-design.md).
+Plan: [v48 plan](superpowers/plans/2026-11-15-paper-service.md).
