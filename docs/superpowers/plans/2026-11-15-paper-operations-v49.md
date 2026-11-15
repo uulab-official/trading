@@ -108,3 +108,19 @@ PRODUCTION_CHECKLIST, operations guide and CURRENT_HANDOFF.
 This tracked plan is a prepublication checkpoint. Exact future commit, artifact
 digest and final CI identities belong in the PR and delivery receipts; no
 self-referential follow-up commit is needed merely to record its own identity.
+
+## Actual CI repair checkpoint
+
+The first candidate 1e00265d87001116584d5226e18c2a6ca4b35d7c exposed a shared
+clock test defect on real Python 3.12/3.13 runners. The deterministic reproduction
+and isolated test-time repair are documented in CURRENT_HANDOFF. Only the
+existing service-state test file changed; production payload and test method
+counts remain unchanged. Independent focused review passed on 3.12/3.13 and an
+in-memory removed-deadline mutation correctly failed. Final regression results
+and new-head CI are required before the final delivery receipt; failed first
+candidate runs remain preserved.
+
+The repaired complete local unittest gate finished: 1,566 methods, 1,563 passed,
+three explicit local socket exclusions, 375.416 seconds. The unchanged release
+payload reconstructs the same a8c22a6c057c1284a705ce2ff90c41362148d5c9eee20d62f8f71f8930cd0da9
+archive. Final hosted results remain the next delivery gate.

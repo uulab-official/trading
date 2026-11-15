@@ -83,16 +83,16 @@ hash.
 The fixed payload contains 42 Python package modules, seven tools, five guides
 and the license, plus `paper-release.json`. The manifest comes first, followed by
 55 sorted payload members. Only canonical uncompressed USTAR regular files are
-accepted: mode0600, uid/gid/mtime0, empty owner/group/link names, zero padding and
+accepted: mode 0600, uid/gid/mtime 0, empty owner/group/link names, zero padding and
 one exact 10240-byte archive boundary. No directory/link/PAX/GNU/sparse members,
 compression, traversal, duplicates, unknown files or trailing data. Bounds are
-8MiB per archive, 1MiB per payload and 64KiB per manifest. Canonical JSON refuses
+8 MiB per archive, 1 MiB per payload and 64 KiB per manifest. Canonical JSON refuses
 duplicate keys, unknown fields, bool/int substitutions, floats/nonfinite values,
 oversized integers and excessive nesting.
 
 Build reads the fixed code root only. Payload bytes determine archive bytes;
 source timestamps, paths, umask and Python patch version do not enter the archive.
-The manifest states CPython>=3.10, Linux and no third-party runtime dependencies.
+The manifest states CPython >= 3.10, Linux and no third-party runtime dependencies.
 It does not package the interpreter, standard library, operating system, tests,
 repository history, credentials or trading stores. The legacy Rust image and
 full monorepo dependency setup remain separate.
@@ -101,7 +101,7 @@ Filesystem operations retain original ancestor/file descriptors, use no-follow
 nonblocking opens and compare identity/content metadata before and after reads
 and final syncs. Output parents are pinned before source/archive verification.
 New destinations only, outside the trusted checkout and archive; no overwrite or
-reuse of existing empty directories. Extraction uses0700/0600, writes manifest
+reuse of existing empty directories. Extraction uses 0700/0600, writes manifest
 last, confirms file/directory/parent sync and exact final inventory, and never
 removes partial output. Restrictive-umask permission repair uses the originally
 pinned Linux O_PATH descriptor through `/proc/self/fd`, never an unpinned name.
@@ -109,10 +109,10 @@ Ancestor traversal is iterative, keeping deep invalid paths an ordinary refusal.
 
 The synchronous API closes descriptors before returning a point-in-time report.
 JSON serialization and future execution are later events; there is no atomic
-verification-to-execution claim. CLI exit0 confirms this operation,2 refuses
-unavailable/invalid input before output,4 preserves storage/output uncertainty,
-and130/143 represent requested interruption unless a higher-priority failure is
-known. Broken/full stdout returns4 with a fixed stderr label and does not repeat
+verification-to-execution claim. CLI exit 0 confirms this operation, 2 refuses
+unavailable/invalid input before output, 4 preserves storage/output uncertainty,
+and 130/143 represent requested interruption unless a higher-priority failure is
+known. Broken/full stdout returns 4 with a fixed stderr label and does not repeat
 the operation. Always use `-B`; extra bytecode or other files invalidate an exact
 release tree. Keep stores and generated reports outside it.
 
@@ -121,12 +121,12 @@ release tree. Keep stores and generated reports outside it.
 The first scoped independent review reproduced one Important defect: under a
 restrictive umask, a pathname-based chmod could modify a substituted directory
 before refusing its inode mismatch. The regression first failed with the unrelated
-victim changed0755→0700; descriptor-bound repair preserves0755 and refuses the
+victim changed 0755→0700; descriptor-bound repair preserves 0755 and refuses the
 substitution with storage uncertainty. A second Minor finding reproduced a raw
 RecursionError for a deeply nested unavailable path; iterative traversal now
 returns the fixed pre-output unavailable result without leaking descriptors.
 
-The off-checkout harness reuses all143 existing service tests and only their
+The off-checkout harness reuses all 143 existing service tests and only their
 required test helpers. Its project paths resolve to the extracted release; no
 production source is copied from the checkout into the harness. The unit test's
 exact ExecStart expectation uses the resolved extracted tool path. Parent tests
@@ -147,9 +147,9 @@ Final local gates on the reviewed implementation:
 
 | Gate | Observed result |
 |---|---|
-| Complete root unittest discovery | 1,566 methods: 1,563 passed, three explicit AF_UNIX capability skips; 377.001 s |
+| Complete root unittest discovery | 1,566 methods: 1,563 passed, three explicit AF_UNIX capability skips; 375.416 s after the CI test repair |
 | New release methods, included above | 58 passed; the nested extracted service suite additionally ran 143 methods, 140 passed and the same three capability exclusions |
-| Standalone isolated runtime suite | Eight passed in 101.968 s, including exact-source imports, original native account/archive checks and the fixed worker |
+| Independent CI test repair | Eight admission tests passed on CPython 3.12.14 and 3.13.5; patched bindings restored; removed-deadline mutation correctly rejected |
 | Independent focused review gate | 50 format/filesystem/CLI methods passed with `-I -S -B`, zero skips |
 | Package/server pytest | 309 passed plus 382 subtests; 926 existing deprecation warnings; 14.33 s |
 | All Node client tests | 103 passed, zero failures/skips; 313.366459 ms |
@@ -169,13 +169,55 @@ independent remote readback are recorded in the PR and delivery receipt. The
 local results above do not preclaim those future results. Strict lint and the
 unchanged Rust Docker build remain actual final-head CI gates.
 
+### First-candidate CI and clock-isolation repair
+
+First published candidate `1e00265d87001116584d5226e18c2a6ca4b35d7c` had
+four completed PR workflows: Pipeline and Safety passed, while Quant Regression
+and Verified PAPER Runtime failed. The 19 jobs/checks comprised 15 successes,
+two failures and the two intended publication/release skips. Both failing jobs
+were the same existing deadline test: replay-integration Python 3.12
+([job 132780571704](https://github.com/uulab-official/trading/actions/runs/43703848386/job/132780571704))
+and the extracted service suite in runtime Python 3.13
+([job 132780571881](https://github.com/uulab-official/trading/actions/runs/43703848387/job/132780571881))
+recorded two admission sleeps where one was expected. No failed workflow was
+silently rerun or accepted as a pass.
+
+The existing test patched the global `time.sleep`. Its simulated admission sleep
+released a real holder subprocess using `communicate(timeout=5)`, whose POSIX
+wait can itself sleep. A deterministic regression forced the first nonblocking
+wait observation to return not-yet-reaped; the subprocess backoff then reentered
+the globally patched admission callback, reproducing exactly two waits. The
+production deadline guard already ran before the next lock attempt.
+
+The repair changes only `tests/test_paper_service_state.py`: all three fake
+clock/sleep bindings are local to `paper_service_state.time`. Subprocess cleanup
+keeps real time. The strengthened existing method forces the unrelated backoff,
+asserts the full 2.0-second simulated descheduling, successful holder exit, exactly
+one actual admission lock attempt and one sleep <= 0.01 seconds, then confirms a
+fresh acquisition succeeds. Method counts remain unchanged. The author observed
+RED then eight focused passes and 46 state methods with two existing local socket
+skips. An independent reviewer ran the eight methods on CPython 3.12 and 3.13,
+confirmed restoration of every patched binding, and showed that removing the
+pre-acquire deadline guard makes the strengthened test fail for the actual
+expired acquisition.
+
+The first candidate's two uploaded Python 3.10/3.12 artifacts were independently
+downloaded and inspected: each contains only the tar and external digest, and the
+706,560-byte tar matches the archive SHA above. No production payload changed in
+the test repair, so this release identity remains exact. First-candidate failure
+logs and artifact evidence are retained separately; repaired-head CI and final
+publication identity must be read from the PR/delivery receipt. The complete
+repaired local suite ran 1,566 methods: 1,563 passed and three explicit local
+socket exclusions in 375.416 seconds; it also repeated the extracted
+143-method service suite with its named capability exclusions.
+
 ## Remaining operational evidence
 
 The new source release closes the gap between repository tests and a separately
 verified minimal PAPER runtime. It does not establish target-host installation,
 activation/rollback/cgroups, real-provider/network/clock/disk soak, alert delivery,
 external backup media, host-disaster recovery, executable account migration and
-authority transfer, worst-case100000-event replay, broker-authoritative execution
+authority transfer, worst-case 100,000-event replay, broker-authoritative execution
 or reconciliation, or browser visual/accessibility acceptance.
 
 Local AF_UNIX capability restrictions must remain visible as explicit skips;

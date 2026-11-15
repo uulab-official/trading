@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -229,17 +230,53 @@ print(json.dumps({'owner_present':result}),flush=True)
         monotonic = time.monotonic
         elapsed = [0.0]
         waits = []
+        wait_origins = []
+        subprocess_waits = []
+        subprocess_wait_origins = []
+        forced_unreaped = []
+        admission_locks = []
+        actual_lock = self.module.PrivateDirectory.lock
+        actual_try_wait = holder._try_wait
+        # Exercise Popen._wait's real backoff even when the child exits quickly.
+        def force_subprocess_backoff(flags):
+            if not forced_unreaped:
+                self.assertEqual(flags, os.WNOHANG)
+                forced_unreaped.append(True)
+                return 0, 0
+            return actual_try_wait(flags)
+        def subprocess_sleep(seconds):
+            subprocess_waits.append(seconds)
+            subprocess_wait_origins.append(sys._getframe(1).f_code.co_name)
+            time.sleep(seconds)
+        def admission_lock(directory, name, **kwargs):
+            if name == '.service.lock' and kwargs.get('exclusive'):
+                admission_locks.append(name)
+            return actual_lock(directory, name, **kwargs)
         def clock():
             return monotonic() + elapsed[0]
         def descheduled(seconds):
             waits.append(seconds)
+            wait_origins.append(sys._getframe(1).f_code.co_name)
             self.release_service_lease(holder)
             elapsed[0] += 2.0
-        with patch('time.monotonic', new=clock), patch('time.sleep', new=descheduled):
+        # Only admission sees the shifted clock; subprocess cleanup keeps real time.
+        with patch.object(holder, '_try_wait', new=force_subprocess_backoff), \
+                patch.object(subprocess, 'time', new=SimpleNamespace(sleep=subprocess_sleep)), \
+                patch.object(self.module.PrivateDirectory, 'lock', new=admission_lock), \
+                patch.object(self.module, 'time', new=SimpleNamespace(
+                    monotonic=clock, sleep=descheduled)):
             with self.assertRaises(self.module.ServiceUnavailable):
                 with self.module.ServiceDirectory(self.service, exclusive=True):
                     self.fail('expired admission must not acquire the now-free lease')
-        self.assertEqual(len(waits), 1)
+        self.assertEqual(len(waits), 1, 'sleep callback origins: ' + repr(wait_origins))
+        self.assertEqual(wait_origins, ['_acquire_lease'])
+        self.assertEqual(elapsed, [2.0], 'the simulated descheduling must complete')
+        self.assertEqual(admission_locks, ['.service.lock'])
+        self.assertEqual(holder.returncode, 0)
+        self.assertEqual(forced_unreaped, [True])
+        self.assertTrue(subprocess_waits, 'real subprocess wait must exercise its own backoff')
+        self.assertTrue(all(seconds > 0 for seconds in subprocess_waits))
+        self.assertEqual(set(subprocess_wait_origins), {'_wait'})
         self.assertGreater(waits[0], 0)
         self.assertLessEqual(waits[0], .01)
         with self.module.ServiceDirectory(self.service, exclusive=True) as owner:
@@ -258,7 +295,8 @@ print(json.dumps({'owner_present':result}),flush=True)
             original.write_bytes(b'')
             original.chmod(0o600)
         try:
-            with patch('time.sleep', new=replaced):
+            with patch.object(self.module, 'time', new=SimpleNamespace(
+                    monotonic=time.monotonic, sleep=replaced)):
                 with self.assertRaises(self.module.ServiceUnavailable):
                     with self.module.ServiceDirectory(self.service, exclusive=True):
                         pass
@@ -280,7 +318,8 @@ print(json.dumps({'owner_present':result}),flush=True)
                       BlockingIOError(errno.EIO, 'not actual would-block contention')):
             with self.subTest(error=type(error).__name__):
                 with patch.object(self.module.fcntl, 'flock', side_effect=error), \
-                        patch('time.sleep', new=forbidden_sleep):
+                        patch.object(self.module, 'time', new=SimpleNamespace(
+                            monotonic=time.monotonic, sleep=forbidden_sleep)):
                     with self.assertRaises(self.module.ServiceUnavailable):
                         with self.module.ServiceDirectory(self.service, exclusive=True):
                             pass
