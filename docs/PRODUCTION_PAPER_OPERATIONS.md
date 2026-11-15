@@ -1,4 +1,4 @@
-# Local paper operations runbook (v48)
+# Local paper operations runbook (v49)
 
 The v46 consumer continues one paper account from the separately operated public
 closed-candle capture. Follow [CONTINUOUS_PAPER.md](CONTINUOUS_PAPER.md) for
@@ -19,6 +19,10 @@ Configuration and unit generation are inert. Explicit service `run` resumes the
 existing public collector and its local PAPER consumer; it contacts the same
 public endpoint through the unchanged capture runtime.
 
+v49 adds [PAPER_RELEASE.md](PAPER_RELEASE.md): a deterministic minimal source
+archive with external SHA-256 verification and strict private-tree extraction.
+It includes no trading stores or secrets and performs no service activation.
+
 This runbook covers continuous and historical local paper operation, saved
 research and the read-only observer on a local POSIX filesystem with Python 3.10
 or newer. Only an explicitly started capture, directly or through the supervisor,
@@ -32,9 +36,11 @@ port forwarding and remote account access are outside this operating contract.
 
 ## Prepare and pin the environment
 
-From the repository root, use an existing environment with the repository
-packages and engine dependencies installed. Record the exact revision and Python
-version before creating an experiment:
+For the broader repository workflows below, use an existing environment with
+the repository packages and engine dependencies installed. The seven-command
+source-release path has its own standard-library-only contract described below.
+From the repository root, record the exact revision and Python version before
+creating an experiment:
 
 ```bash
 git rev-parse HEAD
@@ -59,6 +65,40 @@ check; `is_production_ready()` always returns `False` in this revision. CLI
 `validate` and `show` report operational readiness as unverified. Neither command
 checks a live feed, broker, account reconciliation or recovery authorization.
 The paper workflow below does not require YAML credentials or Telegram tests.
+
+## Prepare a verified source runtime (v49)
+
+Follow [PAPER_RELEASE.md](PAPER_RELEASE.md) from a trusted checkout. The fixed
+profile is 55 payload files plus `paper-release.json`, preserving source layout
+for seven tools: capture, stream, service, its guarded internal worker, backup,
+synthetic backup drill and release verification. These supported commands use
+only the standard library on CPython 3.10+ and Linux. The interpreter, standard
+library and OS remain external; other monorepo workflows retain their existing
+dependencies. The legacy Rust Docker image is a separate runtime.
+
+`paper_release.py build --output NEW_ARCHIVE` creates a canonical uncompressed
+USTAR and reports its digest. Preserve that SHA-256 with the reviewed revision
+and trusted CI evidence. `check ARCHIVE --sha256 EXPECTED_SHA256`,
+`extract ARCHIVE --sha256 EXPECTED_SHA256 --directory NEW_DIRECTORY` and
+`verify DIRECTORY --sha256 EXPECTED_SHA256` require that external digest.
+The manifest alone does not authenticate the source. Python 3.10/3.12/3.13 release
+CI is configured; record actual results for the published head before claiming
+those jobs passed.
+
+Use new outputs outside the checkout and trading stores. Archive/source inputs
+must be stable, operator-owned, regular single-link files without symlink
+components or group/world write permission. Extraction creates private `0700`
+directories and `0600` files after complete archive validation. Verification
+checks the exact tree and rejects extra files. Run extracted commands with
+`-I -S -B` and keep all data, secrets, generated evidence and bytecode outside it.
+Preserve possible output and partial trees after any unconfirmed operation.
+
+Release operations do not change existing account/capture paths, restore data,
+authorize execution or assess readiness. Existing service configurations remain
+bound to their exact runtime root and interpreter. Inspect the original state
+and explicitly configure a new service directory when choosing another runtime
+location; never rewrite saved bindings to force acceptance. Activation, provider
+soak and live-readiness evidence remain separate operating work.
 
 ## Create and continue one paper account
 

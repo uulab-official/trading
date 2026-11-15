@@ -15,6 +15,9 @@ v48 adds [guarded Linux PAPER supervision](docs/PAPER_SERVICE.md) for the existi
 capture/account pair, fresh process-progress checks, retained attempt evidence
 and an inactive systemd user-unit generator. Explicit startup preserves the
 original account/source bindings; there is no automatic worker restart.
+v49 adds a [verified minimal PAPER source release](docs/PAPER_RELEASE.md):
+a deterministic archive with an externally pinned SHA-256, strict validation
+and extraction into a new private runtime directory.
 [PR #1](https://github.com/uulab-official/trading/pull/1)
 remains Draft. The latest continuation state is in
 [CURRENT_HANDOFF.md](docs/CURRENT_HANDOFF.md).
@@ -177,6 +180,31 @@ database. Capacity is a preserved terminal result; there is no automatic archive
 or account reset. See [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) for exact
 bootstrap requirements, frozen options, recovery decisions and JSON/exit codes.
 
+## Verified minimal PAPER source release (v49)
+
+[PAPER_RELEASE.md](docs/PAPER_RELEASE.md) describes `tools/paper_release.py`
+`build`, `check`, `extract` and `verify`. Build records the archive SHA-256;
+the other operations require that digest from a separately trusted record.
+The canonical uncompressed USTAR contains exactly 55 fixed payload files
+(source, tools, license and guides) plus `paper-release.json`. Validation checks
+the exact profile; extracted-tree verification rejects missing or extra files.
+Build and extraction require new outputs, with private files and directories.
+
+The supported seven tool paths are `market_capture.py`, `paper_stream.py`,
+`paper_service.py`, the guarded internal `paper_service_worker.py`,
+`paper_backup.py`, `paper_backup_drill.py` and `paper_release.py` under `tools/`.
+They use the Python standard library on CPython 3.10+ and Linux; the interpreter,
+standard library and operating system remain external. This dependency scope
+applies to the release commands; other monorepo components retain their dependencies.
+The legacy Rust Docker image does not package this Python PAPER runtime.
+
+The archive includes no trading data or secrets. Extraction neither activates a
+service nor changes account/capture paths or existing service runtime/interpreter
+bindings. A different runtime location requires an explicitly new service
+configuration. Digest checks do not establish signed provenance or data/live
+readiness. Python 3.10/3.12/3.13 release CI is configured; inspect the published
+head's actual results before treating it as passed.
+
 ## Supervise an existing PAPER pair (v48)
 
 After stopping the consumer and its exact bound capture and waiting for both
@@ -335,6 +363,7 @@ verification. Runtime data, accounts, reports and secrets must remain private.
 | [PERSONAL_TRADING_GUIDE.md](PERSONAL_TRADING_GUIDE.md) | Synthetic offline trial and duplicate-free checkpoint resume |
 | [MARKET_CAPTURE.md](docs/MARKET_CAPTURE.md) | Public closed-candle capture, freshness, bounded retention and explicit export |
 | [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) | Continuous paper account, indicator-only activation, atomic progress and full-replay resume/audit |
+| [PAPER_RELEASE.md](docs/PAPER_RELEASE.md) | Fixed source archive, external digest checks, private extraction and exact-tree verification |
 | [PAPER_BACKUP.md](docs/PAPER_BACKUP.md) | Verified paired backups, read-only full replay, non-executing recovery copies and local drills |
 | [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md) | Current local paper runbook, probes, shutdown, recovery, backup and rollback |
 | [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) | Paper operating checklist and remaining live-readiness evidence |
@@ -357,15 +386,17 @@ not steps required by this paper runbook or proof of a working live deployment.
 ## Local development
 
 Use Python 3.10 or newer and a local POSIX filesystem for checkpoint/owner-lock
-workflows. In an existing environment, install the repository packages once:
+workflows. For full repository development, install the repository packages
+in an existing environment:
 
 ```bash
 python -m pip install -e packages/core -e packages/data -e packages/strategy -e apps/server
 python tools/offline_checks.py
 ```
 
-The targeted stdlib dashboard/research suites remain independent of the engine
-package setup. Full engine/backtest checks require their existing dependencies.
+The seven-command [PAPER source release](docs/PAPER_RELEASE.md) and targeted
+stdlib dashboard/research suites remain independent of the engine package setup.
+Full engine/backtest checks require their existing dependencies.
 See the workflow guides and CI for checks matching the component being changed.
 No network/provider activation is needed for synthetic paper operation.
 

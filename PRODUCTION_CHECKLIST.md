@@ -7,6 +7,7 @@ historical paper workflows and a read-only local observer. Follow
 [CONTINUOUS_PAPER.md](docs/CONTINUOUS_PAPER.md) for one continuing paper account,
 [PAPER_SERVICE.md](docs/PAPER_SERVICE.md) for guarded Linux pair supervision,
 [PAPER_BACKUP.md](docs/PAPER_BACKUP.md) for paired backup/recovery verification,
+[PAPER_RELEASE.md](docs/PAPER_RELEASE.md) for the verified minimal source release,
 and [PRODUCTION_PAPER_OPERATIONS.md](docs/PRODUCTION_PAPER_OPERATIONS.md)
 for exact commands, probe contracts, budgets, shutdown, recovery and rollback.
 This checklist replaces the previous credential-and-live-switch deployment recipe.
@@ -14,7 +15,7 @@ No entry below is prechecked as evidence that an operator performed it.
 
 ## Before a local paper observation
 
-- [ ] Record the exact code revision and Python version; use the existing package setup.
+- [ ] Record the exact code revision and Python version. Use the verified minimal release for its supported commands, or the existing package setup for broader monorepo workflows.
 - [ ] Use operator-owned private directories (`0700`) and private files (`0600`). Keep accounts, frozen inputs, reports and evidence out of public delivery.
 - [ ] For a historical run, select synthetic or explicitly supplied historical input and a **new** run directory; choose `--resumable` at creation if explicit historical recovery is required. For continuous consumption, follow the separate account checklist below.
 - [ ] Confirm the intended source paths and independent source meanings. Admission reservations are not account balances or replay fills.
@@ -59,6 +60,19 @@ options and fixed exit codes. These are operating checks, not preclaimed results
 - [ ] Allow startup time for mandatory full archived replay on every resume. Resume rechecks the capture after replay and refuses terminal errors regardless of saved phase; never clear a refusal by editing control metadata.
 - [ ] Plan for the 100,000-consumed-bar / 256-MiB account capacity. Evidence is retained, capacity is terminal and there is no automatic archival, migration or account reset.
 - [ ] Record applicable CI results for the published feature head. The configured Python 3.10/3.12/3.13 jobs are coverage targets, not evidence that the current head has already passed them.
+
+## Verified minimal source release (v49)
+
+Follow [PAPER_RELEASE.md](docs/PAPER_RELEASE.md). These checks remain unmarked
+until performed for the intended artifact and host.
+
+- [ ] Record the reviewed source revision, archive SHA-256 and actual published-head CI results. Configured Python 3.10/3.12/3.13 release jobs do not establish that the current head passed.
+- [ ] Confirm CPython 3.10+ and the required Linux/POSIX host facilities. The seven supported tool paths need the standard library; the interpreter/OS remain external, and broader monorepo dependencies still apply outside this release.
+- [ ] Build only the fixed 55 payload files plus manifest from a trusted checkout into a new archive outside the source tree. Retain the digest separately; internal hashes do not authenticate provenance.
+- [ ] Supply the trusted digest to `check`, `extract` and `verify`. Confirm canonical archive validation and exact extracted-tree verification, including refusal of extra files; keep data, secrets and bytecode outside the release.
+- [ ] Use new private outputs, with `0700` extracted directories and `0600` files. Preserve possible archives and partial trees after interruption or uncertainty; do not overwrite or retry automatically.
+- [ ] Preserve original account/capture physical paths and existing service runtime/interpreter bindings. Inspect and explicitly create a new service configuration for a different runtime location; extraction performs no rebinding or activation.
+- [ ] Assess host activation, provider/data freshness and live readiness separately. Source-release verification and legacy Rust Docker builds do not establish those outcomes.
 
 ## Guarded pair supervision (v48)
 
