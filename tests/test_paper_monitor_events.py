@@ -104,7 +104,7 @@ class EventTests(unittest.TestCase):
         alias.symlink_to(self.input)
         result = self.run_cli('record', '--directory', str(self.root),
                               '--input', str(alias))
-        self.assertEqual(result.returncode, 4)
+        self.assertEqual(result.returncode, 2)
 
     def test_reject_symlink_root(self):
         alias = self.root.parent / 'alias'
@@ -137,6 +137,11 @@ class EventTests(unittest.TestCase):
         result = self.run_cli('check', '--directory', str(self.root))
         self.assertEqual(result.returncode, 2)
         self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_missing_arguments_return_json(self):
+        result = self.run_cli('record')
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)['status'], 'unavailable')
 
     def test_database_private(self):
         self.submit(observation())
