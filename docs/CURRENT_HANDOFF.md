@@ -1,3 +1,34 @@
+# Trading continuation handoff — v52 private monitor event journal
+
+v51 introduced a passive three-source status snapshot. This continuation adds
+`tools/paper_monitor_events.py`, 18 focused regression cases, a Python
+3.10/3.12/3.13 workflow and [PAPER_MONITOR_EVENTS.md](PAPER_MONITOR_EVENTS.md).
+It accepts only a complete self-consistent three-source observation, then
+records its current state and distinct state-signature transitions in a private
+SQLite WAL/FULL journal. Identical repeated observations increment a counter
+without creating repeated events; fault-detail changes and healthy recovery
+generate new events. Capacity is capped at 10,000 retained event transitions.
+It never deletes events, repairs trading stores or performs a trade.
+
+Local implementation verification: 18/18 new focused tests passed on CPython
+3.13.5, including six concurrent first-writer subprocesses that initially
+reproduced a SQLite WAL initialization race. The fix adds a private persistent
+bounded initialization flock, retains transactional SQLite writes and never
+silently retries an unconfirmed result. Python 3.10 grammar for the local
+source/tests passed. This is local evidence; the exact final published source
+and CI need independent readback before claiming remote success.
+
+The original native account/collector/strategy runtime, fixed v49 source
+release profile, API contracts and `is_production_ready()` remain untouched.
+No external notification, scheduler, alert acknowledgement, host activation,
+provider request, broker call, or live order is part of this increment.
+A monitor output and a journal update are **not** one atomic operation.
+Actual host soak, alert delivery/ack, disaster recovery, broker-authoritative
+reconciliation and real production approval remain open. PR #1 stays Draft
+and main must not be merged through this task.
+
+---
+
 # Trading continuation handoff — v51 passive operations monitoring
 
 The v50 final commit `d145be27935c6365169113653f16c97775e0ba5d` passed five PR workflow runs:
