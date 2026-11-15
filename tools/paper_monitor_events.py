@@ -4,6 +4,7 @@ Operator-invoked and read-only to all trading stores. No workers, network,
 broker requests, retries, external alerts, or readiness claims are initiated.
 """
 import argparse
+import fcntl
 from contextlib import closing
 from datetime import datetime, timezone
 import json
@@ -11,6 +12,7 @@ import os
 from pathlib import Path
 import sqlite3
 import stat
+import time
 
 
 MAX_INPUT = 65536
@@ -41,6 +43,15 @@ def _private_directory(raw):
     if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
         raise Invalid('invalid_directory')
     return path
+
+
+def _unique_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise Invalid('duplicate_json_key')
+        result[key] = value
+    return result
 
 
 def _bounded_json_file(raw):
@@ -76,7 +87,7 @@ def _bounded_json_file(raw):
         seen = os.stat(path, follow_symlinks=False)
         if (seen.st_dev, seen.st_ino) != (info.st_dev, info.st_ino):
             raise Invalid('unstable_input')
-        return json.loads(b''.join(chunks))
+        return json.loads(b''.join(chunks), object_pairs_hook=_unique_pairs)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise Invalid('invalid_json') from exc
     finally:
@@ -114,6 +125,30 @@ def _observe(raw):
 
 
 def _open_database(directory):
+    # Serialize first creation, journal-mode setup and schema migration. SQLite
+    # alone cannot coordinate concurrent journal_mode switches.
+    lock_file = directory / '.paper-monitor-init.lock'
+    lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        info = os.fstat(lock_fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+            raise Invalid('invalid_init_lock')
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise Invalid('init_lock_busy')
+                time.sleep(0.01)
+        return _initialize_database(directory)
+    finally:
+        os.close(lock_fd)
+
+
+def _initialize_database(directory):
     db = directory / 'paper-monitor-events.sqlite'
     if not db.exists() and not db.is_symlink():
         previous_umask = os.umask(0o077)
