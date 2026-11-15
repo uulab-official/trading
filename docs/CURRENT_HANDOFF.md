@@ -1,3 +1,28 @@
+# Trading continuation handoff — v50 host capability preflight
+
+This increment adds `tools/paper_host_preflight.py`, seven inert host capability
+tests, `docs/PAPER_HOST_PREFLIGHT.md`, and a Linux CPython 3.10/3.12/3.13
+CI workflow. It closes only a basic target-host diagnostic gap; the original
+v49 deterministic release, the 24 frozen execution modules and all existing
+trading/runtime contracts are not changed. The new tool is intentionally
+outside the fixed v49 source-release inventory.
+
+The probe accepts a pre-existing private (0700), owned absolute directory
+and tests Linux, CPython, proc fd access, private/no-follow files, flock,
+Unix sockets and SQLite WAL. It creates/deletes ephemeral local files,
+performs no provider requests, service activation or orders, and always
+reports `production_ready=false`. Standalone local tests: 7 passed; a
+separate local execution observed all seven capabilities passing and an
+empty probe directory afterwards. These are **not** actual operator-host
+or production-readiness evidence.
+
+Publication is on `feat/smc-market-structure`; its final head and CI
+statuses must be confirmed from GitHub before asserting remote success.
+PR #1 remains a review vehicle, not authorization to merge or deploy.
+The existing v49 handoff and its historical verification follow below.
+
+---
+
 # Trading continuation handoff — 2026-11-15 (v49)
 
 ## Current scope and authorized delivery
