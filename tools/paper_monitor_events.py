@@ -194,10 +194,12 @@ def _connect(db):
 
 
 def _record(db, status, signature, *, now=None):
-    timestamp = now or datetime.now(timezone.utc).isoformat(timespec='microseconds')
     with closing(_connect(db)) as conn:
         try:
             conn.execute('BEGIN IMMEDIATE')
+            # Capture wall time after winning the writer lock: an earlier
+            # scheduled writer cannot be mistaken for clock regression.
+            timestamp = now or datetime.now(timezone.utc).isoformat(timespec='microseconds')
             row = conn.execute('SELECT status,signature,observed_at,observations '
                                'FROM state WHERE singleton=1').fetchone()
             if row and timestamp < row[2]:
