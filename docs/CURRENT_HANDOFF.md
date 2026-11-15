@@ -10,14 +10,18 @@ without creating repeated events; fault-detail changes and healthy recovery
 generate new events. Capacity is capped at 10,000 retained event transitions.
 It never deletes events, repairs trading stores or performs a trade.
 
-Local implementation verification: 19/19 new focused tests passed on CPython
+Local implementation verification: 20/20 new focused tests passed on CPython
 3.13.5, including six concurrent first-writer subprocesses that initially
 reproduced a SQLite WAL initialization race. The fix adds a private persistent
 bounded initialization flock, retains transactional SQLite writes and never
 silently retries an unconfirmed result. An additional regression reproduced
 SQLite URI misinterpretation of a private path containing '?' and verified
-percent-encoding in the read-only URI. Duplicate JSON object keys and input
-path symlink components are also rejected. Python 3.10 grammar for the local
+percent-encoding in the read-only URI. Repeated stress testing also
+reproduced a clock-regression false positive when competing writers sampled
+wall time before SQLite writer admission. The clock is now sampled after
+BEGIN IMMEDIATE; a deterministic regression protects this ordering.
+The final 20-case focused suite passed 10 repeated runs (200 cases).
+Duplicate JSON object keys and input path symlink components are also rejected. Python 3.10 grammar for the local
 source/tests passed. This is local evidence; the exact final published source
 and CI need independent readback before claiming remote success.
 
