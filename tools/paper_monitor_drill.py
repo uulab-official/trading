@@ -45,8 +45,18 @@ def _call(script, arguments, expected):
         report = json.loads(result.stdout)
     except (ValueError, UnicodeDecodeError) as exc:
         raise DrillError("output_invalid") from exc
+    sources = {
+        "paper_monitor_events.py": "paper_monitor_events",
+        "paper_alert_queue.py": "paper_alert_queue",
+        "paper_monitor_gate.py": "paper_monitor_gate",
+    }
     if (type(report) is not dict or type(report.get("exit_code")) is not int
-            or report["exit_code"] != result.returncode or result.returncode != expected):
+            or report["exit_code"] != result.returncode or result.returncode != expected
+            or report.get("source") != sources.get(script)
+            or type(report.get("schema_version")) is not int
+            or report["schema_version"] != 1
+            or type(report.get("boundaries")) is not dict
+            or report["boundaries"].get("production_ready") is not False):
         raise DrillError("result_unexpected")
     return report
 
