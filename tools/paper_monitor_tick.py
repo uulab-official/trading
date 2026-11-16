@@ -44,6 +44,10 @@ def _pair_matches(args):
     only compares immutable path bindings; it is not a new service audit.
     """
     try:
+        # Follow the same owner-only, no-symlink directory policy as the
+        # original native stores before comparing their physical paths.
+        for source in (args.service, args.capture, args.account):
+            paper_monitor_events._private_directory(source)
         path = Path(args.service) / "service.json"
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
         try:
