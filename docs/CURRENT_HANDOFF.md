@@ -1,3 +1,34 @@
+# Trading continuation handoff — v54 atomic monitor tick
+
+The v53 head `edf7c620475e34818768ff1326b513a49a70babd` passed all
+eight GitHub CI workflows before this increment. The existing PAPER engine
+and fixed v49 release profile remain unchanged.
+
+This increment adds `tools/paper_monitor_tick.py`, a standalone one-shot CLI
+which invokes the same read-only three-source probe used in v51 and then
+atomically appends the validated status to the v52 local journal while syncing
+the v53 private ACK queue within a single SQLite `BEGIN IMMEDIATE` transaction.
+The v52 `record_in_transaction` helper is an extraction of its existing
+record calculation; its ordinary `_record` still creates its own transaction.
+A failed queue sync now rolls back the new observation in the tick path.
+
+Added [PAPER_MONITOR_TICK.md](PAPER_MONITOR_TICK.md), nine focused tests and
+a CPython 3.10/3.12/3.13 Linux CI matrix. Tests cover initial healthy record,
+deduplication, degraded exit 1, recovery event, queue-conflict rollback, invalid
+source observations and CLI refusal. A passing tick does not independently
+prove the three provided paths belong to the same configured pair; the operator
+must confirm the binding. External notification delivery, scheduling, provider
+soak, backup restoration and broker-authoritative reconciliation remain
+unverified and unimplemented for live use.
+
+No live service, provider, broker, credentials, external notification or
+automatic restart was activated. Keep PR #1 Draft, do not merge main, and keep
+`production_ready=false`. Final HEAD and actual GitHub CI results must be read
+from the remote workflow executions; focused tests alone are not a complete
+production or full-monorepo gate.
+
+---
+
 # Trading continuation handoff — v53 explicit local alert review
 
 Starting from v52 head `a7497f4c81aabb6e1d6e2590e319f316977db3e8`, seven CI
