@@ -193,36 +193,47 @@ def _connect(db):
     return conn
 
 
+def record_in_transaction(conn, status, signature, *, now=None):
+    """Append one observation while caller holds a BEGIN IMMEDIATE transaction.
+
+    This helper never commits, so a higher-level operator can atomically update
+    the event journal and the queue, or roll both back on a refusal.
+    """
+    # Capture wall time after winning the writer lock: an earlier scheduled
+    # writer cannot be mistaken for clock regression.
+    timestamp = now or datetime.now(timezone.utc).isoformat(timespec='microseconds')
+    row = conn.execute('SELECT status,signature,observed_at,observations '
+                       'FROM state WHERE singleton=1').fetchone()
+    if row and timestamp < row[2]:
+        raise Invalid('clock_regression')
+    changed = row is None or row[1] != signature or row[0] != status
+    count = conn.execute('SELECT COUNT(*) FROM events').fetchone()[0]
+    if changed and count >= MAX_EVENTS:
+        raise Invalid('event_capacity')
+    if changed:
+        conn.execute('INSERT INTO events(observed_at,status,signature) VALUES(?,?,?)',
+                     (timestamp, status, signature))
+    conn.execute('INSERT INTO state(singleton,status,signature,observed_at,observations) '
+                 'VALUES(1,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET '
+                 'status=excluded.status,signature=excluded.signature,'
+                 'observed_at=excluded.observed_at,observations=excluded.observations',
+                 (status, signature, timestamp, (row[3] if row else 0) + 1))
+    seq = conn.execute('SELECT MAX(sequence) FROM events').fetchone()[0]
+    return {'status': status, 'event_created': changed, 'event_sequence': seq,
+            'observation_count': (row[3] if row else 0) + 1}
+
+
 def _record(db, status, signature, *, now=None):
     with closing(_connect(db)) as conn:
         try:
             conn.execute('BEGIN IMMEDIATE')
-            # Capture wall time after winning the writer lock: an earlier
-            # scheduled writer cannot be mistaken for clock regression.
-            timestamp = now or datetime.now(timezone.utc).isoformat(timespec='microseconds')
-            row = conn.execute('SELECT status,signature,observed_at,observations '
-                               'FROM state WHERE singleton=1').fetchone()
-            if row and timestamp < row[2]:
-                raise Invalid('clock_regression')
-            changed = row is None or row[1] != signature or row[0] != status
-            count = conn.execute('SELECT COUNT(*) FROM events').fetchone()[0]
-            if changed and count >= MAX_EVENTS:
-                raise Invalid('event_capacity')
-            if changed:
-                conn.execute('INSERT INTO events(observed_at,status,signature) VALUES(?,?,?)',
-                             (timestamp, status, signature))
-            conn.execute('INSERT INTO state(singleton,status,signature,observed_at,observations) '
-                         'VALUES(1,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET '
-                         'status=excluded.status,signature=excluded.signature,'
-                         'observed_at=excluded.observed_at,observations=excluded.observations',
-                         (status, signature, timestamp, (row[3] if row else 0) + 1))
-            seq = conn.execute('SELECT MAX(sequence) FROM events').fetchone()[0]
+            result = record_in_transaction(conn, status, signature, now=now)
             conn.execute('COMMIT')
         except BaseException:
-            conn.execute('ROLLBACK')
+            if conn.in_transaction:
+                conn.execute('ROLLBACK')
             raise
-    return {'status': status, 'event_created': changed, 'event_sequence': seq,
-            'observation_count': (row[3] if row else 0) + 1}
+    return result
 
 
 def _check(db):
