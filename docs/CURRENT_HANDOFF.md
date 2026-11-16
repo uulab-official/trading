@@ -4,11 +4,12 @@ Baseline v54 feature head `2ac8cd4dc9033f03980f3b40d3bdf33a84a56fa0`
 had all nine required GitHub Actions workflows successful on review. No
 merge or live provider/broker activation was performed.
 
-This increment adds `tools/paper_monitor_gate.py`, its dedicated tests, a
+This increment adds `tools/paper_monitor_gate.py`, fourteen dedicated tests, a
 three-version CI job and [PAPER_MONITOR_GATE.md](PAPER_MONITOR_GATE.md). The
 tool reads the existing v52 monitor history and v53 operator ACK queue
 without creating a journal or modifying an account. It validates source
-history/queue consistency, current status, UTC-aware last observation age
+history/queue consistency (including event-tail and saved-state timestamp
+agreement), current status, UTC-aware last observation age
 (default 120 seconds), refusal of future timestamps and outstanding
 unacknowledged degraded events. A recovered healthy snapshot does not hide
 a prior unreviewed failure. Expected exits: 0 valid healthy; 1 observed
