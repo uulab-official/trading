@@ -65,6 +65,11 @@ def inspect(directory, max_age_seconds, *, now=None):
         ).fetchone()
         if row is None or type(row[3]) is not int or row[3] < 1:
             raise GateUnavailable("missing_state")
+        tail = conn.execute(
+            "SELECT observed_at FROM events ORDER BY sequence DESC LIMIT 1"
+        ).fetchone()
+        if tail is None or tail[0] != row[2]:
+            raise GateUnavailable("head_timestamp_mismatch")
         last = _stamp(row[2])
         age = (current - last).total_seconds()
         if age < 0:
