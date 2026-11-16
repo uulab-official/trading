@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import sys
 from types import SimpleNamespace
 
@@ -36,12 +37,54 @@ def _args(argv):
     return args
 
 
+def _pair_matches(args):
+    """Fail closed if a running supervisor's saved pair differs from the inputs.
+
+    The native service check validates the manifest separately. The read here
+    only compares immutable path bindings; it is not a new service audit.
+    """
+    try:
+        path = Path(args.service) / "service.json"
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        try:
+            st = os.fstat(fd)
+            if (not stat.S_ISREG(st.st_mode) or st.st_size > 16384 or st.st_size < 2
+                    or st.st_uid != os.geteuid() or st.st_nlink != 1
+                    or stat.S_IMODE(st.st_mode) != 0o600):
+                return False
+            raw = os.read(fd, 16385)
+            current = os.stat(path, follow_symlinks=False)
+            if (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns) != (
+                    current.st_dev, current.st_ino, current.st_size,
+                    current.st_mtime_ns, current.st_ctime_ns):
+                return False
+        finally:
+            os.close(fd)
+        manifest = json.loads(raw, object_pairs_hook=paper_monitor_events._unique_pairs)
+        pair = manifest["pair"]
+        return (manifest.get("source") == "paper_service_config"
+                and manifest.get("mode") == "paper"
+                and manifest.get("live_enabled") is False
+                and str(Path(args.account).resolve(strict=True)) == pair["account_path"]
+                and str(Path(args.capture).resolve(strict=True)) == pair["capture_path"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def _operate(args):
     """Read three native probes first; append observation and queue in one txn."""
     probe_args = SimpleNamespace(
         service=args.service, capture=args.capture, account=args.account,
         timeout_seconds=args.timeout_seconds)
     observed = paper_monitor.inspect(probe_args)
+    # The native probes are independent. Never aggregate separate healthy
+    # accounts as a healthy *pair* unless the actual supervisor binding matches.
+    if (observed["checks"]["service"]["healthy"] and not _pair_matches(args)):
+        observed["checks"]["service"] = {
+            "status": "pair_mismatch", "healthy": False, "exit_code": 1,
+        }
+        observed["status"] = "attention_required"
+        observed["exit_code"] = 1
     status, signature = paper_monitor_events._observe(observed)
     if set(observed["checks"]) != {"service", "capture", "account"}:
         raise ValueError("incomplete_probes")
