@@ -186,3 +186,16 @@ operator invocation, not an installed scheduler or external notifier.
 - [ ] Confirm that all three absolute paths refer to the **same** configured service/capture/account pair. The tick now refuses a healthy aggregate if private service-manifest path bindings differ, but this is not a substitute for a stopped native full binding audit.
 - [ ] Independently test real host scheduling, actual alarm transport/receipt/ack, service stop/recovery and external backup restoration before any unattended-operation claim.
 - [ ] Keep live execution and production-ready status false; a passing local journal operation does not validate broker execution or financial risk control.
+
+## Read-only monitoring freshness acceptance (v55)
+
+See [PAPER_MONITOR_GATE.md](docs/PAPER_MONITOR_GATE.md). This is a local
+point-in-time inspection; no recurring check or external alert delivery is
+configured by this implementation.
+
+- [ ] Run the actual three-source monitoring tick at a documented interval on the target host; verify the v52 journal and v53 ACK queue stay synchronized.
+- [ ] Run `paper_monitor_gate.py` with an explicit age threshold appropriate to the host and monitor period. Confirm an old healthy snapshot fails as stale; a future timestamp is refused.
+- [ ] Cause a fault followed by recovery without ACK. Confirm the gate still reports the outstanding fault and only becomes healthy after explicit operator acknowledgement and a fresh healthy observation.
+- [ ] Prove missing/inconsistent databases, unsuitable private directory permissions, host clock rollback and failed SQLite reads cannot create a false healthy result.
+- [ ] Record actual externally delivered alerts and their independent acknowledgement and escalation. A local ACK history does not establish external delivery.
+- [ ] Keep overall production readiness false pending real host soak, backup/restore, provider continuity and broker-authoritative reconciliation.
