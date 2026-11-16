@@ -12,6 +12,11 @@ import stat
 import sys
 from types import SimpleNamespace
 
+# CPython isolated mode deliberately omits the script directory from sys.path.
+# Import only adjacent reviewed tools rather than user environment modules.
+TOOLS = Path(__file__).resolve().parent
+sys.path.insert(0, str(TOOLS))
+
 import paper_monitor
 import paper_monitor_events
 import paper_alert_queue
