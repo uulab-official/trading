@@ -1,3 +1,33 @@
+# Trading continuation handoff — v55 monitor freshness and unresolved-fault gate
+
+Baseline v54 feature head `2ac8cd4dc9033f03980f3b40d3bdf33a84a56fa0`
+had all nine required GitHub Actions workflows successful on review. No
+merge or live provider/broker activation was performed.
+
+This increment adds `tools/paper_monitor_gate.py`, its dedicated tests, a
+three-version CI job and [PAPER_MONITOR_GATE.md](PAPER_MONITOR_GATE.md). The
+tool reads the existing v52 monitor history and v53 operator ACK queue
+without creating a journal or modifying an account. It validates source
+history/queue consistency, current status, UTC-aware last observation age
+(default 120 seconds), refusal of future timestamps and outstanding
+unacknowledged degraded events. A recovered healthy snapshot does not hide
+a prior unreviewed failure. Expected exits: 0 valid healthy; 1 observed
+stale/degraded/unacknowledged fault; 2 unavailable/invalid; 4 uncertainty.
+
+The fixed v49 release inventory and original trading engine remain intact.
+No scheduler, notifier delivery, automatic service restart or broker
+reconciliation has been implemented. The operational next steps are
+target-host sustained soak, real external alert delivery and acknowledgement,
+external backup restoration, live-provider continuity, broker-authoritative
+order/position reconciliation and browser acceptance. Live production
+readiness remains false.
+
+The new focused tests must pass on the final published feature head and
+Python 3.10/3.12/3.13 CI before claiming validation. PR #1 should remain
+Draft, without main merge or real-order activation.
+
+---
+
 # Trading continuation handoff — v54 atomic monitor tick
 
 The v53 head `edf7c620475e34818768ff1326b513a49a70babd` passed all
