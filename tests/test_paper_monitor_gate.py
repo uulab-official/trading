@@ -138,6 +138,12 @@ class GateTests(unittest.TestCase):
                              "--max-age-seconds", invalid])
 
     def test_isolated_cli_cannot_claim_unverified_future_health(self):
+        # Keep the CLI test independent of the runner's exact day/time.
+        old_stamp = "2000-01-01T00:00:00+00:00"
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE state SET observed_at=?", (old_stamp,))
+            conn.execute("UPDATE events SET observed_at=?", (old_stamp,))
+            conn.execute("UPDATE alert_queue SET observed_at=?", (old_stamp,))
         process = subprocess.run([sys.executable, "-I", "-S", "-B",
                                   str(TOOLS / "paper_monitor_gate.py"),
                                   "--directory", str(self.folder)],
