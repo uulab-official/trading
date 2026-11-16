@@ -106,13 +106,24 @@ class GateTests(unittest.TestCase):
         with self.assertRaises(gate.queue.Refused):
             self.check()
 
-    def test_state_timestamp_must_match_last_event(self):
+    def test_latest_observation_may_follow_last_transition(self):
+        # A repeated unchanged healthy tick updates state time, but does not
+        # append an event. This is normal operation, not a corrupt journal.
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE state SET observed_at=?, observations=2 WHERE singleton=1",
+                         ((BASE + timedelta(seconds=10)).isoformat(),))
+        result = self.check(offset=60)
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(result["observations"], 2)
+        self.assertEqual(result["event_count"], 1)
+
+    def test_latest_observation_before_last_transition_refused(self):
         with sqlite3.connect(self.db) as conn:
             conn.execute("UPDATE state SET observed_at=? WHERE singleton=1",
-                         ((BASE + timedelta(seconds=10)).isoformat(),))
+                         ((BASE - timedelta(seconds=10)).isoformat(),))
         with self.assertRaises(gate.GateUnavailable) as caught:
             self.check(offset=60)
-        self.assertEqual(str(caught.exception), "head_timestamp_mismatch")
+        self.assertEqual(str(caught.exception), "head_timestamp_regression")
 
     def test_missing_database_refused_without_creating(self):
         self.db.unlink()
