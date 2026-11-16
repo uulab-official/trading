@@ -64,6 +64,8 @@ def _call(script, arguments, expected):
         "paper_alert_queue.py": "paper_alert_queue",
         "paper_monitor_gate.py": "paper_monitor_gate",
     }
+    if type(report) is not dict:
+        raise DrillError("output_invalid")
     boundaries = report.get("boundaries")
     safe_flags = {
         "paper_monitor_events.py": ("live_enabled", "orders_submitted",
