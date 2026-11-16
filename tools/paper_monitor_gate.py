@@ -68,9 +68,15 @@ def inspect(directory, max_age_seconds, *, now=None):
         tail = conn.execute(
             "SELECT observed_at FROM events ORDER BY sequence DESC LIMIT 1"
         ).fetchone()
-        if tail is None or tail[0] != row[2]:
-            raise GateUnavailable("head_timestamp_mismatch")
+        if tail is None:
+            raise GateUnavailable("missing_event_tail")
+        # State time is the latest *observation*. Event time is the latest
+        # *transition*. Repeated unchanged observations legitimately advance
+        # state time without appending another event.
         last = _stamp(row[2])
+        transition = _stamp(tail[0])
+        if last < transition:
+            raise GateUnavailable("head_timestamp_regression")
         age = (current - last).total_seconds()
         if age < 0:
             raise GateUnavailable("future_observation")
