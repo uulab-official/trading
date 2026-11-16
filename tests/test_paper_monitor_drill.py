@@ -133,6 +133,36 @@ class DrillTests(unittest.TestCase):
             with self.assertRaises(drill.DrillError):
                 drill._call("paper_monitor_gate.py", [], 0)
 
+    def test_require_rejects_boolean_as_integer_evidence(self):
+        for actual, expected in ((True, 1), (False, 0), (1, True),
+                                 (0, False), (1.0, 1), ("1", 1)):
+            with self.subTest(actual=actual, expected=expected):
+                with self.assertRaises(drill.DrillError):
+                    drill._require({"count": actual}, "count", expected)
+
+    def test_require_accepts_only_present_exact_typed_value(self):
+        drill._require({"count": 2}, "count", 2)
+        drill._require({"created": False}, "created", False)
+        for report in ({}, [], None, {"count": None}):
+            with self.subTest(report=report):
+                with self.assertRaises(drill.DrillError):
+                    drill._require(report, "count", 2)
+
+    def test_reasons_rejects_ambiguous_or_malformed_evidence(self):
+        drill._require_reasons(
+            {"reasons": ["current_degraded", "unacknowledged_fault"]},
+            ("current_degraded", "unacknowledged_fault"))
+        for reasons in (None, "current_degraded", {}, [1],
+                        ["current_degraded", "current_degraded"],
+                        ["current_degraded", True]):
+            with self.subTest(reasons=reasons):
+                with self.assertRaises(drill.DrillError):
+                    drill._require_reasons({"reasons": reasons}, ("current_degraded",))
+        with self.assertRaises(drill.DrillError):
+            drill._require_reasons(
+                {"reasons": ["unacknowledged_fault", "current_degraded"]},
+                ("unacknowledged_fault",), ("current_degraded",))
+
     def test_reject_excessive_child_output(self):
         fake = subprocess.CompletedProcess([], 0, b"x" * 16385, b"")
         with mock.patch.object(drill.subprocess, "run", return_value=fake):
