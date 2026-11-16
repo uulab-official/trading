@@ -174,3 +174,15 @@ operator-host acceptance checks, not claims of active monitoring or delivery.
 - [ ] Verify fault, changed-fault, and recovery transitions, concurrent monitor writes and queue sync/ack on the intended host, and restoration from an external backup containing SQLite WAL metadata.
 - [ ] Separately establish real notification delivery, authentication, human acknowledgement and escalation; the queue has no external notifier or customer messaging.
 - [ ] Keep PAPER-only and production-readiness false until long soak, host operating, real-provider data and authoritative broker risk/reconciliation gates are satisfied.
+
+## Atomic three-source monitoring tick (v54)
+
+Follow [PAPER_MONITOR_TICK.md](docs/PAPER_MONITOR_TICK.md). This is a single
+operator invocation, not an installed scheduler or external notifier.
+
+- [ ] Run `paper_monitor_tick.py` against the actual existing supervisor, its correct capture/account and the private journal location; record reviewed runtime and host context.
+- [ ] Prove an unchanged healthy observation only increments the observation counter, a degraded observation exits 1 and queues a new event, and recovery creates another event.
+- [ ] Cause a queue-consistency refusal during a new observation and verify no partially recorded event remains after the transaction rollback.
+- [ ] Confirm that all three absolute paths refer to the **same** configured service/capture/account pair. This check is not independently performed by the tick.
+- [ ] Independently test real host scheduling, actual alarm transport/receipt/ack, service stop/recovery and external backup restoration before any unattended-operation claim.
+- [ ] Keep live execution and production-ready status false; a passing local journal operation does not validate broker execution or financial risk control.
