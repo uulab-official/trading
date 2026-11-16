@@ -4,7 +4,7 @@ The prior v56 feature head `f739f6f6eedae280419ebadf977edd4209b2679d`
 had all eleven GitHub Actions workflow runs completed successfully
 before this increment. PR #1 remains Draft and main unmerged.
 
-This increment adds `tools/paper_monitor_drill.py`, seven focused tests,
+This increment adds `tools/paper_monitor_drill.py`, nine focused tests,
 [`paper-monitor-drill.yml`](../.github/workflows/paper-monitor-drill.yml)
 with CPython 3.10/3.12/3.13, and
 [PAPER_MONITOR_DRILL.md](PAPER_MONITOR_DRILL.md). The tool creates an ephemeral
@@ -31,7 +31,7 @@ execution, risk, account or broker code.
 
 Local standalone tests of an isolated implementation copy passed seven
 cases, with one full-integration case not runnable without the adjacent
-existing tools. The actual end-to-end integrated drill must pass in
+existing tools. The drill validates the child result source/schema/readiness boundaries and rejects forged successful responses. The actual end-to-end integrated drill must pass in
 the repository's GitHub Actions matrix before remote verification may
 be claimed. Do not misreport partial local tests as fully exercised
 end-to-end. The final published head's CI outcomes belong in the PR and
