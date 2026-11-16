@@ -1,3 +1,37 @@
+# Trading continuation handoff — v56 inactive systemd monitor timer
+
+This increment starts from v55 feature head
+`aa1dbebbfd5fad166c0c9e3307b49273ac213170`, on which all ten
+GitHub Actions workflows completed successfully. PR #1 was Draft and
+unmerged; main was unchanged.
+
+Added `tools/paper_monitor_systemd.py`, a side-effect-free renderer that
+outputs one Python `-I -S -B` systemd user oneshot service and its inactive
+periodic timer. It rejects shell/systemd-injection characters, `..` paths,
+unexpected tool identity and unsupported timing budgets. The generated unit
+has no shell, automatic restart or live broker interface; it restricts
+journal writes, local socket families, memory/tasks and runtime. There is
+no file publication, systemctl invocation, activation or notification
+delivery. A unit renderer does not prove the actual target host can run
+or isolate the service.
+
+Nine dedicated regression tests, three-version Linux CI with syntax
+verification, [PAPER_MONITOR_SYSTEMD.md](PAPER_MONITOR_SYSTEMD.md), and
+target-host operating checklist gates were added. Remote final-head CI
+must be read from actual GitHub jobs before asserting test success.
+The frozen PAPER strategy/economics, v49 release profile, configured
+service and account authority remain unchanged. No order, credential,
+provider request, server deployment, enabled timer, or external alert
+has been performed.
+
+Still required for production: installed host acceptance/rollback,
+long-duration real-provider continuity and resilience measurements,
+actual delivered alerts/ack/escalation, external media backup/restore,
+browser acceptance and broker-authoritative idempotent order/fill/
+position reconciliation. `is_production_ready()` stays false.
+
+---
+
 # Trading continuation handoff — v55 monitor freshness and unresolved-fault gate
 
 Baseline v54 feature head `2ac8cd4dc9033f03980f3b40d3bdf33a84a56fa0`
