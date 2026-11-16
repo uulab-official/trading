@@ -1,0 +1,47 @@
+name: PAPER Synthetic Monitor Recovery Drill
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Integration and bounded error regression tests
+        run: python -I -S -B -m unittest discover -s tests -p 'test_paper_monitor_drill.py' -v
+      - name: Independently exercise the synthetic incident recovery flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I -S -B tools/paper_monitor_drill.py > "$RUNNER_TEMP/paper-monitor-drill.json"
+          python - "$RUNNER_TEMP/paper-monitor-drill.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding='utf8') as stream:
+              report = json.load(stream)
+          assert report['exit_code'] == 0
+          assert report['status'] == 'verified_synthetic'
+          assert report['events_verified'] == 3
+          assert len(report['stages']) == 5
+          assert not any(report['boundaries'][key] for key in (
+              'provider_requests', 'broker_orders', 'service_activated',
+              'external_notification_delivered', 'production_ready'
+          ))
+          PY
