@@ -1,3 +1,24 @@
+# Trading continuation handoff — v58 strict monitoring drill child JSON
+
+Starting from the existing v57 synthetic monitoring acceptance drill, v58 makes the
+read-only subprocess result boundary reject duplicate JSON object keys (including
+nested objects) and Python's nonstandard NaN/Infinity numeric tokens. Previously
+the Python decoder could silently accept these ambiguous values. This change
+uses a strict object-pairs decoder and constant rejection before validating the
+existing exit-code, source, schema and production-readiness contracts.
+
+Three deterministic regression tests exercise top-level duplicate keys, nested
+duplicate keys, and non-finite values. The underlying PAPER execution engine,
+capture, account, monitor journal, alert queue and gate semantics are not changed.
+No credentials, provider requests, notifications, services, real orders or deploy
+actions are performed. The pull request stays Draft and main stays unmerged.
+
+**Verification boundary:** Check the final published commit and actual remote CI
+results separately. A green synthetic drill is not host, external alert delivery,
+financial, or live production acceptance. Production readiness remains false.
+
+---
+
 # Trading continuation handoff — v57 synthetic monitoring recovery drill
 
 The prior v56 feature head `f739f6f6eedae280419ebadf977edd4209b2679d`
