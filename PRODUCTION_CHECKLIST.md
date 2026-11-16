@@ -199,3 +199,16 @@ configured by this implementation.
 - [ ] Prove missing/inconsistent databases, unsuitable private directory permissions, host clock rollback and failed SQLite reads cannot create a false healthy result.
 - [ ] Record actual externally delivered alerts and their independent acknowledgement and escalation. A local ACK history does not establish external delivery.
 - [ ] Keep overall production readiness false pending real host soak, backup/restore, provider continuity and broker-authoritative reconciliation.
+
+## Inactive systemd monitoring timer review (v56)
+
+See [PAPER_MONITOR_SYSTEMD.md](docs/PAPER_MONITOR_SYSTEMD.md). The v56
+renderer returns **unit text only**; source/CI tests do not install, enable
+or activate any systemd timer.
+
+- [ ] On the intended operator host, inspect the exact Python interpreter, reviewed v54 monitor tool and service/capture/account/journal paths; no symlink or path migration assumptions.
+- [ ] Render and independently review the systemd user service/timer, then run `systemd-analyze verify` on the actual intended unit files and test the host's supported user-manager security directives.
+- [ ] Confirm the monitoring interval fits the actual three native probe timeouts and operator resource budgets; an unhealthy tick exits nonzero without restarting workers.
+- [ ] If a timer is later manually installed, verify systemd ownership, failures, missed ticks, monitor gate staleness, clock shifts, boot/logout behavior and rollback/disable on the actual host.
+- [ ] Implement and independently verify delivered alert transport, acknowledgement, escalation and external backup restoration. A rendered timer is not operational monitoring acceptance.
+- [ ] Keep broker execution disabled and production readiness false until provider, host and brokerage gates are independently satisfied.
