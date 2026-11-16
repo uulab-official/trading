@@ -12,12 +12,15 @@ The v52 `record_in_transaction` helper is an extraction of its existing
 record calculation; its ordinary `_record` still creates its own transaction.
 A failed queue sync now rolls back the new observation in the tick path.
 
-Added [PAPER_MONITOR_TICK.md](PAPER_MONITOR_TICK.md), ten focused tests and
+Added [PAPER_MONITOR_TICK.md](PAPER_MONITOR_TICK.md), twelve focused tests and
 a CPython 3.10/3.12/3.13 Linux CI matrix. Tests cover initial healthy record,
 deduplication, degraded exit 1, recovery event, queue-conflict rollback, invalid
 source observations, CLI refusal and a real offline subprocess run against
 three nonexistent native stores. The latter must persist a degraded event and
-avoid duplicate events on a repeat invocation. A passing tick does not independently
+avoid duplicate events on a repeat invocation. A running supervisor is only
+aggregated healthy if its owner-only immutable service manifest binds to the
+same private physical capture and account paths; mismatches are recorded as
+a degraded `pair_mismatch` instead of a false-healthy observation. A passing tick does not independently
 prove the three provided paths belong to the same configured pair; the operator
 must confirm the binding. External notification delivery, scheduling, provider
 soak, backup restoration and broker-authoritative reconciliation remain
