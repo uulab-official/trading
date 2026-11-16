@@ -25,7 +25,8 @@ exchange prices: the original three native checks provide their own meanings.
 A healthy gate requires ALL of the following:
 
 - A readable, owner-private existing SQLite journal with the original
-  v52 history fully synchronized into the v53 queue.
+  v52 history fully synchronized into the v53 queue, including agreement
+  between the state timestamp and the final retained event timestamp.
 - A current `healthy` three-source observation, with a timestamp no more
   than the configured age threshold in the past and not in the future.
 - **Zero unacknowledged degraded events**, including faults followed by a
