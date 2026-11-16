@@ -64,6 +64,33 @@ class DrillTests(unittest.TestCase):
             with self.assertRaises(drill.DrillError):
                 drill._call("paper_monitor_events.py", [], 0)
 
+    def test_reject_duplicate_child_json_keys(self):
+        raw = (b'{"schema_version":1,"source":"paper_monitor_events",'
+               b'"exit_code":0,"exit_code":0,'
+               b'"boundaries":{"production_ready":false}}')
+        fake = subprocess.CompletedProcess([], 0, raw, b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_nested_duplicate_child_json_keys(self):
+        raw = (b'{"schema_version":1,"source":"paper_monitor_events",'
+               b'"exit_code":0,"boundaries":{'
+               b'"production_ready":false,"production_ready":false}}')
+        fake = subprocess.CompletedProcess([], 0, raw, b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_nonfinite_child_json_number(self):
+        raw = (b'{"schema_version":1,"source":"paper_monitor_events",'
+               b'"exit_code":0,"unexpected":NaN,'
+               b'"boundaries":{"production_ready":false}}')
+        fake = subprocess.CompletedProcess([], 0, raw, b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
     def test_reject_excessive_child_output(self):
         fake = subprocess.CompletedProcess([], 0, b"x" * 16385, b"")
         with mock.patch.object(drill.subprocess, "run", return_value=fake):
