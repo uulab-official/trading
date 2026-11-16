@@ -120,8 +120,21 @@ def _write_snapshot(root, name, report):
 
 
 def _require(report, field, value):
-    if report.get(field) != value:
+    # Equality alone admits True == 1 and False == 0 in Python.
+    # Evidence fields must preserve both the expected type and value.
+    if (type(report) is not dict or field not in report
+            or type(report[field]) is not type(value)
+            or report[field] != value):
         raise DrillError("unexpected_state")
+
+
+def _require_reasons(report, required, forbidden=()):
+    reasons = report.get("reasons") if type(report) is dict else None
+    if (type(reasons) is not list or any(type(item) is not str for item in reasons)
+            or len(reasons) != len(set(reasons))
+            or not set(required).issubset(reasons)
+            or any(reason in reasons for reason in forbidden)):
+        raise DrillError("unexpected_reasons")
 
 
 def run():
@@ -156,17 +169,14 @@ def run():
         _require(gate(2), "status", "unavailable")
         _require(sync(), "pending", 2)
         degraded = gate(1)
-        if not {"current_degraded", "unacknowledged_fault"}.issubset(
-                set(degraded.get("reasons", []))):
-            raise DrillError("fault_missing")
+        _require_reasons(degraded, ("current_degraded", "unacknowledged_fault"))
         stages.append("fault_detected")
 
         _require(record("recovered.json", _snapshot()), "event_sequence", 3)
         _require(sync(), "pending", 3)
         unresolved = gate(1)
-        if ("unacknowledged_fault" not in unresolved.get("reasons", [])
-                or "current_degraded" in unresolved.get("reasons", [])):
-            raise DrillError("recovery_boundary_broken")
+        _require_reasons(unresolved, ("unacknowledged_fault",),
+                         ("current_degraded",))
         stages.append("recovery_unacknowledged")
 
         _require(_call("paper_alert_queue.py",
