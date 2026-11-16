@@ -128,6 +128,35 @@ class QueueTests(unittest.TestCase):
         self.assertFalse(boundaries['broker_orders'])
         self.assertFalse(boundaries['external_delivery'])
 
+    def test_real_v52_monitor_journal_roundtrip(self):
+        journal = self.folder.parent / 'v52-private'
+        journal.mkdir(mode=0o700)
+        observed = self.folder.parent / 'observation.json'
+        snapshot = {
+            'schema_version': 1, 'source': 'paper_monitor',
+            'status': 'attention_required', 'exit_code': 1,
+            'checks': {
+                'service': {'status': 'running', 'exit_code': 0, 'healthy': True},
+                'capture': {'status': 'stale', 'exit_code': 1, 'healthy': False},
+                'account': {'status': 'current', 'exit_code': 0, 'healthy': True},
+            },
+        }
+        observed.write_text(json.dumps(snapshot))
+        observed.chmod(0o600)
+        v52 = SCRIPT.parent / 'paper_monitor_events.py'
+        record = subprocess.run(
+            [sys.executable, '-I', '-S', '-B', str(v52), 'record',
+             '--directory', str(journal), '--input', str(observed)],
+            capture_output=True, text=True, timeout=8)
+        self.assertEqual(record.returncode, 0, record.stdout + record.stderr)
+        self.folder = journal
+        code, status = self.cli('sync')
+        self.assertEqual(code, 0, status)
+        self.assertEqual(status['pending'], 1)
+        code, ack = self.cli('ack', '--sequence', '1',
+                             '--reason', 'operator reviewed incident')
+        self.assertEqual(code, 0, ack)
+
     def test_special_character_directory(self):
         special = self.folder.parent / 'private?mode=memory'
         special.mkdir(mode=0o700)
