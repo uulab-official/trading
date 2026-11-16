@@ -64,6 +64,21 @@ def _call(script, arguments, expected):
         "paper_alert_queue.py": "paper_alert_queue",
         "paper_monitor_gate.py": "paper_monitor_gate",
     }
+    boundaries = report.get("boundaries")
+    safe_flags = {
+        "paper_monitor_events.py": ("live_enabled", "orders_submitted",
+                                    "notification_delivered", "production_ready"),
+        "paper_alert_queue.py": ("live_enabled", "external_delivery",
+                                 "broker_orders", "production_ready"),
+        "paper_monitor_gate.py": ("external_notification_delivered",
+                                  "live_execution", "production_ready"),
+    }
+    if (type(boundaries) is not dict
+            or any(boundaries.get(flag) is not False
+                   for flag in safe_flags[script])
+            or (script == "paper_monitor_gate.py"
+                and boundaries.get("read_only") is not True)):
+        raise DrillError("unsafe_boundary")
     if (type(report) is not dict or type(report.get("exit_code")) is not int
             or report["exit_code"] != result.returncode or result.returncode != expected
             or report.get("source") != sources.get(script)
