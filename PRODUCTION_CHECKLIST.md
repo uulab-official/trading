@@ -183,6 +183,6 @@ operator invocation, not an installed scheduler or external notifier.
 - [ ] Run `paper_monitor_tick.py` against the actual existing supervisor, its correct capture/account and the private journal location; record reviewed runtime and host context.
 - [ ] Prove an unchanged healthy observation only increments the observation counter, a degraded observation exits 1 and queues a new event, and recovery creates another event.
 - [ ] Cause a queue-consistency refusal during a new observation and verify no partially recorded event remains after the transaction rollback.
-- [ ] Confirm that all three absolute paths refer to the **same** configured service/capture/account pair. This check is not independently performed by the tick.
+- [ ] Confirm that all three absolute paths refer to the **same** configured service/capture/account pair. The tick now refuses a healthy aggregate if private service-manifest path bindings differ, but this is not a substitute for a stopped native full binding audit.
 - [ ] Independently test real host scheduling, actual alarm transport/receipt/ack, service stop/recovery and external backup restoration before any unattended-operation claim.
 - [ ] Keep live execution and production-ready status false; a passing local journal operation does not validate broker execution or financial risk control.
