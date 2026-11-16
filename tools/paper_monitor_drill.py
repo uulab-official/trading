@@ -105,6 +105,10 @@ def run():
         _require(record("initial.json", _snapshot()), "event_sequence", 1)
         _require(sync(), "pending", 1)
         _require(gate(0), "status", "healthy")
+        repeated = record("healthy-repeated.json", _snapshot())
+        _require(repeated, "event_sequence", 1)
+        _require(repeated, "event_created", False)
+        _require(gate(0), "status", "healthy")
         stages.append("healthy_observed")
 
         _require(record("fault.json", _snapshot(True)), "event_sequence", 2)
@@ -139,7 +143,7 @@ def run():
         saved = _call("paper_monitor_events.py",
                       ["check", "--directory", str(root)], 0)
         _require(saved, "event_count", 3)
-        _require(saved, "observation_count", 3)
+        _require(saved, "observation_count", 4)
         stages.append("journal_consistent")
 
     return {
