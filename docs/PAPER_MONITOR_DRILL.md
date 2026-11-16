@@ -32,7 +32,10 @@ is deleted after execution, so store external CI logs separately as evidence.
 ## Expected scenario
 
 1. Record a synthetic **healthy** three-source observation. Synchronize
-   the local alert queue and require the freshness gate to pass.
+   the local alert queue and require the freshness gate to pass. Record
+   the **same healthy observation again**, without adding a transition,
+   and require the gate to remain healthy. This protects against confusing
+   the most recent observation time with the last state-change time.
 2. Record a synthetic capture **degraded** observation. Before syncing
    the queue, require the gate to refuse an incomplete history. After
    sync, require a degraded gate result containing both current fault and
@@ -43,7 +46,8 @@ is deleted after execution, so store external CI logs separately as evidence.
 4. Explicitly ACK exactly the synthetic fault sequence with a bounded
    reason. The gate must now pass; duplicate ACK must be refused.
 5. Read the original journal and verify exactly **three distinct events**
-   and three observations. Return a structured list of five verified stages.
+   and **four observations** (including the unchanged healthy repeat).
+   Return a structured list of five verified stages.
 
 The drill validates the **interaction** between existing persisted-state
 tools, rather than only testing a mock implementation. It does not exercise
@@ -66,3 +70,13 @@ backup restoration and verified rollback. The live trading path separately
 requires broker-authoritative order/fill/position reconciliation and
 risk controls. Until independently demonstrated, keep
 `production_ready=false` and do not activate live orders.
+
+## v55 historical timestamp regression correction
+
+The saved `state.observed_at` advances on every observation, even when its
+status does not change. The latest `events.observed_at` advances only when
+the status/signature changes. They must **not** be required to match.
+The fixed v55 gate requires the latest observation to be at or after the
+latest transition and checks its own age against the wall clock. A saved
+observation earlier than the last transition is refused. The v57 synthetic
+drill exercises a duplicate healthy observation to prevent a regression.
