@@ -212,3 +212,16 @@ or activate any systemd timer.
 - [ ] If a timer is later manually installed, verify systemd ownership, failures, missed ticks, monitor gate staleness, clock shifts, boot/logout behavior and rollback/disable on the actual host.
 - [ ] Implement and independently verify delivered alert transport, acknowledgement, escalation and external backup restoration. A rendered timer is not operational monitoring acceptance.
 - [ ] Keep broker execution disabled and production readiness false until provider, host and brokerage gates are independently satisfied.
+
+## Offline monitoring incident and recovery acceptance (v57)
+
+See [PAPER_MONITOR_DRILL.md](docs/PAPER_MONITOR_DRILL.md). This is **synthetic**
+contract validation against the actual v52/v53/v55 implementation and is
+not evidence of delivered alerts or production host availability.
+
+- [ ] Run `python3 -I -S -B tools/paper_monitor_drill.py` in the reviewed checkout; require a zero exit, `verified_synthetic`, exactly three transition events and five completed stages.
+- [ ] Confirm a repeated healthy observation increments count without creating a new transition and remains fresh. The v55 gate must not demand identical latest-observation and last-transition timestamps.
+- [ ] Confirm the gate refuses the unsynchronized queue after a new fault, reports an unacknowledged fault after recovery, and returns healthy only after the explicit simulated ACK.
+- [ ] Verify the duplicate ACK is refused and no real account, capture, broker, provider, external alert, systemd timer or public network resource is used.
+- [ ] On the **actual operating host**, independently repeat the corresponding real incident, stale tick, alert delivery/receipt, backup restore and rollback drills before accepting unattended PAPER operations.
+- [ ] Continue refusing live trading until broker-authoritative order/fill/balance reconciliation and real operational risk controls are independently verified.
