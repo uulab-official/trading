@@ -91,6 +91,48 @@ class DrillTests(unittest.TestCase):
             with self.assertRaises(drill.DrillError):
                 drill._call("paper_monitor_events.py", [], 0)
 
+    def test_reject_unsafe_child_execution_flags(self):
+        cases = [
+            ("paper_monitor_events.py", "paper_monitor_events",
+             {"live_enabled": True, "orders_submitted": False,
+              "notification_delivered": False, "production_ready": False}),
+            ("paper_alert_queue.py", "paper_alert_queue",
+             {"live_enabled": False, "external_delivery": True,
+              "broker_orders": False, "production_ready": False}),
+            ("paper_monitor_gate.py", "paper_monitor_gate",
+             {"read_only": True, "external_notification_delivered": False,
+              "live_execution": True, "production_ready": False}),
+        ]
+        for script, source, boundaries in cases:
+            with self.subTest(script=script):
+                fake = subprocess.CompletedProcess(
+                    [], 0, json.dumps({"schema_version": 1, "source": source,
+                                      "exit_code": 0, "boundaries": boundaries}).encode(), b"")
+                with mock.patch.object(drill.subprocess, "run", return_value=fake):
+                    with self.assertRaises(drill.DrillError):
+                        drill._call(script, [], 0)
+
+    def test_reject_missing_safety_flag_even_if_production_false(self):
+        fake = subprocess.CompletedProcess(
+            [], 0, json.dumps({"schema_version": 1, "source": "paper_monitor_events",
+                               "exit_code": 0, "boundaries": {
+                                   "production_ready": False}}).encode(), b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_gate_without_read_only_contract(self):
+        fake = subprocess.CompletedProcess(
+            [], 0, json.dumps({"schema_version": 1, "source": "paper_monitor_gate",
+                               "exit_code": 0, "boundaries": {
+                                   "read_only": False,
+                                   "external_notification_delivered": False,
+                                   "live_execution": False,
+                                   "production_ready": False}}).encode(), b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_gate.py", [], 0)
+
     def test_reject_excessive_child_output(self):
         fake = subprocess.CompletedProcess([], 0, b"x" * 16385, b"")
         with mock.patch.object(drill.subprocess, "run", return_value=fake):
