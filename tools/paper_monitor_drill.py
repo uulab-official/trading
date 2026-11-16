@@ -1,0 +1,184 @@
+"""Offline acceptance drill for PAPER monitor history, queue and freshness gate.
+
+Uses only freshly generated synthetic status files and an ephemeral journal.
+Never accesses accounts, providers, broker APIs or external notification systems.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+import tempfile
+
+TOOLS = Path(__file__).resolve().parent
+MAX_OUTPUT = 16384
+
+
+class DrillError(RuntimeError):
+    pass
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise DrillError("invalid_arguments")
+
+
+def _tools_present():
+    for name in ("paper_monitor_events.py", "paper_alert_queue.py", "paper_monitor_gate.py"):
+        path = TOOLS / name
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            raise DrillError("tool_unavailable")
+
+
+def _call(script, arguments, expected):
+    command = [sys.executable, "-I", "-S", "-B", str(TOOLS / script), *arguments]
+    try:
+        result = subprocess.run(command, check=False, capture_output=True, timeout=12)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise DrillError("tool_unavailable") from exc
+    if len(result.stdout) > MAX_OUTPUT or len(result.stderr) > 4096:
+        raise DrillError("output_unbounded")
+    try:
+        report = json.loads(result.stdout)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise DrillError("output_invalid") from exc
+    if (type(report) is not dict or type(report.get("exit_code")) is not int
+            or report["exit_code"] != result.returncode or result.returncode != expected):
+        raise DrillError("result_unexpected")
+    return report
+
+
+def _snapshot(degraded=False):
+    return {
+        "schema_version": 1, "source": "paper_monitor",
+        "status": "attention_required" if degraded else "healthy",
+        "exit_code": 1 if degraded else 0,
+        "checks": {
+            "service": {"status": "running", "healthy": True, "exit_code": 0},
+            "capture": {"status": "stale" if degraded else "current",
+                        "healthy": not degraded, "exit_code": 1 if degraded else 0},
+            "account": {"status": "current", "healthy": True, "exit_code": 0},
+        },
+    }
+
+
+def _write_snapshot(root, name, report):
+    target = root / name
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        raw = json.dumps(report, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        if os.write(fd, raw) != len(raw):
+            raise DrillError("write_unconfirmed")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return target
+
+
+def _require(report, field, value):
+    if report.get(field) != value:
+        raise DrillError("unexpected_state")
+
+
+def run():
+    _tools_present()
+    stages = []
+    with tempfile.TemporaryDirectory(prefix="paper-monitor-drill-") as tmp:
+        root = Path(tmp) / "history"
+        root.mkdir(mode=0o700)
+        gate_args = ["--directory", str(root), "--max-age-seconds", "120"]
+
+        def record(filename, report):
+            path = _write_snapshot(Path(tmp), filename, report)
+            return _call("paper_monitor_events.py",
+                         ["record", "--directory", str(root), "--input", str(path)], 0)
+
+        def sync():
+            return _call("paper_alert_queue.py", ["sync", "--directory", str(root)], 0)
+
+        def gate(code):
+            return _call("paper_monitor_gate.py", gate_args, code)
+
+        _require(record("initial.json", _snapshot()), "event_sequence", 1)
+        _require(sync(), "pending", 1)
+        _require(gate(0), "status", "healthy")
+        stages.append("healthy_observed")
+
+        _require(record("fault.json", _snapshot(True)), "event_sequence", 2)
+        _require(gate(2), "status", "unavailable")
+        _require(sync(), "pending", 2)
+        degraded = gate(1)
+        if not {"current_degraded", "unacknowledged_fault"}.issubset(
+                set(degraded.get("reasons", []))):
+            raise DrillError("fault_missing")
+        stages.append("fault_detected")
+
+        _require(record("recovered.json", _snapshot()), "event_sequence", 3)
+        _require(sync(), "pending", 3)
+        unresolved = gate(1)
+        if ("unacknowledged_fault" not in unresolved.get("reasons", [])
+                or "current_degraded" in unresolved.get("reasons", [])):
+            raise DrillError("recovery_boundary_broken")
+        stages.append("recovery_unacknowledged")
+
+        _require(_call("paper_alert_queue.py",
+                       ["ack", "--directory", str(root), "--sequence", "2",
+                        "--reason", "synthetic incident reviewed"], 0),
+                 "acknowledged_sequence", 2)
+        healthy = gate(0)
+        _require(healthy, "unacknowledged_faults", 0)
+        _require(healthy, "pending_acknowledgements", 2)
+        _call("paper_alert_queue.py",
+              ["ack", "--directory", str(root), "--sequence", "2",
+               "--reason", "synthetic incident reviewed"], 2)
+        stages.append("operator_acknowledged")
+
+        saved = _call("paper_monitor_events.py",
+                      ["check", "--directory", str(root)], 0)
+        _require(saved, "event_count", 3)
+        _require(saved, "observation_count", 3)
+        stages.append("journal_consistent")
+
+    return {
+        "schema_version": 1, "source": "paper_monitor_drill",
+        "status": "verified_synthetic", "exit_code": 0,
+        "stages": stages, "events_verified": 3,
+        "boundaries": {
+            "synthetic_only": True, "provider_requests": False,
+            "broker_orders": False, "service_activated": False,
+            "external_notification_delivered": False, "production_ready": False,
+        },
+    }
+
+
+def main(argv=None):
+    parser = Parser(add_help=False, allow_abbrev=False)
+    try:
+        parser.parse_args(argv)
+        result = run()
+        code = 0
+    except (DrillError, ValueError, OSError):
+        code = 2
+        result = {"schema_version": 1, "source": "paper_monitor_drill",
+                  "status": "unavailable", "exit_code": code}
+    except Exception:
+        code = 4
+        result = {"schema_version": 1, "source": "paper_monitor_drill",
+                  "status": "uncertain", "exit_code": code}
+    result.setdefault("boundaries", {
+        "synthetic_only": True, "provider_requests": False,
+        "broker_orders": False, "service_activated": False,
+        "external_notification_delivered": False, "production_ready": False,
+    })
+    try:
+        print(json.dumps(result, sort_keys=True, allow_nan=False), flush=True)
+    except OSError:
+        return 4
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
