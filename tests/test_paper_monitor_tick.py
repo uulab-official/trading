@@ -106,6 +106,27 @@ class TickTests(unittest.TestCase):
                         "--capture", "/private/capture",
                         "--account", "/private/account", "--directory", "relative"])
 
+    def test_real_native_missing_store_probes_record_degraded(self):
+        import subprocess
+        script = TOOLS / "paper_monitor_tick.py"
+        missing = self.root.parent / "missing-store"
+        command = [
+            sys.executable, "-I", "-S", "-B", str(script),
+            "--service", str(missing / "service"),
+            "--capture", str(missing / "capture"),
+            "--account", str(missing / "account"),
+            "--directory", str(self.root), "--timeout-seconds", "3",
+        ]
+        first = subprocess.run(command, capture_output=True, text=True, timeout=25)
+        self.assertEqual(first.returncode, 1, first.stdout + first.stderr)
+        observed = json.loads(first.stdout)
+        self.assertEqual(observed["status"], "attention_required")
+        self.assertEqual(observed["pending_acknowledgements"], 1)
+        self.assertFalse(observed["boundaries"]["external_notification_delivered"])
+        second = subprocess.run(command, capture_output=True, text=True, timeout=25)
+        self.assertEqual(second.returncode, 1, second.stdout + second.stderr)
+        self.assertFalse(json.loads(second.stdout)["event_created"])
+
     def test_main_no_activation_on_invalid_arguments(self):
         with mock.patch.object(tick.paper_monitor, "inspect") as probe, \
              mock.patch("builtins.print") as emit:
