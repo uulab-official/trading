@@ -1,3 +1,13 @@
+# Trading continuation — v59 exact-type recovery evidence (2026-11-16)
+
+Building on v58, this increment hardens the synthetic PAPER monitoring drill's acceptance assertions. Python equality permits `True == 1`, `False == 0`, and `1.0 == 1`, so event sequences, pending acknowledgement counts and state flags previously could pass if a child returned an unexpected but equal-valued type. `_require` now requires an exact built-in type, explicit field presence, and matching value. The fault/recovery reason arrays are required to be lists of unique strings rather than an arbitrary iterable; missing or forbidden reasons fail closed.
+
+Three focused regression tests cover boolean/numeric confusion, missing/wrongly typed evidence, and malformed/duplicated/forbidden reason sets. They are included in the existing 3-version synthetic-monitor workflow. No execution strategy, broker connector, credential, provider, account state, external alert service or host is touched; this is a verification-boundary change. 
+
+**Release gate:** New-head GitHub Actions workflows were queued on commit `909978233f1a17c5add9e92d05435011798bcd62` at submission. Do not record them as passed until actually completed. Real host sustained PAPER soak, operator-received alert delivery/ACK, backup restore, browser acceptance, and broker-authoritative reconciliation remain outstanding. Keep PR #1 Draft, main unchanged, and `production_ready=false`; no real trading authorization.
+
+---
+
 # Trading continuation — v58 strict child-result safety (2026-11-16)
 
 Starting from the v57 synthetic incident/recovery drill on Draft PR #1, this continuation hardens the *verification boundary* without touching execution modules, PAPER account authority, strategy, release profile, live credentials, broker interfaces, or any running host.
