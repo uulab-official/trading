@@ -1,3 +1,53 @@
+# Trading continuation handoff — v57 synthetic monitoring recovery drill
+
+The prior v56 feature head `f739f6f6eedae280419ebadf977edd4209b2679d`
+had all eleven GitHub Actions workflow runs completed successfully
+before this increment. PR #1 remains Draft and main unmerged.
+
+This increment adds `tools/paper_monitor_drill.py`, seven focused tests,
+[`paper-monitor-drill.yml`](../.github/workflows/paper-monitor-drill.yml)
+with CPython 3.10/3.12/3.13, and
+[PAPER_MONITOR_DRILL.md](PAPER_MONITOR_DRILL.md). The tool creates an ephemeral
+owner-private synthetic monitoring history and calls the existing v52 event
+recorder, v53 ACK queue and v55 gate using isolated subprocesses. It verifies
+healthy, repeated unchanged healthy, unsynchronized fault refusal, degraded
+fault, healthy recovery with unacknowledged older fault, explicit ACK,
+duplicate-ACK refusal and final retained journal consistency. It never
+touches an existing trading store, provider, broker, service or external
+notification destination. Five validated stages represent three distinct
+events and four observations.
+
+Critical correctness correction: v55 incorrectly required
+`state.observed_at == latest events.observed_at`; the former is advanced
+by *every* observation while the latter is advanced only on a changed
+state/signature. This could turn a normal repeated healthy tick into an
+unavailable gate. The v55 gate now requires
+`state.observed_at >= latest events.observed_at` after timezone-aware
+parsing. Two focused cases protect valid repeated observations and a
+regressed state timestamp. The synthetic drill also makes a repeated
+healthy observation and requires the gate to remain healthy. This
+correction changes only read-only monitoring evaluation, not trading
+execution, risk, account or broker code.
+
+Local standalone tests of an isolated implementation copy passed seven
+cases, with one full-integration case not runnable without the adjacent
+existing tools. The actual end-to-end integrated drill must pass in
+the repository's GitHub Actions matrix before remote verification may
+be claimed. Do not misreport partial local tests as fully exercised
+end-to-end. The final published head's CI outcomes belong in the PR and
+operator delivery receipt after independent readback.
+
+Remaining production requirements: actual Linux host service deployment
+and rollback, prolonged real-provider/network/clock/disk resilience
+testing, reliable external alert delivery/acknowledgement, external
+backup restoration, maximum-volume replay measurements, authenticated
+browser UI checks, and broker-authoritative ambiguous-order/fill/position
+reconciliation. `is_production_ready()` remains false. Do not enable
+real orders, timers, external notifications or merge into main as part
+of this increment.
+
+---
+
 # Trading continuation handoff — v56 inactive systemd monitor timer
 
 This increment starts from v55 feature head
