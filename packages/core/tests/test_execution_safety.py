@@ -107,13 +107,27 @@ class PaperExchangeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order.filled, Decimal("1"))
         self.assertEqual(order.remaining, Decimal("0"))
 
-    async def test_order_manager_accepts_nullable_mocked_live_response(self):
+    async def test_order_manager_preserves_nullable_response_as_unknown(self):
+        from trading_core.order_manager import OrderOutcomeUnknown, ReconciliationRequired
+
         adapter = SimpleNamespace(create_order=AsyncMock(return_value={"id": "mock-accepted", "status": None, "filled": None}))
         manager = OrderManager(adapter)
-        order = await manager.place_order("BTC/USDT", OrderSide.BUY, OrderType.MARKET, Decimal("1"))
-        self.assertEqual(order.status, OrderStatus.OPEN)
+        # An identifier without status/fill evidence is not an acknowledgement.
+        with self.assertRaises(OrderOutcomeUnknown):
+            await manager.place_order("BTC/USDT", OrderSide.BUY, OrderType.MARKET,
+                                      Decimal("1"), client_order_id="nullable-response")
+        order = await manager.get_order("nullable-response")
+        self.assertEqual(order.status, OrderStatus.UNKNOWN)
         self.assertEqual(order.filled, Decimal("0"))
         self.assertEqual(order.remaining, Decimal("1"))
+        self.assertIsNone(order.exchange_order_id)
+        repeated = await manager.place_order("BTC/USDT", OrderSide.BUY, OrderType.MARKET,
+                                             Decimal("1"), client_order_id="nullable-response")
+        self.assertEqual(repeated.status, OrderStatus.UNKNOWN)
+        with self.assertRaises(ReconciliationRequired):
+            await manager.place_order("BTC/USDT", OrderSide.BUY, OrderType.MARKET,
+                                      Decimal("1"), client_order_id="another-order")
+        adapter.create_order.assert_awaited_once()
 
     async def test_duplicate_local_order_is_not_charged_twice(self):
         first = await self.exchange.create_order("BTC/USDT", "market", "buy", Decimal("1"), params={"clientOrderId": "repeat"})

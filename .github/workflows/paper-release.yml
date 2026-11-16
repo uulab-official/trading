@@ -1,0 +1,56 @@
+name: Verified PAPER Runtime
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12', '3.13']
+    env:
+      PAPER_SERVICE_REQUIRE_SOCKET: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify release boundaries and extracted native runtime without installed packages
+        run: python -I -S -B -m unittest discover -s tests -p 'test_paper_release*.py' -v
+      - name: Build reproducibly and verify a separate release tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/paper-runtime-output"
+          release_dir="$RUNNER_TEMP/paper-runtime-extracted"
+          mkdir -m 700 "$artifact_dir"
+          python -I -S -B tools/paper_release.py build --output "$artifact_dir/paper-runtime.tar"
+          python -I -S -B tools/paper_release.py build --output "$artifact_dir/repeated.tar"
+          cmp "$artifact_dir/paper-runtime.tar" "$artifact_dir/repeated.tar"
+          expected_sha="$(sha256sum "$artifact_dir/paper-runtime.tar" | cut -d ' ' -f 1)"
+          python -I -S -B tools/paper_release.py check "$artifact_dir/paper-runtime.tar" --sha256 "$expected_sha"
+          python -I -S -B tools/paper_release.py extract "$artifact_dir/paper-runtime.tar" --sha256 "$expected_sha" --directory "$release_dir"
+          python -I -S -B "$release_dir/tools/paper_backup_drill.py" --directory "$RUNNER_TEMP/paper-runtime-drill"
+          python -I -S -B tools/paper_release.py verify "$release_dir" --sha256 "$expected_sha"
+          (cd "$artifact_dir" && sha256sum paper-runtime.tar > paper-runtime.sha256)
+      - name: Retain verified source archive and its external digest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: paper-runtime-python-${{ matrix.python-version }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/paper-runtime-output/paper-runtime.tar
+            ${{ runner.temp }}/paper-runtime-output/paper-runtime.sha256
+          if-no-files-found: error
+          retention-days: 7

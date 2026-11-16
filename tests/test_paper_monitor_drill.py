@@ -1,0 +1,197 @@
+"""Synthetic PAPER monitoring drill must remain isolated, deterministic and honest."""
+import importlib.util
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+TOOL = Path(__file__).resolve().parents[1] / "tools" / "paper_monitor_drill.py"
+SPEC = importlib.util.spec_from_file_location("paper_monitor_drill", TOOL)
+drill = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(drill)
+
+
+class DrillTests(unittest.TestCase):
+    def test_synthetic_snapshots_consistent(self):
+        normal = drill._snapshot()
+        failure = drill._snapshot(True)
+        self.assertEqual(normal["status"], "healthy")
+        self.assertEqual(normal["exit_code"], 0)
+        self.assertEqual(failure["status"], "attention_required")
+        self.assertEqual(failure["exit_code"], 1)
+        self.assertFalse(failure["checks"]["capture"]["healthy"])
+
+    def test_new_private_file_never_overwrites(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            created = drill._write_snapshot(root, "capture.json", drill._snapshot())
+            self.assertEqual(created.stat().st_mode & 0o777, 0o600)
+            with self.assertRaises(FileExistsError):
+                drill._write_snapshot(root, "capture.json", drill._snapshot(True))
+
+    def test_reject_invalid_child_json(self):
+        fake = subprocess.CompletedProcess([], 0, b"invalid", b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_unexpected_child_exit(self):
+        fake = subprocess.CompletedProcess([], 1, b'{"exit_code":1}', b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_wrong_source_even_with_success_exit(self):
+        bad = {
+            "schema_version": 1, "source": "unrelated_tool", "exit_code": 0,
+            "boundaries": {"production_ready": False},
+        }
+        fake = subprocess.CompletedProcess([], 0, json.dumps(bad).encode(), b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_false_ready_result(self):
+        bad = {
+            "schema_version": 1, "source": "paper_monitor_events", "exit_code": 0,
+            "boundaries": {"production_ready": True},
+        }
+        fake = subprocess.CompletedProcess([], 0, json.dumps(bad).encode(), b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_duplicate_child_json_keys(self):
+        raw = (b'{"schema_version":1,"source":"paper_monitor_events",'
+               b'"exit_code":0,"exit_code":0,'
+               b'"boundaries":{"production_ready":false}}')
+        fake = subprocess.CompletedProcess([], 0, raw, b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_nested_duplicate_child_json_keys(self):
+        raw = (b'{"schema_version":1,"source":"paper_monitor_events",'
+               b'"exit_code":0,"boundaries":{'
+               b'"production_ready":false,"production_ready":false}}')
+        fake = subprocess.CompletedProcess([], 0, raw, b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_nonfinite_child_json_number(self):
+        raw = (b'{"schema_version":1,"source":"paper_monitor_events",'
+               b'"exit_code":0,"unexpected":NaN,'
+               b'"boundaries":{"production_ready":false}}')
+        fake = subprocess.CompletedProcess([], 0, raw, b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_unsafe_child_execution_flags(self):
+        cases = [
+            ("paper_monitor_events.py", "paper_monitor_events",
+             {"live_enabled": True, "orders_submitted": False,
+              "notification_delivered": False, "production_ready": False}),
+            ("paper_alert_queue.py", "paper_alert_queue",
+             {"live_enabled": False, "external_delivery": True,
+              "broker_orders": False, "production_ready": False}),
+            ("paper_monitor_gate.py", "paper_monitor_gate",
+             {"read_only": True, "external_notification_delivered": False,
+              "live_execution": True, "production_ready": False}),
+        ]
+        for script, source, boundaries in cases:
+            with self.subTest(script=script):
+                fake = subprocess.CompletedProcess(
+                    [], 0, json.dumps({"schema_version": 1, "source": source,
+                                      "exit_code": 0, "boundaries": boundaries}).encode(), b"")
+                with mock.patch.object(drill.subprocess, "run", return_value=fake):
+                    with self.assertRaises(drill.DrillError):
+                        drill._call(script, [], 0)
+
+    def test_reject_missing_safety_flag_even_if_production_false(self):
+        fake = subprocess.CompletedProcess(
+            [], 0, json.dumps({"schema_version": 1, "source": "paper_monitor_events",
+                               "exit_code": 0, "boundaries": {
+                                   "production_ready": False}}).encode(), b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_gate_without_read_only_contract(self):
+        fake = subprocess.CompletedProcess(
+            [], 0, json.dumps({"schema_version": 1, "source": "paper_monitor_gate",
+                               "exit_code": 0, "boundaries": {
+                                   "read_only": False,
+                                   "external_notification_delivered": False,
+                                   "live_execution": False,
+                                   "production_ready": False}}).encode(), b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_gate.py", [], 0)
+
+    def test_require_rejects_boolean_as_integer_evidence(self):
+        for actual, expected in ((True, 1), (False, 0), (1, True),
+                                 (0, False), (1.0, 1), ("1", 1)):
+            with self.subTest(actual=actual, expected=expected):
+                with self.assertRaises(drill.DrillError):
+                    drill._require({"count": actual}, "count", expected)
+
+    def test_require_accepts_only_present_exact_typed_value(self):
+        drill._require({"count": 2}, "count", 2)
+        drill._require({"created": False}, "created", False)
+        for report in ({}, [], None, {"count": None}):
+            with self.subTest(report=report):
+                with self.assertRaises(drill.DrillError):
+                    drill._require(report, "count", 2)
+
+    def test_reasons_rejects_ambiguous_or_malformed_evidence(self):
+        drill._require_reasons(
+            {"reasons": ["current_degraded", "unacknowledged_fault"]},
+            ("current_degraded", "unacknowledged_fault"))
+        for reasons in (None, "current_degraded", {}, [1],
+                        ["current_degraded", "current_degraded"],
+                        ["current_degraded", True]):
+            with self.subTest(reasons=reasons):
+                with self.assertRaises(drill.DrillError):
+                    drill._require_reasons({"reasons": reasons}, ("current_degraded",))
+        with self.assertRaises(drill.DrillError):
+            drill._require_reasons(
+                {"reasons": ["unacknowledged_fault", "current_degraded"]},
+                ("unacknowledged_fault",), ("current_degraded",))
+
+    def test_reject_excessive_child_output(self):
+        fake = subprocess.CompletedProcess([], 0, b"x" * 16385, b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_invalid_arguments_do_not_start_drill(self):
+        result = subprocess.run([sys.executable, "-I", "-S", "-B", str(TOOL),
+                                 "--unknown"], capture_output=True, text=True, timeout=8)
+        self.assertEqual(result.returncode, 2)
+        body = json.loads(result.stdout)
+        self.assertFalse(body["boundaries"]["broker_orders"])
+        self.assertFalse(body["boundaries"]["production_ready"])
+
+    def test_real_end_to_end_offline_acceptance(self):
+        # No fakes: exercise v52 record, v53 sync/ack and v55 gate directly.
+        completed = subprocess.run([sys.executable, "-I", "-S", "-B", str(TOOL)],
+                                   capture_output=True, text=True, timeout=60)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        report = json.loads(completed.stdout)
+        self.assertEqual(report["status"], "verified_synthetic")
+        self.assertEqual(report["events_verified"], 3)
+        self.assertEqual(report["stages"], [
+            "healthy_observed", "fault_detected", "recovery_unacknowledged",
+            "operator_acknowledged", "journal_consistent"])
+        for field in ("provider_requests", "broker_orders", "service_activated",
+                      "external_notification_delivered", "production_ready"):
+            self.assertFalse(report["boundaries"][field])
+
+
+if __name__ == "__main__":
+    unittest.main()

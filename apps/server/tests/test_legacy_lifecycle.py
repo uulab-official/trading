@@ -98,6 +98,42 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.order_manager.place_order("BTC/USDT", OrderSide.BUY, OrderType.MARKET, Decimal("1"))
         self.assertEqual(self.bot.exchange.snapshot()["orders"], {})
 
+    async def test_false_strategy_id_is_rejected_without_a_paper_fill(self):
+        self.bot.exchange.set_price("BTC/USDT", Decimal("100"))
+        before = self.bot.exchange.snapshot()
+        with self.assertRaisesRegex(ValueError, "invalid_strategy_id"):
+            await self.bot._process_signal(Signal(
+                SignalType.BUY, "BTC/USDT", Decimal("100"), Clock.utcnow(), strategy_id=False))
+        self.assertEqual(self.bot.exchange.snapshot(), before)
+        self.assertFalse(self.bot.portfolio.has_position("BTC/USDT"))
+        self.assertEqual(self.bot.portfolio.cash_balance, Decimal("10000"))
+
+    async def test_optional_cancel_flag_restores_only_absent_or_false(self):
+        await self.buy()
+        await self.bot.stop()
+        saved = self.raw()
+        for flag in ("absent", False, True, 0, None, "false"):
+            with self.subTest(cancel_requested=flag):
+                data = json.loads(saved)
+                order = next(iter(data["orders"].values()))
+                if flag == "absent":
+                    order.pop("cancel_requested", None)
+                else:
+                    order["cancel_requested"] = flag
+                self.replace(data)
+                original = self.raw()
+                resumed = await self.new_bot()
+                if flag == "absent" or flag is False:
+                    self.assertIsNone(resumed.recovery_reason)
+                    self.assertEqual(resumed.portfolio.cash_balance, Decimal("9000"))
+                    self.assertFalse(next(iter(resumed.order_manager.get_all_orders().values())).cancel_requested)
+                else:
+                    self.assertIsNotNone(resumed.recovery_reason)
+                    self.assertIsNone(resumed.exchange)
+                await resumed.stop()
+                if flag != "absent" and flag is not False:
+                    self.assertEqual(self.raw(), original)
+
     async def test_risk_only_gap_allows_explicit_exit_keeps_source_and_blocks_later_buy(self):
         await self.buy()
         await self.bot.stop()

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "common": {
+    "initial_balance": "1000000",
+    "position_size_pct": "20",
+    "fee_pct": "0.1",
+    "slippage_pct": "0.05",
+    "max_daily_loss_pct": "3",
+    "max_drawdown_pct": "10"
+  },
+  "candidates": [
+    {"id": "ma-fast", "strategy": "ma_cross", "fast_period": 3, "slow_period": 5},
+    {"id": "ma-slow", "strategy": "ma_cross", "fast_period": 5, "slow_period": 20},
+    {"id": "rsi-14", "strategy": "rsi", "rsi_period": 14}
+  ]
+}

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>공개 시세 관측 · UULAB Trading</title>
+  <link rel="stylesheet" href="/market-data.css">
+  <script type="module" src="/market-data.mjs"></script>
+</head>
+<body id="market-capture-observer">
+<header class="topbar">
+  <a class="brand" href="/">uulab<span> / trading</span></a>
+  <nav aria-label="주요 메뉴"><a href="/">운영 원장</a><a href="/research.html">전략 연구</a><a href="/paper-account.html">모의계좌</a><span class="selected" aria-current="page">공개 시세</span></nav>
+  <span class="local">LOCAL · READ ONLY</span>
+</header>
+<main>
+  <section class="page-head">
+    <div><p class="eyebrow">PUBLIC MARKET OBSERVATORY</p><h1>닫힌 캔들의 흐름을 확인합니다.</h1><p class="subtitle">Upbit 공개 시세의 보존 창과 마지막 검증 시점을 함께 봅니다.</p></div>
+    <div class="refresh-area"><span>10초마다 확인 · 숨긴 탭에서는 일시 정지</span><button id="refresh" type="button">저장 상태 다시 읽기 <span aria-hidden="true">↻</span></button><span id="request-status" role="status" aria-live="polite">조회 대기</span></div>
+  </section>
+  <noscript><p class="notice">상태 화면에는 JavaScript가 필요합니다. 터미널의 market_capture.py check 명령으로 저장 상태를 확인할 수 있습니다.</p></noscript>
+  <div id="refresh-warning" class="notice" role="alert" hidden></div>
+  <section class="status-panel" aria-labelledby="status-label">
+    <div><p class="label" id="market-label">공개 캔들 · 조회 대기</p><h2 id="status-label">상태 확인 전</h2><p id="capture-phase">아직 저장 단계를 읽지 않았습니다.</p></div>
+    <div class="boundary"><strong>읽기 전용 · 실거래 비활성</strong><span>프로세스 실행 여부 미확인</span><span>계좌 접근과 주문 동작 없음</span></div>
+  </section>
+  <p id="state-warning" class="state-note" role="status" hidden></p>
+  <section class="metrics" aria-label="수집 자료 요약">
+    <article><p class="label">마지막 닫힌 캔들 종가</p><strong id="latest-close">—</strong><small>KRW · 현재 호가가 아닙니다.</small></article>
+    <article><p class="label">데이터 경과시간</p><strong id="data-age">—</strong><small id="data-budget">캔들 종료 경계부터 계산</small></article>
+    <article><p class="label">검증 경과시간</p><strong id="observation-age">—</strong><small id="observation-budget">마지막 유효 응답 검증부터 계산</small></article>
+    <article><p class="label">보존 캔들 / 보존 한도</p><strong id="window-bars">—</strong><small id="window-policy">전체 이력이 아닌 이동 보존 창</small></article>
+  </section>
+  <section class="panel" aria-labelledby="candle-heading">
+    <div class="section-heading"><h2 id="candle-heading">마지막 닫힌 캔들</h2><span id="candle-period">저장된 시각 확인 전</span></div>
+    <p id="no-candles" class="empty">첫 번째 유효한 캔들을 저장하기 전에는 가격을 표시하지 않습니다.</p>
+    <dl id="candle-values" class="candle-grid" hidden>
+      <div><dt>시가 · KRW</dt><dd id="candle-open">—</dd></div><div><dt>고가 · KRW</dt><dd id="candle-high">—</dd></div><div><dt>저가 · KRW</dt><dd id="candle-low">—</dd></div><div><dt>종가 · KRW</dt><dd id="candle-close">—</dd></div><div><dt>거래량 · 기준 자산</dt><dd id="candle-volume">—</dd></div>
+    </dl>
+    <p class="explanation">가격과 거래량은 저장된 소수 값을 그대로 표시합니다. 비어 있는 시간 구간을 가상 캔들로 채우지 않습니다.</p>
+  </section>
+  <section class="bottom-grid">
+    <article class="panel"><h2>수집 단계와 실패 기록</h2><p class="failure-reason" id="failure-reason">조회 후 확인할 수 있습니다.</p><dl class="details">
+      <div><dt>연속 실패</dt><dd id="failure-count">—</dd></div><div><dt>성공한 검증 횟수</dt><dd id="poll-count">—</dd></div><div><dt>수집 주기</dt><dd id="poll-interval">—</dd></div><div><dt>첫 수집 요청 수</dt><dd id="bootstrap">—</dd></div>
+      <div><dt>마지막 시도 · UTC</dt><dd id="last-attempt">—</dd></div><div><dt>마지막 검증 · UTC</dt><dd id="last-verified">—</dd></div>
+    </dl><p class="explanation">같은 캔들을 다시 검증하면 성공 횟수와 검증 시각만 바뀔 수 있습니다. 새 시장 데이터가 추가되었다는 뜻은 아닙니다.</p></article>
+    <article class="panel"><h2>보존 창의 경계</h2><dl class="details">
+      <div><dt>첫 캔들 시작 · UTC</dt><dd id="window-first">—</dd></div><div><dt>마지막 종료 경계 · UTC</dt><dd id="window-end">—</dd></div>
+    </dl><p class="explanation">한도를 넘은 과거 캔들은 창에서 제외됩니다. 제외된 캔들의 수는 누적 기록하며, 이 창을 완전한 이력 보관소로 판단하지 않습니다.</p><details><summary>보존 캔들 내용 식별값 · SHA-256</summary><code id="candles-hash">—</code></details></article>
+  </section>
+  <section class="panel provenance" aria-labelledby="source-heading">
+    <div class="section-heading"><h2 id="source-heading">이번 조회의 기준</h2><span>모든 상태와 경과시간은 아래 API 관측 시점 기준입니다.</span></div>
+    <dl class="details provenance-grid"><div><dt>API 관측 시각 · UTC</dt><dd id="observed-at">—</dd></div><div><dt>수집 식별자</dt><dd id="capture-id">—</dd></div><div><dt>저장 리비전</dt><dd id="revision">—</dd></div><div><dt>최근 저장 시각 · UTC</dt><dd id="updated-at">—</dd></div><div><dt>생성 시각 · UTC</dt><dd id="created-at">—</dd></div></dl>
+    <p class="explanation">자료가 오래되었거나 중지 상태여도 유효한 과거 기록은 표시합니다. 수집의 시작·재개와 이력 내보내기는 별도의 명시적 터미널 작업입니다.</p>
+  </section>
+  <footer>공개 닫힌 캔들 관측 전용 · 제공자 자료의 진본 인증 아님 · 수집 프로세스의 생존이나 주문 가능 여부를 판단하지 않습니다.</footer>
+</main>
+</body>
+</html>

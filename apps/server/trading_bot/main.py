@@ -471,7 +471,7 @@ class TradingBot:
                 side=OrderSide.BUY,
                 order_type=OrderType.MARKET,
                 amount=size,
-                strategy_id=signal.strategy_id
+                strategy_id=None if signal.strategy_id == "" else signal.strategy_id
             )
             
             # Update portfolio
@@ -767,7 +767,8 @@ class TradingBot:
             try:
                 key = session.begin_intent('buy', signal.symbol, amount=size, price=signal.price)
                 order = await self.order_manager.place_order(signal.symbol, OrderSide.BUY, OrderType.MARKET,
-                    size, strategy_id=signal.strategy_id, client_order_id=key)
+                    size, strategy_id=None if signal.strategy_id == "" else signal.strategy_id,
+                    client_order_id=key)
                 if order.status.value != 'filled' or order.filled != size or order.remaining != 0:
                     raise CheckpointError("Paper entry did not fill completely")
                 self.portfolio.open_position(signal.symbol, 'long', size, signal.price,

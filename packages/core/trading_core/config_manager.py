@@ -321,7 +321,15 @@ class ConfigManager:
         return target_path
     
     def is_production_ready(self) -> bool:
-        """실전 투입 준비되었는지 확인"""
+        """Return false: configuration cannot establish runtime/feed/broker readiness.
+
+        Kept for compatibility. This revision supports local paper observation;
+        no operational live-readiness assessment is implemented here.
+        """
+        return False
+
+    def is_live_configuration_complete(self) -> bool:
+        """Check live settings only; this grants no permission to trade or resume."""
         if not self._config:
             return False
         
