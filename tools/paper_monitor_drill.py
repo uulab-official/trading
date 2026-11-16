@@ -33,6 +33,19 @@ def _tools_present():
             raise DrillError("tool_unavailable")
 
 
+def _unique_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _reject_constant(value):
+    raise ValueError("non-finite JSON number")
+
+
 def _call(script, arguments, expected):
     command = [sys.executable, "-I", "-S", "-B", str(TOOLS / script), *arguments]
     try:
@@ -42,7 +55,8 @@ def _call(script, arguments, expected):
     if len(result.stdout) > MAX_OUTPUT or len(result.stderr) > 4096:
         raise DrillError("output_unbounded")
     try:
-        report = json.loads(result.stdout)
+        report = json.loads(result.stdout, object_pairs_hook=_unique_pairs,
+                            parse_constant=_reject_constant)
     except (ValueError, UnicodeDecodeError) as exc:
         raise DrillError("output_invalid") from exc
     sources = {
