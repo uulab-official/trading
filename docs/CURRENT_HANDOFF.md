@@ -1,3 +1,34 @@
+# Trading continuation handoff — v53 explicit local alert review
+
+Starting from v52 head `a7497f4c81aabb6e1d6e2590e319f316977db3e8`, seven CI
+workflows completed successfully. This increment adds
+`tools/paper_alert_queue.py`, 15 focused tests, an isolated CPython
+3.10/3.12/3.13 workflow, and [PAPER_ALERT_QUEUE.md](PAPER_ALERT_QUEUE.md).
+
+The queue reads the private v52 monitor journal, atomically synchronizes
+its up-to-10,000 event transitions, refuses changed source events and missing
+sync, displays bounded unacknowledged entries, and allows an explicit
+single ACK per event with a reason and UTC timestamp. Both degraded and
+recovered status transitions require review. Only local SQLite changes
+occur; there is no external alert transport, auto-ack, notification
+delivery, service restart, trade or broker call. No performance or
+financial outcome is asserted.
+
+The independently isolated author test tree passed the initial 14 cases,
+then 15 after requiring source-to-queue synchronization before list/ack.
+The published source/tests require final-head CI readback; local evidence
+does not authorize production. The original trading engine, v49 fixed
+release profile and `is_production_ready()` contract remain unchanged.
+Main is not merged and PR #1 should remain Draft.
+
+Operator host evidence still needed: actual notifier delivery and
+acknowledgement, scheduled monitoring continuity and alert escalation,
+long-duration provider soak, service manager deployment/rollback,
+external backup restoration and broker-authoritative order/position
+reconciliation.
+
+---
+
 # Trading continuation handoff — v52 private monitor event journal
 
 v51 introduced a passive three-source status snapshot. This continuation adds
