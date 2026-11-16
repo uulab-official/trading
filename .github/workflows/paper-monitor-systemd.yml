@@ -1,0 +1,53 @@
+name: PAPER Monitor Systemd Timer Rendering
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inert-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Unit renderer regressions
+        run: python -I -S -B -m unittest discover -s tests -p 'test_paper_monitor_systemd.py' -v
+      - name: Render and validate service and timer syntax without installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RUNNER_TEMP/paper-unit-review"
+          python -I -S -B tools/paper_monitor_systemd.py \
+            --python /usr/bin/python3 \
+            --tool /opt/paper/tools/paper_monitor_tick.py \
+            --service /var/lib/paper/private/service \
+            --capture /var/lib/paper/private/capture \
+            --account /var/lib/paper/private/account \
+            --directory /var/lib/paper/private/history > "$RUNNER_TEMP/paper-unit-review/rendered.json"
+          python - "$RUNNER_TEMP/paper-unit-review" <<'PY'
+          import json
+          import pathlib
+          import sys
+          root = pathlib.Path(sys.argv[1])
+          obj = json.loads((root / 'rendered.json').read_text())
+          assert obj['status'] == 'rendered_only' and not obj['boundaries']['activated']
+          for name, content in obj['files'].items():
+              (root / name).write_text(content)
+          PY
+          systemd-analyze verify "$RUNNER_TEMP/paper-unit-review/paper-monitor.service" "$RUNNER_TEMP/paper-unit-review/paper-monitor.timer"
+          test -z "$(systemctl --user list-unit-files 'paper-monitor*' --no-legend 2>/dev/null || true)"
