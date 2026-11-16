@@ -44,6 +44,26 @@ class DrillTests(unittest.TestCase):
             with self.assertRaises(drill.DrillError):
                 drill._call("paper_monitor_events.py", [], 0)
 
+    def test_reject_wrong_source_even_with_success_exit(self):
+        bad = {
+            "schema_version": 1, "source": "unrelated_tool", "exit_code": 0,
+            "boundaries": {"production_ready": False},
+        }
+        fake = subprocess.CompletedProcess([], 0, json.dumps(bad).encode(), b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
+    def test_reject_false_ready_result(self):
+        bad = {
+            "schema_version": 1, "source": "paper_monitor_events", "exit_code": 0,
+            "boundaries": {"production_ready": True},
+        }
+        fake = subprocess.CompletedProcess([], 0, json.dumps(bad).encode(), b"")
+        with mock.patch.object(drill.subprocess, "run", return_value=fake):
+            with self.assertRaises(drill.DrillError):
+                drill._call("paper_monitor_events.py", [], 0)
+
     def test_reject_excessive_child_output(self):
         fake = subprocess.CompletedProcess([], 0, b"x" * 16385, b"")
         with mock.patch.object(drill.subprocess, "run", return_value=fake):
