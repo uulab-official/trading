@@ -162,3 +162,15 @@ explicit record/check commands. This component does not send any alert.
 - [ ] Verify normal-to-fault, fault-detail-change and fault-to-recovery transitions, and test multiple concurrent writers plus init-lock timeout on the intended operator host.
 - [ ] Back up the entire quiescent SQLite monitor journal. No automatic eviction is performed after 10,000 distinct transitions; preserve evidence and explicitly plan capacity management.
 - [ ] Integrate a separate, approved delivery/acknowledgement system. The event history is NOT evidence that any alert was delivered or read; no production readiness follows from it.
+
+## Explicit local alert review and ACK (v53)
+
+Follow [PAPER_ALERT_QUEUE.md](docs/PAPER_ALERT_QUEUE.md). These are unfulfilled
+operator-host acceptance checks, not claims of active monitoring or delivery.
+
+- [ ] Record a complete, consistent service+capture+account v52 monitor observation on the intended host before syncing the local alert queue.
+- [ ] Run `paper_alert_queue.py sync` in the private monitor journal and inspect `list`. Confirm repeated sync preserves a single event per transition, and a later event requires resync before list/ack.
+- [ ] ACK a specific event with an explicit operator reason. Confirm duplicate ACK and unknown event IDs are refused. An ACK means reviewed, **not** service repaired.
+- [ ] Verify fault, changed-fault, and recovery transitions, concurrent monitor writes and queue sync/ack on the intended host, and restoration from an external backup containing SQLite WAL metadata.
+- [ ] Separately establish real notification delivery, authentication, human acknowledgement and escalation; the queue has no external notifier or customer messaging.
+- [ ] Keep PAPER-only and production-readiness false until long soak, host operating, real-provider data and authoritative broker risk/reconciliation gates are satisfied.
