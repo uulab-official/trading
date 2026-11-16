@@ -1,3 +1,15 @@
+# Trading continuation — v58 strict child-result safety (2026-11-16)
+
+Starting from the v57 synthetic incident/recovery drill on Draft PR #1, this continuation hardens the *verification boundary* without touching execution modules, PAPER account authority, strategy, release profile, live credentials, broker interfaces, or any running host.
+
+- `tools/paper_monitor_drill.py` now rejects duplicate JSON keys at every nesting level and Python's nonstandard NaN/Infinity tokens from child reports. It checks report object shape before inspecting its fields.
+- Each child must explicitly preserve its own safety assertions, not merely `production_ready=false`: event recorder (`live_enabled=false`, `orders_submitted=false`, `notification_delivered=false`); ACK queue (`live_enabled=false`, `external_delivery=false`, `broker_orders=false`); gate (`read_only=true`, `external_notification_delivered=false`, `live_execution=false`). Missing or contradictory flags fail closed.
+- Six focused negative test methods were added across parser and safety-boundary cases; actual integrated drill execution remains in the Linux Python 3.10/3.12/3.13 CI matrix.
+- GitHub Actions checks for the final source commit must complete before claiming this revision is validated. No operator-host activation, actual notification receipt, provider soak, authoritative live reconciliation or production-readiness proof has been performed. `is_production_ready()` remains false.
+- Keep PR #1 Draft, main unchanged and live trading disabled. Next operator work is real-host offline installation/rollback plus sustained service and monitoring drills; live/broker work requires its own explicit approval and evidence.
+
+---
+
 # Trading continuation handoff — v58 strict monitoring drill child JSON
 
 Starting from the existing v57 synthetic monitoring acceptance drill, v58 makes the
