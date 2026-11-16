@@ -60,10 +60,14 @@ notification delivery or automatic escalation.
 - The source status checking itself precedes the journal transaction and
   therefore the three observations are not a single simultaneous physical
   snapshot; only the resulting journal and queue commit is atomic.
+- When the supervisor reports healthy, the tool additionally reads its
+  owner-private immutable `service.json` to compare the configured account
+  and capture paths against the provided physical paths. A missing/changed
+  config or pair mismatch converts the supervisor result into a degraded
+  `pair_mismatch` observation; an unrelated healthy account cannot produce a
+  healthy combined tick. This is **not** a fresh complete native binding audit.
 - Run the tool in a trusted operator context on a local POSIX filesystem.
   An attacker with the same UID can alter monitoring or database files.
-  The paths must correspond to the same configured service/capture/account
-  pair; the tool does not prove that binding independently.
 - Timeouts are not permission to automatically restart workers. Capture
   errors and native refusals remain authoritative.
 - A failed JSON stdout delivery cannot undo a transaction that already
