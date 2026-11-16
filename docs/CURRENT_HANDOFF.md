@@ -2,7 +2,7 @@
 
 Starting from v52 head `a7497f4c81aabb6e1d6e2590e319f316977db3e8`, seven CI
 workflows completed successfully. This increment adds
-`tools/paper_alert_queue.py`, 15 focused tests, an isolated CPython
+`tools/paper_alert_queue.py`, 16 focused tests, an isolated CPython
 3.10/3.12/3.13 workflow, and [PAPER_ALERT_QUEUE.md](PAPER_ALERT_QUEUE.md).
 
 The queue reads the private v52 monitor journal, atomically synchronizes
@@ -15,7 +15,7 @@ delivery, service restart, trade or broker call. No performance or
 financial outcome is asserted.
 
 The independently isolated author test tree passed the initial 14 cases,
-then 15 after requiring source-to-queue synchronization before list/ack.
+then 15 after requiring source-to-queue synchronization before list/ack. A sixteenth end-to-end test uses the actual v52 monitor recorder to produce a private journal before v53 sync and ACK; its remote CI result must be verified.
 The published source/tests require final-head CI readback; local evidence
 does not authorize production. The original trading engine, v49 fixed
 release profile and `is_production_ready()` contract remain unchanged.
