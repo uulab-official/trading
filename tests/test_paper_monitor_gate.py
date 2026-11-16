@@ -106,6 +106,14 @@ class GateTests(unittest.TestCase):
         with self.assertRaises(gate.queue.Refused):
             self.check()
 
+    def test_state_timestamp_must_match_last_event(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE state SET observed_at=? WHERE singleton=1",
+                         ((BASE + timedelta(seconds=10)).isoformat(),))
+        with self.assertRaises(gate.GateUnavailable) as caught:
+            self.check(offset=60)
+        self.assertEqual(str(caught.exception), "head_timestamp_mismatch")
+
     def test_missing_database_refused_without_creating(self):
         self.db.unlink()
         process = subprocess.run([sys.executable, "-I", "-S", "-B",
