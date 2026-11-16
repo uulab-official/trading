@@ -40,7 +40,8 @@ class TickTests(unittest.TestCase):
                                     directory=str(self.root), timeout_seconds=10)
 
     def inspect(self, value):
-        with mock.patch.object(tick.paper_monitor, "inspect", return_value=value):
+        with mock.patch.object(tick.paper_monitor, "inspect", return_value=value), \
+             mock.patch.object(tick, "_pair_matches", return_value=True):
             return tick._operate(self.args)
 
     def test_healthy_initial_atomic_record_queue(self):
@@ -105,6 +106,37 @@ class TickTests(unittest.TestCase):
             tick._args(["--service", "/private/service",
                         "--capture", "/private/capture",
                         "--account", "/private/account", "--directory", "relative"])
+
+    def test_healthy_probes_with_mismatched_pair_become_degraded(self):
+        with mock.patch.object(tick.paper_monitor, "inspect", return_value=snapshot()), \
+             mock.patch.object(tick, "_pair_matches", return_value=False):
+            result = tick._operate(self.args)
+        self.assertEqual(result["exit_code"], 1)
+        self.assertEqual(result["status"], "attention_required")
+        self.assertEqual(result["checks"]["service"]["status"], "pair_mismatch")
+        self.assertEqual(result["pending_acknowledgements"], 1)
+
+    def test_bindings_match_exact_saved_pair_paths(self):
+        service = self.root.parent / "service"
+        account = self.root.parent / "account"
+        capture = self.root.parent / "capture"
+        for folder in (service, account, capture):
+            folder.mkdir(mode=0o700)
+        manifest = {
+            "source": "paper_service_config", "mode": "paper",
+            "live_enabled": False,
+            "pair": {"account_path": str(account.resolve()),
+                     "capture_path": str(capture.resolve())},
+        }
+        config = service / "service.json"
+        config.write_text(json.dumps(manifest))
+        config.chmod(0o600)
+        self.args.service = str(service)
+        self.args.account = str(account)
+        self.args.capture = str(capture)
+        self.assertTrue(tick._pair_matches(self.args))
+        self.args.capture = str(self.root)
+        self.assertFalse(tick._pair_matches(self.args))
 
     def test_real_native_missing_store_probes_record_degraded(self):
         import subprocess
