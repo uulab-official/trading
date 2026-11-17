@@ -111,3 +111,39 @@ manager/monitoring after validating the failure flow.
   production-grade live automated trading.
 
 See [production readiness gate](../PRODUCTION_CHECKLIST.md).
+
+
+## Optional macOS launchd (local machine only)
+
+A conservative template is provided at
+`infra/launchd/co.uulab.trading.paper.plist.example`.
+It is **not installed or started automatically** by the repository.
+Copy the example into a user-specific LaunchAgents location, replace
+**every** `REPLACE_WITH_ABSOLUTE_...` placeholder with actual local
+paths, and ensure the virtual environment contains required packages.
+
+```sh
+mkdir -p "$HOME/Library/LaunchAgents"
+cp infra/launchd/co.uulab.trading.paper.plist.example \
+  "$HOME/Library/LaunchAgents/co.uulab.trading.paper.plist"
+# Edit all absolute paths before running:
+plutil -lint "$HOME/Library/LaunchAgents/co.uulab.trading.paper.plist"
+launchctl bootstrap "gui/$(id -u)" \
+  "$HOME/Library/LaunchAgents/co.uulab.trading.paper.plist"
+```
+
+The template sets `KeepAlive=false` so launchd **does not
+automatically restart the bot** after its failure threshold. It runs
+the explicit `--mode paper --loop` supervisor only. The data
+directory must exist and be private; log files need independent local
+retention/rotation. If you need to stop it:
+
+```sh
+launchctl bootout "gui/$(id -u)" \
+  "$HOME/Library/LaunchAgents/co.uulab.trading.paper.plist"
+```
+
+Installing or stopping this service affects only the user's local
+machine. An uninterrupted running Mac, network access, and OS permission
+configuration are required for continuing operation. The file is a
+template, not proof of deployed or successfully monitored runtime.
