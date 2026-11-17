@@ -12,6 +12,7 @@ from pathlib import Path
 import signal
 import sys
 import tempfile
+import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -134,17 +135,16 @@ def main(argv=None):
         parser.error("Archive, checkpoint and heartbeat paths must all be distinct")
     try:
         if args.loop:
-            stopped = False
+            stopped = threading.Event()
             def on_signal(signum, frame):
-                nonlocal stopped
-                stopped = True
+                stopped.set()
             signal.signal(signal.SIGTERM, on_signal)
             signal.signal(signal.SIGINT, on_signal)
             code = run_loop(archive=args.archive, checkpoint=args.checkpoint,
                             heartbeat=args.heartbeat, market=args.market,
                             unit=args.unit, count=args.count, balance=args.initial_balance,
                             interval_seconds=interval, max_failures=args.max_failures,
-                            should_stop=lambda: stopped)
+                            should_stop=stopped.is_set, sleep=stopped.wait)
             return code
         status = run_supervised_once(archive=args.archive, checkpoint=args.checkpoint,
                                      heartbeat=args.heartbeat, market=args.market,
