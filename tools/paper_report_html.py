@@ -58,7 +58,10 @@ def generate(fixture_path: Path, checkpoint_path: Path):
     if hashlib.sha256(raw_checkpoint).hexdigest() != verified["checkpoint_sha256"]:
         raise ValueError("Checkpoint changed after audit; retry only when idle")
     state = json.loads(raw_checkpoint)
-    fixture = json.loads(fixture_path.read_bytes())
+    raw_fixture = fixture_path.read_bytes()
+    if hashlib.sha256(raw_fixture).hexdigest() != verified["fixture_sha256"]:
+        raise ValueError("Fixture changed after audit; retry only when idle")
+    fixture = json.loads(raw_fixture)
     bars = fixture["candles"][:verified["processed_bars"]]
     if not bars:
         raise ValueError("No verified candles")
