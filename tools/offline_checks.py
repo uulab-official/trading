@@ -34,6 +34,7 @@ def main():
         ("apps/server/tests", "test_paper_runner.py"),
         ("apps/server/tests", "test_paper_checkpoint_audit.py"),
         ("apps/server/tests", "test_paper_report_html.py"),
+        ("apps/server/tests", "test_import_ohlcv_csv.py"),
         ("apps/server/tests", "test_paper_currency.py"),
         ("apps/server/tests", "test_paper_checkpoint.py"),
         ("apps/server/tests", "test_paper_cli.py"),
