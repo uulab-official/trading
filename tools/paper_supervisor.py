@@ -70,7 +70,8 @@ def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
     except Exception as error:
         # Never persist broker credentials, payloads, URLs, or arbitrary error
         # strings to a report that might be shown in an operations dashboard.
-        failure = dict(base, status="degraded", last_error_type=type(error).__name__)
+        failure = dict(base, status="halted" if isinstance(error, PaperEmergencyStop) else "degraded",
+                       last_error_type=type(error).__name__)
         _safe_heartbeat(heartbeat, failure)
         raise
 
@@ -170,6 +171,9 @@ def main(argv=None):
                                      heartbeat=args.heartbeat, market=args.market,
                                      unit=args.unit, count=args.count, balance=args.initial_balance,
                                      kill_switch=kill_switch)
+    except PaperEmergencyStop:
+        print("Paper supervisor stopped by operator STOP marker.", file=sys.stderr)
+        return 3
     except Exception as error:
         # A failed public API/lock/network operation may be a RuntimeError or
         # URLError. Always exit nonzero; never falsely report a healthy cycle.
