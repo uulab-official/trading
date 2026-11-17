@@ -4,6 +4,10 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import sys
+
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
 
 from tools.paper_checkpoint_audit import audit
 from trading_bot.paper_runner import PaperRunConfig, PaperRunner
