@@ -19,6 +19,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools.upbit_paper_cycle import run_cycle
 
+
+class PaperEmergencyStop(RuntimeError):
+    """Local kill-switch marker denies any new public-data paper cycle."""
+
+
 def _safe_heartbeat(path, payload):
     """Atomically replace only our health file; keep it distinct from trading state."""
     path = Path(path).resolve()
@@ -39,7 +44,7 @@ def _safe_heartbeat(path, payload):
 
 
 def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
-                        balance, cycle=run_cycle, now=time.time):
+                        balance, cycle=run_cycle, now=time.time, kill_switch=None):
     if len({Path(archive).resolve(), Path(checkpoint).resolve(),
             Path(heartbeat).resolve()}) != 3:
         raise ValueError("Archive, checkpoint, and heartbeat must be distinct paths")
@@ -50,6 +55,8 @@ def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
             "unit_minutes": unit, "last_attempt_utc": datetime.fromtimestamp(
                 observed, tz=timezone.utc).isoformat()}
     try:
+        if kill_switch is not None and Path(kill_switch).exists():
+            raise PaperEmergencyStop("Paper operator stop marker is present")
         result = cycle(Path(archive), Path(checkpoint), market=market, unit=unit,
                        count=count, initial_balance=balance)
         if not isinstance(result, dict) or result.get("mode") != "paper" or result.get("live_orders_enabled") is not False:
@@ -71,7 +78,7 @@ def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
 def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
              count=200, balance=Decimal("1000000"), interval_seconds=3600,
              max_failures=3, cycle=run_cycle, now=time.time, sleep=time.sleep,
-             should_stop=lambda: False):
+             should_stop=lambda: False, kill_switch=None):
     if type(unit) is not int or unit not in (1, 3, 5, 10, 15, 30, 60, 240):
         raise ValueError("Unsupported paper candle minute unit")
     if type(interval_seconds) is not int or interval_seconds < unit * 60:
@@ -84,8 +91,15 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
         try:
             run_supervised_once(archive=archive, checkpoint=checkpoint,
                                 heartbeat=heartbeat, market=market, unit=unit,
-                                count=count, balance=balance, cycle=cycle, now=now)
+                                count=count, balance=balance, cycle=cycle, now=now,
+                                kill_switch=kill_switch)
             consecutive = 0
+        except PaperEmergencyStop:
+            previous = json.loads(Path(heartbeat).read_text(encoding="utf-8"))
+            previous["status"] = "halted"
+            previous["operator_stop"] = True
+            _safe_heartbeat(heartbeat, previous)
+            return 3
         except Exception:
             consecutive += 1
             if consecutive >= max_failures:
@@ -114,6 +128,8 @@ def main(argv=None):
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--heartbeat", type=Path, required=True)
+    parser.add_argument("--kill-switch", type=Path, default=None,
+                        help="Local STOP marker file; existence prevents starting a new paper cycle")
     parser.add_argument("--initial-balance", type=Decimal, default=Decimal("1000000"))
     operation = parser.add_mutually_exclusive_group()
     operation.add_argument("--once", action="store_true")
@@ -133,6 +149,9 @@ def main(argv=None):
     paths = (args.archive.resolve(), args.checkpoint.resolve(), args.heartbeat.resolve())
     if len(set(paths)) != 3:
         parser.error("Archive, checkpoint and heartbeat paths must all be distinct")
+    kill_switch = args.kill_switch or args.checkpoint.with_name(args.checkpoint.name + ".STOP")
+    if kill_switch.resolve() in set(paths):
+        parser.error("Kill-switch path must differ from data and health files")
     try:
         if args.loop:
             stopped = threading.Event()
@@ -144,11 +163,13 @@ def main(argv=None):
                             heartbeat=args.heartbeat, market=args.market,
                             unit=args.unit, count=args.count, balance=args.initial_balance,
                             interval_seconds=interval, max_failures=args.max_failures,
-                            should_stop=stopped.is_set, sleep=stopped.wait)
+                            should_stop=stopped.is_set, sleep=stopped.wait,
+                            kill_switch=kill_switch)
             return code
         status = run_supervised_once(archive=args.archive, checkpoint=args.checkpoint,
                                      heartbeat=args.heartbeat, market=args.market,
-                                     unit=args.unit, count=args.count, balance=args.initial_balance)
+                                     unit=args.unit, count=args.count, balance=args.initial_balance,
+                                     kill_switch=kill_switch)
     except Exception as error:
         # A failed public API/lock/network operation may be a RuntimeError or
         # URLError. Always exit nonzero; never falsely report a healthy cycle.
