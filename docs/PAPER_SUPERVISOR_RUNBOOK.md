@@ -1,0 +1,113 @@
+# Paper Supervisor — operator runbook (public data, NO real orders)
+
+`tools/paper_supervisor.py` adds opt-in supervised polling around the
+existing `upbit_paper_cycle.py` one-shot public-data + checkpointed-paper
+workflow. It is **not** a real-money trading daemon. It has no authentication
+or private order connection, and it cannot set `mode=live`.
+
+## Prerequisites
+
+- Linux/macOS local filesystem supporting POSIX locks. Do not put archive
+  or checkpoint files on NFS/cloud-synced/shared network storage.
+- Python 3.10+ and the documented offline package requirements.
+- Consistent system clock (NTP) and stable network for public quotation.
+- Writable local private `data/` directory.
+- All prior tests passed; public REST fetch behavior still requires real
+  exchange-endpoint verification, which synthetic unit tests cannot prove.
+
+## 1. One supervised cycle
+
+```sh
+python tools/paper_supervisor.py \
+  --mode paper --once --market KRW-BTC --unit 60 --count 200 \
+  --archive data/upbit-btc-1h-archive.json \
+  --checkpoint data/upbit-btc-1h-paper.json \
+  --heartbeat data/upbit-btc-1h-health.json \
+  --initial-balance 1000000
+```
+
+`--once` is the default. This reads *public* market candles, replays them
+locally using simulated fills, and exits. The heartbeat is written as an
+atomic JSON snapshot with `mode: paper` and
+`live_orders_enabled: false`.
+
+## 2. Opt-in continuous paper sampling
+
+```sh
+python tools/paper_supervisor.py \
+  --mode paper --loop --market KRW-BTC --unit 60 \
+  --interval-seconds 3600 --max-failures 3 \
+  --archive data/upbit-btc-1h-archive.json \
+  --checkpoint data/upbit-btc-1h-paper.json \
+  --heartbeat data/upbit-btc-1h-health.json
+```
+
+The polling interval cannot be less than the candle duration, avoiding
+a flood of quotation requests. Network/API issues are **not** retried
+within a single cycle. Every future attempt starts a fresh public-read
+and independently verifies the previous checkpoint before replay.
+After the configured number of consecutive failed cycles, the process
+exits with code `2` and heartbeat `halted`. An operator must inspect
+the failure before deliberately restarting. Never auto-restart a
+`halted` loop indefinitely via process-manager policy.
+
+This is a local process; ChatGPT does not start or monitor it in the
+background. Do not run multiple supervisors over the same archive /
+portfolio checkpoint. Co-operating cycles use a local owner lock,
+and concurrent runs must be treated as an operational error.
+On shutdown, the in-progress synchronous cycle may complete before
+the process exits; an operating system hard kill interrupts it and
+the next start verifies the last atomic checkpoint.
+
+## 3. Read-only liveness probe
+
+```sh
+python tools/paper_healthcheck.py \
+  data/upbit-btc-1h-health.json --max-age-seconds 7200
+```
+
+Exit statuses:
+
+- `0`: valid, recent heartbeat marked healthy
+- `2`: invalid, stale, degraded or halted; operator action required
+- `4`: heartbeat missing or unreadable
+
+This only probes the *local reported state*. It does not claim that
+the displayed paper portfolio matches a broker account. Health files
+omit raw failures and API responses to reduce accidental leakage.
+Explicit `daily_loss_halted` and `drawdown_halted` flags identify risk
+blocks on new simulated entries.
+
+## 4. Fault handling
+
+1. **Network unavailable/429/5xx** — cycle fails; do not fabricate bars.
+   Read the heartbeat, verify the public endpoint and applicable API limits.
+2. **Market gap / changed completed candle** — stop; never overwrite
+   historical bars to make a strategy look successful.
+3. **Checkpoint mismatch** — preserve both archive and checkpoint.
+   Diagnose whether a strategy, account assumption, or historical
+   data changed. A new experiment must use fresh paths.
+4. **Disk full / lock owner** — repair access/storage and check for
+   an existing running process. Never delete active lock files.
+5. **System clock skew / stale feed** — correct time synchronization
+   and verify exchange UTC timestamps before restarting.
+6. **Loss/drawdown halted** — treat as a risk signal, not a reason to
+   raise position limits or switch to live mode.
+
+No built-in Telegram or hosted alert delivery is configured by this
+supervisor. Connect the healthcheck exit code to your local process
+manager/monitoring after validating the failure flow.
+
+## Critical limitations
+
+- Only one KRW spot symbol and illustrative fees/slippage per paper book.
+- No order-book-aware fills, liquidity guarantees, partial orders, or
+  live account reconciliation.
+- No historical pagination beyond public 200-candle snapshots;
+  missing overlap remains an explicit fail-closed incident.
+- No promise of investment returns, positive expectancy, or safe real
+  order execution.
+- A local polling loop is **not** sufficient to certify
+  production-grade live automated trading.
+
+See [production readiness gate](../PRODUCTION_CHECKLIST.md).
