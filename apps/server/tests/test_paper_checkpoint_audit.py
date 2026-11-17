@@ -12,7 +12,6 @@ sys.path.insert(0, str(ROOT))
 from tools.paper_checkpoint_audit import audit
 from trading_bot.paper_runner import PaperRunConfig, PaperRunner
 
-ROOT = Path(__file__).resolve().parents[3]
 
 
 class TestPaperCheckpointAudit(unittest.TestCase):
@@ -36,7 +35,7 @@ class TestPaperCheckpointAudit(unittest.TestCase):
 
     def test_modified_cash_is_rejected_without_repair(self):
         state = json.loads(self.checkpoint.read_text())
-        state["exchange"]["cash"] = "999999999"
+        state["exchange"]["balances"]["USDT"] = "999999999"
         corrupted = json.dumps(state).encode()
         self.checkpoint.write_bytes(corrupted)
         with self.assertRaises(ValueError):
