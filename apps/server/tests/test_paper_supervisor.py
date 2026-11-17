@@ -84,6 +84,26 @@ class PaperSupervisorTests(unittest.TestCase):
                    side_effect=RuntimeError("simulated network failure")):
             self.assertEqual(2, main(args))
 
+    def test_operator_stop_file_prevents_paper_cycle_and_halts_loop(self):
+        from tools.paper_supervisor import PaperEmergencyStop
+        stop = self.checkpoint.with_name(self.checkpoint.name + ".STOP")
+        stop.write_text("operator requested stop")
+        touched = []
+        def should_never_run(*args, **kwargs):
+            touched.append(True)
+            return success_cycle()
+        with self.assertRaises(PaperEmergencyStop):
+            run_supervised_once(**self.kwargs, cycle=should_never_run,
+                                kill_switch=stop, now=lambda: 1700000000)
+        self.assertEqual([], touched)
+        self.assertEqual(3, run_loop(**self.kwargs, cycle=should_never_run,
+                                     kill_switch=stop, now=lambda: 1700000000,
+                                     interval_seconds=3600))
+        self.assertEqual([], touched)
+        report = json.loads(self.heartbeat.read_text())
+        self.assertEqual("halted", report["status"])
+        self.assertTrue(report["operator_stop"])
+
     def test_refuses_colliding_paths_and_oversampling(self):
         with self.assertRaises(ValueError):
             run_supervised_once(**dict(self.kwargs, heartbeat=self.checkpoint),
