@@ -59,6 +59,28 @@ On shutdown, the in-progress synchronous cycle may complete before
 the process exits; an operating system hard kill interrupts it and
 the next start verifies the last atomic checkpoint.
 
+## Operator emergency STOP marker
+
+The default local kill-switch path is the checkpoint path plus `.STOP`.
+For example, if the checkpoint is `data/upbit-btc-1h-paper.json`,
+create `data/upbit-btc-1h-paper.json.STOP` to prevent **any subsequent**
+cycle from fetching data or advancing simulated trades:
+
+```sh
+touch data/upbit-btc-1h-paper.json.STOP
+```
+
+After observing this marker, the supervisor emits `halted` and exits
+with code `3`. This stop is checked **between** cycles; it does not
+cancel a synchronous cycle already processing a saved fixture. For
+immediate OS-level interruption, terminate the process as well; its
+checkpoint atomics protect the last completed bar.
+
+Remove the marker **only after** investigating the incident and
+deliberately authorizing paper operation again. Never use a marker
+as an exchange-side cancellation mechanism: there are no live orders
+in this tool. The path is configurable with `--kill-switch`.
+
 ## 3. Read-only liveness probe
 
 ```sh
