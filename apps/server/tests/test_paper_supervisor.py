@@ -96,6 +96,12 @@ class PaperSupervisorTests(unittest.TestCase):
             run_supervised_once(**self.kwargs, cycle=should_never_run,
                                 kill_switch=stop, now=lambda: 1700000000)
         self.assertEqual([], touched)
+        from tools.paper_supervisor import main
+        self.assertEqual(3, main(["--mode", "paper", "--once",
+                                   "--archive", str(self.archive),
+                                   "--checkpoint", str(self.checkpoint),
+                                   "--heartbeat", str(self.heartbeat),
+                                   "--kill-switch", str(stop)]))
         self.assertEqual(3, run_loop(**self.kwargs, cycle=should_never_run,
                                      kill_switch=stop, now=lambda: 1700000000,
                                      interval_seconds=3600))
