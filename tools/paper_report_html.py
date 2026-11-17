@@ -11,8 +11,11 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import sys
 
-from paper_checkpoint_audit import audit
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from tools.paper_checkpoint_audit import audit
 
 
 def _money(raw):
