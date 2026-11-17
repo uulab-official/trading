@@ -18,7 +18,7 @@ The existing backtest engine now has separate
 `python tools/offline_checks.py --include-backtest` with pandas/numpy available
 to check causal fills, spot balances, fees, marked equity, and repeatable runs.
 
-Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nRun `python tools/offline_trade_report.py` for a network-forbidden report of the
+Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nGenerate a **static, local-only paper dashboard** with\n`python tools/paper_report_html.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json --output data/owner-trial/report.html`\n(see [offline dashboard guide](docs/OFFLINE_PAPER_REPORT.md)). The output is an audited\nsnapshot, not live monitoring or an activated trading service.\n\nRun `python tools/offline_trade_report.py` for a network-forbidden report of the
 local synthetic fixture using [fee-inclusive FIFO trade reporting](docs/OFFLINE_REALIZED_REPORTING.md).
 It also includes [elapsed-time CAGR](docs/OFFLINE_ANNUALIZATION.md) with period,
 units, undefined-value handling, and an explicit extrapolation warning.
