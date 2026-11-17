@@ -29,13 +29,16 @@ may automatically enable live order placement.
 
 ## Gate B — continuously supervised PAPER operation (NOT complete)
 
-- [ ] Reliable timed ingestion with reconnection, retry budgets, backoff, and jitter
+- [x] Opt-in local paper supervisor with minimum poll period, atomic health, fail-closed retry threshold
+- [x] Read-only heartbeat freshness and clock-skew probe
+- [x] macOS launchd paper-only template with no auto-restart after halted state
+- [ ] Reliable timed ingestion with reconnect budgets, backoff/jitter, and validated multi-day runtime
 - [ ] Clock-skew detection and NTP operational checks; reject stale or future prices
 - [ ] Historical pagination/backfill after gaps > 200 candles
 - [ ] Crash-safe archive+strategy state orchestration and startup reconciliation
 - [ ] Circuit breaker for network instability, schema drift, data gaps, bad ticks
 - [ ] Single source of truth for positions, trades, and portfolio in operator UI
-- [ ] User authentication, audit trail, alerts, health checks, and SLO monitoring
+- [ ] User authentication, durable audit trail, external alerts, and measured SLO monitoring (local heartbeat probe exists)
 - [ ] Credential-free paper environment continuously exercised for at least 2 weeks
 - [ ] Disaster-recovery and backup/restore drill completed
 
