@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>co.uulab.trading.paper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPLACE_WITH_ABSOLUTE_VENV_PYTHON</string>
+    <string>REPLACE_WITH_ABSOLUTE_REPO_ROOT/tools/paper_supervisor.py</string>
+    <string>--mode</string><string>paper</string>
+    <string>--loop</string>
+    <string>--market</string><string>KRW-BTC</string>
+    <string>--unit</string><string>60</string>
+    <string>--interval-seconds</string><string>3600</string>
+    <string>--max-failures</string><string>3</string>
+    <string>--archive</string><string>REPLACE_WITH_ABSOLUTE_DATA_DIR/candles.json</string>
+    <string>--checkpoint</string><string>REPLACE_WITH_ABSOLUTE_DATA_DIR/ledger.json</string>
+    <string>--heartbeat</string><string>REPLACE_WITH_ABSOLUTE_DATA_DIR/health.json</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>REPLACE_WITH_ABSOLUTE_REPO_ROOT</string>
+  <key>RunAtLoad</key><true/>
+  <!-- NO KeepAlive: 3 consecutive failures must halt until manual inspection -->
+  <key>KeepAlive</key><false/>
+  <key>StandardOutPath</key><string>REPLACE_WITH_ABSOLUTE_DATA_DIR/paper.stdout.log</string>
+  <key>StandardErrorPath</key><string>REPLACE_WITH_ABSOLUTE_DATA_DIR/paper.stderr.log</string>
+</dict>
+</plist>
