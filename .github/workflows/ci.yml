@@ -60,7 +60,11 @@ jobs:
 
     - name: Run tests
       run: |
-        pytest packages/ apps/server/tests/ -v --cov=trading_core --cov=trading_data --cov=trading_strategy --cov=trading_backtest --cov-report=xml\n\n    - name: Verify network-forbidden offline safety suite\n      run: |\n        python tools/offline_checks.py
+        pytest packages/ apps/server/tests/ -v --cov=trading_core --cov=trading_data --cov=trading_strategy --cov=trading_backtest --cov-report=xml
+
+    - name: Verify network-forbidden offline safety suite
+      run: |
+        python tools/offline_checks.py
 
     - name: Upload coverage
       id: coverage_upload
