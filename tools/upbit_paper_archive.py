@@ -9,6 +9,11 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+for source in (ROOT, ROOT / "packages/data", ROOT / "apps/server"):
+    sys.path.insert(0, str(source))
 
 from tools.upbit_public_paper_snapshot import build_snapshot
 from trading_bot.paper_checkpoint import locked_checkpoint
