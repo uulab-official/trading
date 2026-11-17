@@ -16,7 +16,7 @@ for source in (ROOT, ROOT / "packages/data", ROOT / "apps/server"):
     sys.path.insert(0, str(source))
 
 from tools.upbit_public_paper_snapshot import build_snapshot
-from trading_bot.paper_checkpoint import locked_checkpoint
+from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
 from trading_data import Candle, CandleBuffer
 
 
@@ -140,6 +140,8 @@ def main(argv=None):
     try:
         outcome = capture_once(args.archive, market=args.market, unit=args.unit,
                                count=args.count, allow_gaps=args.allow_gaps)
+    except CheckpointInUseError:
+        parser.exit(3, "Paper archive is owned by another process; retry after it completes.\\n")
     except (ValueError, OSError, KeyError, TypeError, DecimalException):
         parser.exit(2, "Paper archive refused public data; no orders or account access attempted.\n")
     print(json.dumps(outcome, sort_keys=True))
