@@ -18,9 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools.upbit_paper_cycle import run_cycle
 
-MAX_HEARTBEAT_BYTES = 64_000
-
-
 def _safe_heartbeat(path, payload):
     """Atomically replace only our health file; keep it distinct from trading state."""
     path = Path(path).resolve()
@@ -152,8 +149,10 @@ def main(argv=None):
         status = run_supervised_once(archive=args.archive, checkpoint=args.checkpoint,
                                      heartbeat=args.heartbeat, market=args.market,
                                      unit=args.unit, count=args.count, balance=args.initial_balance)
-    except (ValueError, OSError, KeyError, TypeError, InvalidOperation):
-        print("Paper supervisor stopped safely. Inspect health file and local logs.", file=sys.stderr)
+    except Exception as error:
+        # A failed public API/lock/network operation may be a RuntimeError or
+        # URLError. Always exit nonzero; never falsely report a healthy cycle.
+        print("Paper supervisor stopped safely (" + type(error).__name__ + "). Inspect local health.", file=sys.stderr)
         return 2
     print(json.dumps(status, sort_keys=True))
     return 0
