@@ -57,9 +57,11 @@ class PublicPaperCycleTests(unittest.TestCase):
                       "fetcher": lambda *args: public_rows([0, 1, 2, 3])}
             run_cycle(archive, checkpoint, **kwargs)
             before = checkpoint.read_bytes()
+            before_archive = archive.read_bytes()
             with self.assertRaises(ValueError):
                 run_cycle(archive, checkpoint, initial_balance=Decimal("2"), **kwargs)
             self.assertEqual(before, checkpoint.read_bytes())
+            self.assertEqual(before_archive, archive.read_bytes())
 
     def test_archive_and_checkpoint_must_be_distinct(self):
         with tempfile.TemporaryDirectory() as directory:
