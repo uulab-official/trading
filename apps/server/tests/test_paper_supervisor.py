@@ -75,6 +75,15 @@ class PaperSupervisorTests(unittest.TestCase):
                                       should_stop=lambda: attempts[0] >= 2))
         self.assertEqual("healthy", json.loads(self.heartbeat.read_text())["status"])
 
+    def test_cli_exits_nonzero_on_public_network_failure(self):
+        from tools.paper_supervisor import main
+        args = ["--mode", "paper", "--once", "--archive", str(self.archive),
+                "--checkpoint", str(self.checkpoint),
+                "--heartbeat", str(self.heartbeat)]
+        with patch("tools.paper_supervisor.run_supervised_once",
+                   side_effect=RuntimeError("simulated network failure")):
+            self.assertEqual(2, main(args))
+
     def test_refuses_colliding_paths_and_oversampling(self):
         with self.assertRaises(ValueError):
             run_supervised_once(**dict(self.kwargs, heartbeat=self.checkpoint),
