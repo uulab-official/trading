@@ -8,6 +8,7 @@ import asyncio
 from dataclasses import fields
 import hashlib
 import json
+from decimal import localcontext
 from pathlib import Path
 import sys
 
@@ -18,6 +19,7 @@ sys.path.insert(0, str(ROOT / "apps/server"))
 
 from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
 from trading_bot.paper_runner import PaperRunConfig, PaperRunner
+from trading_core.paper_exchange import PAPER_CALCULATION_CONTEXT
 
 
 def audit(fixture_path: Path, checkpoint_path: Path):
@@ -47,7 +49,8 @@ def audit(fixture_path: Path, checkpoint_path: Path):
         if type(cursor) is not int or cursor < 1 or cursor > len(candles):
             raise ValueError("Checkpoint cursor is invalid")
         # Compare ALL saved economic and risk state, not just file hashes.
-        expected = asyncio.run(PaperRunner(config)._run(candles[:cursor], return_state=True))
+        with localcontext(PAPER_CALCULATION_CONTEXT):
+            expected = asyncio.run(PaperRunner(config)._run(candles[:cursor], return_state=True))
         if state != expected:
             raise ValueError("Checkpoint diverges from independently replayed state")
         return {
