@@ -5,7 +5,7 @@ no claim of historical authenticity or candle completeness is made.
 """
 import argparse
 import csv
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 import hashlib
 import json
 import os
@@ -108,7 +108,7 @@ def main(argv=None):
         finally:
             if temporary is not None and temporary.exists():
                 temporary.unlink()
-    except (ValueError, OSError, csv.Error, OverflowError):
+    except (ValueError, OSError, csv.Error, OverflowError, DecimalException):
         parser.exit(2, "CSV import rejected; existing input was not modified.\n")
     print(str(target))
     return 0
