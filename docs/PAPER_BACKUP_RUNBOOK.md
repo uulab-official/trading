@@ -39,12 +39,22 @@ access-controlled storage.
 
 ```sh
 python tools/paper_backup.py verify data/backups/paper-YYYYMMDDTHHMMSSZ
+
+# Optional: independently replay backed-up paper economic state
+python tools/paper_backup.py verify \
+  data/backups/paper-YYYYMMDDTHHMMSSZ --deep
 ```
 
 The output status `backup_bytes_verified` means both backed-up files match
 their manifest's hashes. The report explicitly states
 `economic_replay_verified: false` because this *verify* command only
 checks backup bytes, not economic strategy correctness.
+
+With `--deep`, the auditor additionally replays the backed-up strategy
+history, verifies economic/risk/pending-signal state, and reports
+`backup_deep_verified` with `economic_replay_verified: true`.
+Without it, verification checks only the backed-up bytes and reports
+`backup_bytes_verified`. Neither verifies profitability or broker orders.
 
 For a recovery evaluation, **do not overwrite** running production data.
 Copy the saved archive + checkpoint into new isolated test paths, then
