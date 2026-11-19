@@ -24,7 +24,12 @@ equity in KRW, and entry-block flags.
 Re-run the **same** command later. Overlapping historical candles must
 remain identical. The checkpoint's saved prefix and assumptions are
 independently verified before replay. If no new completed candle was
-received, no additional fills are created. If a checkpoint has different
+received, no additional fills are created. Before requesting the next
+public candle snapshot, the cycle also independently replays and verifies
+any existing checkpoint against its current local archive. A forged
+balance, pending signal, or strategy state therefore stops the cycle
+**before even fetching or appending market data**; both source files
+remain unchanged. If a checkpoint has different
 strategy or initial balance assumptions, the run fails closed; use a
 different checkpoint for an intentionally new experiment.
 
