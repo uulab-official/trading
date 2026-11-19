@@ -98,6 +98,24 @@ class PaperRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([trade["side"] for trade in result["trades"]], ["buy", "sell"])
         self.assertTrue(result["daily_loss_halted"])
 
+    async def test_incremental_prefix_hash_matches_legacy_contract_on_every_resume(self):
+        from trading_bot.paper_runner import _prefix_hash
+        from trading_data import Candle
+        fixture = rows([(100 + i, 100 + i) for i in range(20)])
+        config = PaperRunConfig()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "incremental-hash.json"
+            for prefix in range(1, len(fixture) + 1):
+                await PaperRunner(config).run(fixture, checkpoint_path=path, stop_after=1)
+                state = json.loads(path.read_text())
+                self.assertEqual(prefix, state["next_index"])
+                self.assertEqual(_prefix_hash([Candle(*row) for row in fixture], prefix),
+                                 state["prefix_hash"])
+            # A completed checkpoint must remain valid when replayed again.
+            expected = await PaperRunner(config).run(fixture)
+            resumed = await PaperRunner(config).run(fixture, checkpoint_path=path)
+            self.assertEqual(expected, resumed)
+
     async def test_real_existing_ma_strategy_runs_fully_offline(self):
         prices = [100 - i for i in range(55)] + [50 + i * 5 for i in range(20)] + [145 - i * 8 for i in range(15)]
         fixture = rows([(max(1, price), max(1, price)) for price in prices])
