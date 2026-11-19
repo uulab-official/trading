@@ -16,6 +16,7 @@ for source in (ROOT, ROOT / "packages/core", ROOT / "packages/data",
     sys.path.insert(0, str(source))
 
 from tools.upbit_paper_archive import capture_once
+from tools.paper_checkpoint_audit import audit
 from trading_bot.paper_checkpoint import CheckpointInUseError, locked_checkpoint
 from trading_bot.paper_runner import PaperRunner, PaperRunConfig
 
@@ -40,6 +41,13 @@ def run_cycle(archive, checkpoint, *, market="KRW-BTC", unit=60, count=200,
             prior = json.loads(checkpoint.read_text(encoding="utf-8"))
             if not isinstance(prior, dict) or prior.get("config") != config.identity():
                 raise ValueError("Stored paper portfolio configuration differs; archive left unchanged")
+            # Validate the entire previously recorded paper economy BEFORE
+            # any new public snapshot can mutate archived history. A corrupt
+            # checkpoint cannot be concealed by fetching new candles.
+            checked = audit(archive, checkpoint)
+            if (checked["mode"] != "paper" or checked["symbol"] != config.symbol
+                    or checked["timeframe"] != config.timeframe):
+                raise ValueError("Previous paper portfolio identity mismatch")
         capture = capture_once(archive, market=market, unit=unit, count=count,
                                allow_gaps=allow_gaps, fetcher=fetcher, now_ms=now_ms)
         fixture = json.loads(archive.read_text(encoding="utf-8"))
