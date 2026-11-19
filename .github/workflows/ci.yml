@@ -174,7 +174,7 @@ jobs:
 
   create-release:
     runs-on: ubuntu-latest
-    needs: [build-and-push]
+    needs: [test, lint, docker]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -193,26 +193,23 @@ jobs:
           LICENSE
           CUSTOMER_SETUP.md
         body: |
-          ## Trading Bot Release ${{ github.ref_name }}
+          ## Trading research / paper-only release
 
-          ### Docker Image
+          This tag **does not approve live automated trading**.
+          The Python local paper runner, public quotation snapshot tools,
+          and Rust Docker image have distinct state paths. Never assume
+          an image tag or dashboard status proves broker readiness.
+
+          ### Safe local check
           ```bash
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          python tools/offline_checks.py
           ```
-
-          ### Quick Start
-          1. Download the release
-          2. Run `python -m trading_core.config_cli init`
-          3. Configure your API keys in `config/secrets/secrets.yml`
-          4. Run `docker-compose up -d`
 
           ### Documentation
-          - [Customer Setup Guide](CUSTOMER_SETUP.md)
-          - [Zero-Downtime Deployment](docs/ZERO_DOWNTIME_DEPLOYMENT.md)
-          - [Telegram Setup](docs/TELEGRAM_SETUP.md)
+          - [Paper-only supervisor](docs/PAPER_SUPERVISOR_RUNBOOK.md)
+          - [Production safety gates](PRODUCTION_CHECKLIST.md)
+          - [Offline replay](docs/OFFLINE_PAPER_RUNNER.md)
 
-          ### Verification
-          ```bash
-          # Verify image
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} python -m trading_core.config_cli validate
-          ```
+          Live exchange keys, private account permissions, unattended
+          real orders, and broker-side reconciliation are **not** included
+          or validated by this release.
