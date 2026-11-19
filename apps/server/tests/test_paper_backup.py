@@ -38,6 +38,19 @@ class PaperBackupTests(unittest.TestCase):
         self.assertEqual("backup_bytes_verified", checked["status"])
         self.assertFalse(checked["economic_replay_verified"])
 
+    def test_deep_verification_replays_economic_state_from_backup(self):
+        backup_pair(self.archive, self.checkpoint, self.backup)
+        report = verify_backup(self.backup, deep=True)
+        self.assertEqual("backup_deep_verified", report["status"])
+        self.assertTrue(report["economic_replay_verified"])
+        self.assertEqual(90, report["processed_bars"])
+
+    def test_deep_cli_does_not_modify_backup_files(self):
+        backup_pair(self.archive, self.checkpoint, self.backup)
+        before = (self.backup / "checkpoint.json").read_bytes()
+        self.assertEqual(0, main(["verify", str(self.backup), "--deep"]))
+        self.assertEqual(before, (self.backup / "checkpoint.json").read_bytes())
+
     def test_existing_backup_cannot_be_overwritten(self):
         backup_pair(self.archive, self.checkpoint, self.backup)
         original = (self.backup / "manifest.json").read_bytes()
