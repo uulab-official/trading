@@ -95,6 +95,15 @@ class PaperSupervisorTests(unittest.TestCase):
                    side_effect=RuntimeError("simulated network failure")):
             self.assertEqual(2, main(args))
 
+    def test_cli_reports_nonzero_when_risk_guard_is_latched(self):
+        from tools.paper_supervisor import main
+        args = ["--mode", "paper", "--once", "--archive", str(self.archive),
+                "--checkpoint", str(self.checkpoint), "--heartbeat", str(self.heartbeat)]
+        with patch("tools.paper_supervisor.run_supervised_once",
+                   return_value={"mode": "paper", "live_orders_enabled": False,
+                                 "status": "risk_blocked"}):
+            self.assertEqual(2, main(args))
+
     def test_operator_stop_file_prevents_paper_cycle_and_halts_loop(self):
         from tools.paper_supervisor import PaperEmergencyStop
         stop = self.checkpoint.with_name(self.checkpoint.name + ".STOP")
