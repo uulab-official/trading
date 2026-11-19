@@ -204,3 +204,40 @@ recent `healthy` heartbeat. The health probe treats `stopped`,
 The supervisor does not automatically restart itself. A hard power loss or
 SIGKILL cannot rewrite the heartbeat; age-based stale detection remains the
 fallback and is not instantaneous.
+
+
+## Persistent halt latch and manual recovery (2026-11-19)
+
+A repeated-failure `halted` heartbeat is now an **inter-process
+restart latch**. A restarted supervisor first reads the previous health
+file. If its last status is `halted`, it refuses to fetch quotation data
+or advance the paper ledger. This remains true after a machine reboot or
+process-manager restart, provided the health file is preserved. An active
+operator STOP marker also remains effective.
+
+After diagnosing the incident, to re-enable **paper only**, retain the
+halted heartbeat for investigation and deliberately move it out of the
+active path before starting a new process:
+
+```sh
+# Stop any running process first; do not change live accounts.
+mv data/upbit-btc-1h-health.json \
+  "data/upbit-btc-1h-health.halted-$(date -u +%Y%m%dT%H%M%SZ).json"
+
+# If and only if an operator previously created a STOP marker and
+# has verified a safe restart, remove THAT file separately.
+# rm data/upbit-btc-1h-paper.json.STOP
+
+python tools/paper_supervisor.py --mode paper --once \
+  --market KRW-BTC --unit 60 \
+  --archive data/upbit-btc-1h-archive.json \
+  --checkpoint data/upbit-btc-1h-paper.json \
+  --heartbeat data/upbit-btc-1h-health.json
+```
+
+The saved archive and paper checkpoint must **not** be deleted or reset
+as part of recovery; they are independently verified on restart.
+Malformed or non-paper prior heartbeat files are also refused rather
+than overwritten. Moving the heartbeat only resets the supervisor
+monitoring latch, not strategy risk guards or the underlying paper ledger.
+This control does not replace exchange-side risk controls for real orders.
