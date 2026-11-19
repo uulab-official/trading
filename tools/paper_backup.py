@@ -102,7 +102,7 @@ def backup_pair(archive: Path, checkpoint: Path, destination: Path):
     return manifest
 
 
-def verify_backup(directory: Path):
+def verify_backup(directory: Path, *, deep=False):
     """Check bytes against the manifest; does not restore or trust profitability."""
     directory = Path(directory)
     manifest = json.loads(_read_bounded(directory / "manifest.json", 65536))
@@ -114,11 +114,18 @@ def verify_backup(directory: Path):
     ):
         if hashlib.sha256(_read_bounded(directory / name, maximum)).hexdigest() != manifest.get(key):
             raise ValueError("Backup file differs from manifest")
-    return {"status": "backup_bytes_verified", "mode": "paper",
-            "live_orders_enabled": False, "market": manifest["market"],
+    if deep:
+        verification = audit(directory / "archive.json", directory / "checkpoint.json")
+        if (verification["fixture_sha256"] != manifest["archive_sha256"]
+                or verification["checkpoint_sha256"] != manifest["checkpoint_sha256"]
+                or verification["processed_bars"] != manifest["processed_bars"]
+                or verification["symbol"] != manifest["market"]):
+            raise ValueError("Deep backup replay does not match signed-off manifest fields")
+    return {"status": "backup_deep_verified" if deep else "backup_bytes_verified",
+            "mode": "paper", "live_orders_enabled": False, "market": manifest["market"],
             "processed_bars": manifest["processed_bars"],
-            "economic_replay_verified": False,
-            "note": "Hash verification only; use paper_checkpoint_audit before manual recovery"}
+            "economic_replay_verified": bool(deep),
+            "note": "Even deep replay does not validate real exchange orders or profitability"}
 
 
 def main(argv=None):
@@ -130,12 +137,14 @@ def main(argv=None):
     create.add_argument("--destination", type=Path, required=True)
     verify = sub.add_parser("verify")
     verify.add_argument("directory", type=Path)
+    verify.add_argument("--deep", action="store_true",
+                        help="Independently replay backed-up paper economic state")
     args = parser.parse_args(argv)
     try:
         if args.action == "create":
             result = backup_pair(args.archive, args.checkpoint, args.destination)
         else:
-            result = verify_backup(args.directory)
+            result = verify_backup(args.directory, deep=args.deep)
     except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError, CheckpointInUseError):
         print("Paper backup refused invalid or changing state; no source files modified.", file=sys.stderr)
         return 2
