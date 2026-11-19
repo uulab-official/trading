@@ -130,6 +130,54 @@ class PaperSupervisorTests(unittest.TestCase):
         self.assertEqual("halted", report["status"])
         self.assertTrue(report["operator_stop"])
 
+    def test_halted_process_cannot_resume_trading_on_restart(self):
+        from tools.paper_supervisor import PaperHaltLatched
+        attempts = []
+        def outage(*args, **kwargs):
+            attempts.append("failed")
+            raise RuntimeError("offline")
+        exit_code = run_loop(**self.kwargs, cycle=outage,
+                             now=lambda: 1700000000, interval_seconds=3600,
+                             max_failures=2, sleep=lambda seconds: None)
+        self.assertEqual(2, exit_code)
+        self.assertEqual(["failed", "failed"], attempts)
+        original = self.heartbeat.read_bytes()
+        with self.assertRaises(PaperHaltLatched):
+            run_supervised_once(**self.kwargs, cycle=success_cycle,
+                                now=lambda: 1700000000)
+        self.assertEqual(original, self.heartbeat.read_bytes())
+        # Even a newly started loop must refuse before invoking its cycle.
+        second = []
+        def unexpectedly_active(*args, **kwargs):
+            second.append("called")
+            return success_cycle()
+        self.assertEqual(2, run_loop(**self.kwargs, cycle=unexpectedly_active,
+                                     now=lambda: 1700000000,
+                                     interval_seconds=3600,
+                                     max_failures=2, sleep=lambda seconds: None))
+        self.assertEqual([], second)
+        self.assertEqual("halted", json.loads(self.heartbeat.read_text())["status"])
+
+    def test_operator_must_explicitly_archive_halted_health_for_paper_recovery(self):
+        from tools.paper_supervisor import PaperHaltLatched
+        self.heartbeat.write_text(json.dumps({"mode": "paper",
+             "live_orders_enabled": False, "status": "halted"}))
+        with self.assertRaises(PaperHaltLatched):
+            run_supervised_once(**self.kwargs, cycle=success_cycle,
+                                now=lambda: 1700000000)
+        # Operator retains forensic evidence outside the active heartbeat path.
+        self.heartbeat.rename(self.heartbeat.with_suffix(".halted-backup"))
+        status = run_supervised_once(**self.kwargs, cycle=success_cycle,
+                                     now=lambda: 1700000000)
+        self.assertEqual("healthy", status["status"])
+
+    def test_malformed_prior_health_cannot_be_reset_implicitly(self):
+        self.heartbeat.write_text("invalid-json")
+        with self.assertRaises(ValueError):
+            run_supervised_once(**self.kwargs, cycle=success_cycle,
+                                now=lambda: 1700000000)
+        self.assertEqual("invalid-json", self.heartbeat.read_text())
+
     def test_second_supervisor_refused_even_during_idle_period(self):
         from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
         owner = self.checkpoint.with_name(self.checkpoint.name + ".supervisor")
