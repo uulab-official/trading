@@ -110,6 +110,31 @@ class PaperSupervisorTests(unittest.TestCase):
         self.assertEqual("halted", report["status"])
         self.assertTrue(report["operator_stop"])
 
+    def test_second_supervisor_refused_even_during_idle_period(self):
+        from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
+        owner = self.checkpoint.with_name(self.checkpoint.name + ".supervisor")
+        with locked_checkpoint(owner):
+            with self.assertRaises(CheckpointInUseError):
+                run_loop(**self.kwargs, cycle=success_cycle,
+                         interval_seconds=3600, should_stop=lambda: False,
+                         sleep=lambda value: None)
+        self.assertFalse(self.heartbeat.exists())
+
+    def test_supervisor_lock_released_after_normal_stop(self):
+        from trading_bot.paper_checkpoint import locked_checkpoint
+        owner = self.checkpoint.with_name(self.checkpoint.name + ".supervisor")
+        calls = []
+        def one_cycle(*args, **kwargs):
+            calls.append(1)
+            return success_cycle()
+        self.assertEqual(0, run_loop(**self.kwargs, cycle=one_cycle,
+                                      now=lambda: 1700000000,
+                                      interval_seconds=3600,
+                                      should_stop=lambda: bool(calls)))
+        with locked_checkpoint(owner):
+            pass
+        self.assertEqual([1], calls)
+
     def test_refuses_colliding_paths_and_oversampling(self):
         with self.assertRaises(ValueError):
             run_supervised_once(**dict(self.kwargs, heartbeat=self.checkpoint),
