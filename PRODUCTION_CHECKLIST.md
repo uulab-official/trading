@@ -45,7 +45,8 @@ may automatically enable live order placement.
 - [ ] Single source of truth for positions, trades, and portfolio in operator UI
 - [ ] User authentication, durable audit trail, external alerts, and measured SLO monitoring (local heartbeat probe exists)
 - [ ] Credential-free paper environment continuously exercised for at least 2 weeks
-- [ ] Disaster-recovery and backup/restore drill completed
+- [x] Immutable-by-policy paper archive/checkpoint pair backup and SHA-256 manifest verification added
+- [ ] Disaster-recovery and backup/restore drill completed (manual recovery test pending)
 
 ## Gate C — broker sandbox order lifecycle (NOT complete)
 
