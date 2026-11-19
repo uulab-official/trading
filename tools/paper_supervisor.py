@@ -121,6 +121,15 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
                 break
             # Keep owner lock during interruptible sleep too.
             sleep(interval_seconds)
+        # Graceful shutdown must not leave a recent "healthy" pulse that
+        # suggests the stopped process is still supervising the market.
+        heartbeat_path = Path(heartbeat)
+        if heartbeat_path.exists():
+            previous = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+            if previous.get("mode") != "paper" or previous.get("live_orders_enabled") is not False:
+                raise ValueError("Refusing to overwrite invalid paper heartbeat")
+            previous["status"] = "stopped"
+            _safe_heartbeat(heartbeat_path, previous)
     return 0
 
 
