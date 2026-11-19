@@ -18,6 +18,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools.upbit_paper_cycle import run_cycle
+from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
 
 
 class PaperEmergencyStop(RuntimeError):
@@ -86,37 +87,38 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
         raise ValueError("Paper polling interval must be at least a candle period")
     if type(max_failures) is not int or not (1 <= max_failures <= 10):
         raise ValueError("max_failures must be between 1 and 10")
-    consecutive = 0
-    attempts = 0
-    while not should_stop():
-        try:
-            run_supervised_once(archive=archive, checkpoint=checkpoint,
-                                heartbeat=heartbeat, market=market, unit=unit,
-                                count=count, balance=balance, cycle=cycle, now=now,
-                                kill_switch=kill_switch)
-            consecutive = 0
-        except PaperEmergencyStop:
-            previous = json.loads(Path(heartbeat).read_text(encoding="utf-8"))
-            previous["status"] = "halted"
-            previous["operator_stop"] = True
-            _safe_heartbeat(heartbeat, previous)
-            return 3
-        except Exception:
-            consecutive += 1
-            if consecutive >= max_failures:
-                # Fatal state remains visible until an operator deliberately
-                # diagnoses and restarts. Never spin through a broken archive.
+    # Hold a distinct supervisor owner lock across every idle interval,
+    # not merely while one cycle is running. This excludes a second daemon
+    # which would otherwise race on heartbeat / retry history.
+    owner = Path(checkpoint).with_name(Path(checkpoint).name + ".supervisor")
+    with locked_checkpoint(owner):
+        consecutive = 0
+        while not should_stop():
+            try:
+                run_supervised_once(archive=archive, checkpoint=checkpoint,
+                                    heartbeat=heartbeat, market=market, unit=unit,
+                                    count=count, balance=balance, cycle=cycle, now=now,
+                                    kill_switch=kill_switch)
+                consecutive = 0
+            except PaperEmergencyStop:
                 previous = json.loads(Path(heartbeat).read_text(encoding="utf-8"))
                 previous["status"] = "halted"
-                previous["consecutive_failures"] = consecutive
+                previous["operator_stop"] = True
                 _safe_heartbeat(heartbeat, previous)
-                return 2
-        attempts += 1
-        if should_stop():
-            break
-        # Sleep occurs between complete, separately checkpointed cycles.
-        # The supervisor never retries a single broker submission.
-        sleep(interval_seconds)
+                return 3
+            except Exception:
+                consecutive += 1
+                if consecutive >= max_failures:
+                    # Never spin through broken state or silently auto-restart.
+                    previous = json.loads(Path(heartbeat).read_text(encoding="utf-8"))
+                    previous["status"] = "halted"
+                    previous["consecutive_failures"] = consecutive
+                    _safe_heartbeat(heartbeat, previous)
+                    return 2
+            if should_stop():
+                break
+            # Keep owner lock during interruptible sleep too.
+            sleep(interval_seconds)
     return 0
 
 
