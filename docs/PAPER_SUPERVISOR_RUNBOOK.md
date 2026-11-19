@@ -241,3 +241,15 @@ Malformed or non-paper prior heartbeat files are also refused rather
 than overwritten. Moving the heartbeat only resets the supervisor
 monitoring latch, not strategy risk guards or the underlying paper ledger.
 This control does not replace exchange-side risk controls for real orders.
+
+
+## One-shot versus daemon locking
+
+Both `--once` and `--loop` now acquire the same local
+`checkpoint.json.supervisor` ownership lock. A manual one-shot
+invocation cannot run while the background daemon is in either its
+active or sleeping interval. If an operator wants a one-shot diagnostic,
+stop the daemon first, confirm its heartbeat becomes `stopped`, and
+then run the diagnostic. Never remove lock files to bypass this check.
+External code calling the paper cycle directly should separately
+coordinate access; the cycle maintains its own narrower replay lock.
