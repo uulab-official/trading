@@ -188,6 +188,20 @@ class PaperSupervisorTests(unittest.TestCase):
                          sleep=lambda value: None)
         self.assertFalse(self.heartbeat.exists())
 
+    def test_one_shot_refuses_to_race_active_supervisor_owner(self):
+        from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
+        owner = self.checkpoint.with_name(self.checkpoint.name + ".supervisor")
+        invoked = []
+        def fake_cycle(*args, **kwargs):
+            invoked.append(1)
+            return success_cycle()
+        with locked_checkpoint(owner):
+            with self.assertRaises(CheckpointInUseError):
+                run_supervised_once(**self.kwargs, cycle=fake_cycle,
+                                    now=lambda: 1700000000)
+        self.assertEqual([], invoked)
+        self.assertFalse(self.heartbeat.exists())
+
     def test_supervisor_lock_released_after_normal_stop(self):
         from trading_bot.paper_checkpoint import locked_checkpoint
         owner = self.checkpoint.with_name(self.checkpoint.name + ".supervisor")
