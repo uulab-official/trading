@@ -45,6 +45,13 @@ class PaperHealthcheckTests(unittest.TestCase):
         self.assertEqual("halted", result["status"])
         self.assertTrue(result["operator_action_required"])
 
+    def test_risk_blocked_heartbeat_requires_operator_action(self):
+        self.data["status"] = "risk_blocked"
+        self.save()
+        report = inspect(self.path, now=NOW)
+        self.assertEqual("risk_blocked", report["status"])
+        self.assertTrue(report["operator_action_required"])
+
     def test_future_heartbeat_and_live_marker_rejected(self):
         self.data["last_attempt_utc"] = datetime.fromtimestamp(NOW + 1000, tz=timezone.utc).isoformat()
         self.save()
