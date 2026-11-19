@@ -67,7 +67,18 @@ def _safe_heartbeat(path, payload):
 
 
 def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
-                        balance, cycle=run_cycle, now=time.time, kill_switch=None):
+                        balance, cycle=run_cycle, now=time.time, kill_switch=None,
+                        _owner_locked=False):
+    if not _owner_locked:
+        # One-shot calls must be excluded while the daemon owns the portfolio,
+        # including during its idle period; do not race heartbeat writes.
+        owner = Path(checkpoint).with_name(Path(checkpoint).name + ".supervisor")
+        with locked_checkpoint(owner):
+            return run_supervised_once(
+                archive=archive, checkpoint=checkpoint, heartbeat=heartbeat,
+                market=market, unit=unit, count=count, balance=balance,
+                cycle=cycle, now=now, kill_switch=kill_switch,
+                _owner_locked=True)
     if len({Path(archive).resolve(), Path(checkpoint).resolve(),
             Path(heartbeat).resolve()}) != 3:
         raise ValueError("Archive, checkpoint, and heartbeat must be distinct paths")
@@ -127,7 +138,7 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
                 run_supervised_once(archive=archive, checkpoint=checkpoint,
                                     heartbeat=heartbeat, market=market, unit=unit,
                                     count=count, balance=balance, cycle=cycle, now=now,
-                                    kill_switch=kill_switch)
+                                    kill_switch=kill_switch, _owner_locked=True)
                 consecutive = 0
             except PaperHaltLatched:
                 return 2
