@@ -25,6 +25,28 @@ class PaperEmergencyStop(RuntimeError):
     """Local kill-switch marker denies any new public-data paper cycle."""
 
 
+class PaperHaltLatched(RuntimeError):
+    """Prior repeated failure must be acknowledged before running again."""
+
+
+def _check_prior_halt(heartbeat):
+    """Never silently auto-restart a previously halted paper supervisor."""
+    path = Path(heartbeat)
+    if not path.exists():
+        return
+    raw = path.read_bytes()
+    if len(raw) > 65536:
+        raise ValueError("Prior paper heartbeat exceeds size limit")
+    saved = json.loads(raw)
+    if not isinstance(saved, dict) or saved.get("mode") != "paper" or saved.get("live_orders_enabled") is not False:
+        raise ValueError("Prior heartbeat is not an authenticated paper-mode marker")
+    if saved.get("status") == "halted":
+        if saved.get("operator_stop") is True:
+            raise PaperEmergencyStop("Operator STOP still latched")
+        raise PaperHaltLatched("Prior paper supervisor failure remains latched")
+
+
+
 def _safe_heartbeat(path, payload):
     """Atomically replace only our health file; keep it distinct from trading state."""
     path = Path(path).resolve()
@@ -52,6 +74,9 @@ def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
     observed = now()
     if not isinstance(observed, (int, float)) or not (0 < observed < 10**12):
         raise ValueError("Invalid supervisor clock")
+    # A restart must not reset the failure threshold by replacing halted
+    # state with a fresh healthy pulse. Preserve the old marker on refusal.
+    _check_prior_halt(heartbeat)
     base = {"mode": "paper", "live_orders_enabled": False, "market": market,
             "unit_minutes": unit, "last_attempt_utc": datetime.fromtimestamp(
                 observed, tz=timezone.utc).isoformat()}
@@ -75,6 +100,8 @@ def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
         # strings to a report that might be shown in an operations dashboard.
         failure = dict(base, status="halted" if isinstance(error, PaperEmergencyStop) else "degraded",
                        last_error_type=type(error).__name__)
+        if isinstance(error, PaperEmergencyStop):
+            failure["operator_stop"] = True
         _safe_heartbeat(heartbeat, failure)
         raise
 
@@ -102,6 +129,8 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
                                     count=count, balance=balance, cycle=cycle, now=now,
                                     kill_switch=kill_switch)
                 consecutive = 0
+            except PaperHaltLatched:
+                return 2
             except PaperEmergencyStop:
                 previous = json.loads(Path(heartbeat).read_text(encoding="utf-8"))
                 previous["status"] = "halted"
