@@ -39,6 +39,17 @@ class PaperSupervisorTests(unittest.TestCase):
         self.assertEqual(json.loads(self.heartbeat.read_text()), status)
         self.assertFalse(self.checkpoint.exists())
 
+    def test_risk_blocked_paper_portfolio_is_not_reported_healthy(self):
+        def risk_cycle(*args, **kwargs):
+            result = success_cycle()
+            result["drawdown_halted"] = True
+            return result
+        status = run_supervised_once(**self.kwargs, cycle=risk_cycle,
+                                     now=lambda: 1700000000)
+        self.assertEqual("risk_blocked", status["status"])
+        self.assertTrue(status["drawdown_halted"])
+        self.assertEqual("risk_blocked", json.loads(self.heartbeat.read_text())["status"])
+
     def test_failure_marks_health_degraded_without_leaking_error_detail(self):
         def failing(*args, **kwargs):
             raise ValueError("SECRET_FAKE_TOKEN_DO_NOT_PERSIST")
