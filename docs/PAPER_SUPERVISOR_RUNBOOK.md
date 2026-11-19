@@ -169,3 +169,28 @@ Installing or stopping this service affects only the user's local
 machine. An uninterrupted running Mac, network access, and OS permission
 configuration are required for continuing operation. The file is a
 template, not proof of deployed or successfully monitored runtime.
+
+
+## Concurrency, performance, and risk-state correctness (2026-11-19)
+
+- `--loop` now holds a **supervisor lifetime owner lock** across the
+  entire capture, replay, and idle period. Two cooperating daemons
+  targeting the same paper checkpoint cannot both remain active. A
+  rejected second daemon exits with a nonzero status; its lock file
+  should never be manually deleted while the first is running.
+- The paper replay maintains the existing version-1 checkpoint SHA-256
+  format using **incremental prefix hashing** instead of repeatedly
+  rebuilding the full historical prefix at every bar. The historical
+  hash format remains identical, so no migration or forced checkpoint
+  reset is permitted. The separate initial checkpoint verification
+  still replays recorded history.
+- When the existing simulated daily-loss or drawdown guard blocks
+  entries, the supervisor reports `risk_blocked` (not `healthy`).
+  `paper_healthcheck.py` exits nonzero for this state. The paper
+  supervisor **continues processing completed bars** so simulated
+  exits can still be evaluated; there is no live broker connection.
+  Operators must inspect loss conditions rather than hiding them with
+  a green availability check.
+- The checked-in code and regression tests are not evidence that an
+  independent production CI run, a long-running macOS deployment,
+  or real-money execution has passed.
