@@ -62,7 +62,9 @@ def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
                        count=count, initial_balance=balance)
         if not isinstance(result, dict) or result.get("mode") != "paper" or result.get("live_orders_enabled") is not False:
             raise ValueError("Unexpected non-paper trading result")
-        heartbeat_state = dict(base, status="healthy", processed_bars=result["processed_bars"],
+        risk_blocked = result["daily_loss_halted"] or result["drawdown_halted"]
+        heartbeat_state = dict(base, status="risk_blocked" if risk_blocked else "healthy",
+                               processed_bars=result["processed_bars"],
                                appended_bars=result["appended_bars"],
                                daily_loss_halted=result["daily_loss_halted"],
                                drawdown_halted=result["drawdown_halted"])
