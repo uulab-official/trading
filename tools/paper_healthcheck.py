@@ -25,7 +25,7 @@ def inspect(path, *, max_age_seconds=7200, now=None):
     if not isinstance(data, dict) or data.get("mode") != "paper" or data.get("live_orders_enabled") is not False:
         raise ValueError("Invalid supervisor mode or live safety marker")
     status = data.get("status")
-    if status not in ("healthy", "risk_blocked", "degraded", "halted"):
+    if status not in ("healthy", "risk_blocked", "degraded", "halted", "stopped"):
         raise ValueError("Invalid supervisor status")
     stamp = data.get("last_attempt_utc")
     if not isinstance(stamp, str):
