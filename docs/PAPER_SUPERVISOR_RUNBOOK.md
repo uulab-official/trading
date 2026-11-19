@@ -91,7 +91,7 @@ python tools/paper_healthcheck.py \
 Exit statuses:
 
 - `0`: valid, recent heartbeat marked healthy
-- `2`: invalid, stale, degraded or halted; operator action required
+- `2`: invalid, stale, risk_blocked, degraded, halted or stopped; operator action required
 - `4`: heartbeat missing or unreadable
 
 This only probes the *local reported state*. It does not claim that
@@ -194,3 +194,13 @@ template, not proof of deployed or successfully monitored runtime.
 - The checked-in code and regression tests are not evidence that an
   independent production CI run, a long-running macOS deployment,
   or real-money execution has passed.
+
+
+## Shutdown heartbeat semantics (2026-11-19)
+
+A graceful `--loop` shutdown writes `status: stopped` rather than leaving a
+recent `healthy` heartbeat. The health probe treats `stopped`,
+`risk_blocked`, `halted`, and `degraded` as operator-action-required states.
+The supervisor does not automatically restart itself. A hard power loss or
+SIGKILL cannot rewrite the heartbeat; age-based stale detection remains the
+fallback and is not instantaneous.
