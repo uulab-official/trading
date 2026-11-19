@@ -63,6 +63,30 @@ class PublicPaperCycleTests(unittest.TestCase):
             self.assertEqual(before, checkpoint.read_bytes())
             self.assertEqual(before_archive, archive.read_bytes())
 
+    def test_forged_checkpoint_is_rejected_before_new_market_capture(self):
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "candles.json"
+            checkpoint = Path(directory) / "checkpoint.json"
+            kwargs = {"count": 4, "now_ms": START + 4 * H + 10000,
+                      "fetcher": lambda *args: public_rows([0, 1, 2, 3])}
+            run_cycle(archive, checkpoint, **kwargs)
+            state = json.loads(checkpoint.read_text())
+            state["exchange"]["balances"]["KRW"] = "999999999"
+            checkpoint.write_text(json.dumps(state))
+            history = archive.read_bytes()
+            corrupted = checkpoint.read_bytes()
+            fetch_count = []
+            def forbidden_fetch(*args):
+                fetch_count.append(True)
+                return public_rows([0, 1, 2, 3, 4])
+            with self.assertRaises(ValueError):
+                run_cycle(archive, checkpoint, count=5, now_ms=START + 5 * H + 10000,
+                          fetcher=forbidden_fetch)
+            self.assertEqual([], fetch_count)
+            self.assertEqual(history, archive.read_bytes())
+            self.assertEqual(corrupted, checkpoint.read_bytes())
+
     def test_archive_and_checkpoint_must_be_distinct(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "same.json"
