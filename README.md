@@ -21,7 +21,7 @@ to check causal fills, spot balances, fees, marked equity, and repeatable runs.
 Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nCreate an immutable **offline paper portfolio backup** only after economic
 replay validation with
 `python tools/paper_backup.py create --archive data/upbit-btc-1h-archive.json --checkpoint data/upbit-btc-1h-paper.json --destination data/backups/paper-001`.
-Verify it using `python tools/paper_backup.py verify data/backups/paper-001`.
+Verify file hashes with `python tools/paper_backup.py verify data/backups/paper-001` or independently replay backed-up paper economics with `python tools/paper_backup.py verify data/backups/paper-001 --deep`.
 See [paper backup and manual recovery runbook](docs/PAPER_BACKUP_RUNBOOK.md).
 This does not restore state or enable live orders.
 
