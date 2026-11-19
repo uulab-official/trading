@@ -30,6 +30,9 @@ may automatically enable live order placement.
 ## Gate B — continuously supervised PAPER operation (NOT complete)
 
 - [x] Opt-in local paper supervisor with minimum poll period, atomic health, fail-closed retry threshold
+- [x] Supervisor lifetime exclusive local lock (including idle periods)
+- [x] Incremental v1-compatible checkpoint prefix hashing (local equivalence checked)
+- [x] Paper risk-entry halts surfaced as risk_blocked (not healthy)
 - [x] Read-only heartbeat freshness and clock-skew probe
 - [x] macOS launchd paper-only template with no auto-restart after halted state
 - [ ] Reliable timed ingestion with reconnect budgets, backoff/jitter, and validated multi-day runtime
