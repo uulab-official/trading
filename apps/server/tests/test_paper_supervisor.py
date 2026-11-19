@@ -84,7 +84,7 @@ class PaperSupervisorTests(unittest.TestCase):
                                       interval_seconds=3600,
                                       sleep=lambda value: None,
                                       should_stop=lambda: attempts[0] >= 2))
-        self.assertEqual("healthy", json.loads(self.heartbeat.read_text())["status"])
+        self.assertEqual("stopped", json.loads(self.heartbeat.read_text())["status"])
 
     def test_cli_exits_nonzero_on_public_network_failure(self):
         from tools.paper_supervisor import main
@@ -154,6 +154,7 @@ class PaperSupervisorTests(unittest.TestCase):
         with locked_checkpoint(owner):
             pass
         self.assertEqual([1], calls)
+        self.assertEqual("stopped", json.loads(self.heartbeat.read_text())["status"])
 
     def test_refuses_colliding_paths_and_oversampling(self):
         with self.assertRaises(ValueError):
