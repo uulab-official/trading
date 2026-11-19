@@ -72,6 +72,23 @@ class PaperBackupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_backup(self.backup)
 
+    def test_deep_replay_rejects_consistent_hashes_with_forged_balance(self):
+        import hashlib
+        backup_pair(self.archive, self.checkpoint, self.backup)
+        checkpoint_path = self.backup / "checkpoint.json"
+        state = json.loads(checkpoint_path.read_text())
+        state["exchange"]["balances"]["USDT"] = "999999999"
+        corrupted = json.dumps(state, sort_keys=True).encode("utf-8")
+        checkpoint_path.write_bytes(corrupted)
+        manifest_path = self.backup / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["checkpoint_sha256"] = hashlib.sha256(corrupted).hexdigest()
+        manifest_path.write_text(json.dumps(manifest))
+        # A self-consistent unsiged manifest can pass a byte-only check.
+        self.assertEqual("backup_bytes_verified", verify_backup(self.backup)["status"])
+        with self.assertRaises(ValueError):
+            verify_backup(self.backup, deep=True)
+
     def test_source_collision_rejected(self):
         with self.assertRaises(ValueError):
             backup_pair(self.archive, self.checkpoint, self.archive)
