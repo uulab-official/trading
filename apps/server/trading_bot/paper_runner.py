@@ -152,8 +152,12 @@ class PaperRunner:
         cursor = state["next_index"]
         # Rebuild indicator/cross state from the verified historical prefix.
         # Replayed historical signals are not submitted again.
-        for candle in candles[:cursor]:
+        prefix_digest = hashlib.sha256(b"[")
+        for history_index, candle in enumerate(candles[:cursor]):
             strategy.on_candle(candle)
+            if history_index:
+                prefix_digest.update(b",")
+            prefix_digest.update(json.dumps(_canonical_bar(candle), separators=(",", ":")).encode())
         await exchange.connect()
         manager = OrderManager(exchange)
         consumed = 0
@@ -189,7 +193,15 @@ class PaperRunner:
                     raise ValueError("Unknown offline strategy signal")
                 state["pending_signal"] = {"action": "sell" if action == "close" else action, "source_index": index} if action in ("buy", "sell", "close") else None
                 state["next_index"] = index + 1
-                state["prefix_hash"] = _prefix_hash(candles, index + 1)
+                # The canonical prefix hash uses JSON of a list of bars.
+                # Incrementally hash the list body and add the closing bracket
+                # on a copy to preserve the v1 hash contract exactly.
+                if index:
+                    prefix_digest.update(b",")
+                prefix_digest.update(json.dumps(_canonical_bar(candle), separators=(",", ":")).encode())
+                final_digest = prefix_digest.copy()
+                final_digest.update(b"]")
+                state["prefix_hash"] = final_digest.hexdigest()
                 state["exchange"] = exchange.snapshot()
                 if path is not None:
                     _atomic_checkpoint(path, state)
