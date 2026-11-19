@@ -20,7 +20,7 @@ for source in (ROOT, ROOT / "packages/core", ROOT / "packages/data",
     sys.path.insert(0, str(source))
 
 from tools.paper_checkpoint_audit import audit
-from trading_bot.paper_checkpoint import locked_checkpoint
+from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
 
 MAX_ARCHIVE_BYTES = 32_000_000
 MAX_CHECKPOINT_BYTES = 32_000_000
@@ -136,7 +136,7 @@ def main(argv=None):
             result = backup_pair(args.archive, args.checkpoint, args.destination)
         else:
             result = verify_backup(args.directory)
-    except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError):
+    except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError, CheckpointInUseError):
         print("Paper backup refused invalid or changing state; no source files modified.", file=sys.stderr)
         return 2
     print(json.dumps(result, sort_keys=True, allow_nan=False))
