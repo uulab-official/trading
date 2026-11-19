@@ -184,7 +184,7 @@ def main(argv=None):
         print("Paper supervisor stopped safely (" + type(error).__name__ + "). Inspect local health.", file=sys.stderr)
         return 2
     print(json.dumps(status, sort_keys=True))
-    return 0
+    return 0 if status["status"] == "healthy" else 2
 
 
 if __name__ == "__main__":
