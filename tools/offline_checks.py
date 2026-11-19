@@ -7,6 +7,9 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+# Script execution sets sys.path[0] to tools/, not the repository root.
+# Server regression tests import tools.* directly; restore project-root imports.
+sys.path.insert(0, str(ROOT))
 for source in [ROOT / "packages/core", ROOT / "packages/data", ROOT / "packages/strategy", ROOT / "apps/server"]:
     sys.path.insert(0, str(source))
 
