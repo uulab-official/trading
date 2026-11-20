@@ -33,7 +33,7 @@ up to three additional requests are made for backfill.
 
 ## Independent pre-promotion review
 
-After creating a candidate, verify the original archive and paper
+After stopping the supervisor, create the candidate and verify the original archive and paper
 checkpoint, compare every historical candle, and independently replay
 the saved economic state against the candidate:
 
