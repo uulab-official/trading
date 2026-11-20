@@ -44,11 +44,6 @@ class TossStockFixtureCliTests(unittest.TestCase):
         self.assertEqual(1, len(converted["candles"]))
 
     def test_rejects_daily_interval_before_creating_output(self):
-        with redirect_stderr(StringIO()):
-            with self.assertRaises(SystemExit) as error:
-                main(self.args[:])
-        # Existing valid arguments succeed, while 1d always fails.
-        self.assertEqual(0, error.exception.code) if False else None
         invalid = self.args.copy()
         invalid[invalid.index("1m")] = "1d"
         with redirect_stderr(StringIO()), self.assertRaises(SystemExit) as error:
