@@ -148,6 +148,10 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
                 if type(prior_failures) is not int or not (1 <= prior_failures <= 10):
                     raise ValueError("Invalid prior consecutive failure count")
                 consecutive = prior_failures
+                if consecutive >= max_failures:
+                    prior["status"] = "halted"
+                    _safe_heartbeat(heartbeat, prior)
+                    return 2
         while not should_stop():
             try:
                 run_supervised_once(archive=archive, checkpoint=checkpoint,
