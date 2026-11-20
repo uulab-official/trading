@@ -54,6 +54,11 @@ class OrderIntentJournal:
                     broker_order_id TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_intents_status ON intents(status);
+                -- A broker execution ID must never be treated as evidence
+                -- for two distinct local client intents.
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_intents_broker_order
+                    ON intents(broker_order_id)
+                    WHERE broker_order_id IS NOT NULL;
             """)
 
     def _connect(self):
@@ -168,3 +173,55 @@ class OrderIntentJournal:
             return [self._row(row) for row in db.execute(
                 "SELECT * FROM intents WHERE status IN ('reserved','uncertain') ORDER BY client_id"
             ).fetchall()]
+
+    def audit_integrity(self):
+        """Read-only preflight: reject corrupt or contradictory journal state.
+
+        This is not proof broker evidence is authentic. Never submit orders
+        based only on this local database report.
+        """
+        with closing(self._connect()) as db:
+            if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                raise ValueError("SQLite integrity check failed")
+            records = [dict(row) for row in db.execute(
+                "SELECT * FROM intents ORDER BY client_id"
+            ).fetchall()]
+        pending = []
+        order_ids = set()
+        for row in records:
+            _identifier(row["client_id"], "client_id")
+            if not re.fullmatch(r"[A-Z0-9]{2,20}/(?:KRW|USDT)", row["symbol"]):
+                raise ValueError("Unrecognized journal symbol")
+            if row["side"] not in ("buy", "sell"):
+                raise ValueError("Unrecognized journal side")
+            if _quantity(row["quantity"]) != row["quantity"]:
+                raise ValueError("Noncanonical journal quantity")
+            if row["status"] in PENDING:
+                if any(row[field] is not None for field in
+                       ("outcome", "evidence_ref", "broker_order_id")):
+                    raise ValueError("Unresolved intent carries final evidence")
+                pending.append(row["client_id"])
+            elif row["status"] == "reconciled":
+                if row["outcome"] not in FINAL:
+                    raise ValueError("Reconciled intent lacks final outcome")
+                _identifier(row["evidence_ref"], "evidence_ref")
+                order_id = row["broker_order_id"]
+                if row["outcome"] == "filled" and not order_id:
+                    raise ValueError("Filled intent lacks broker order ID")
+                if order_id is not None:
+                    _identifier(order_id, "broker_order_id")
+                    if order_id in order_ids:
+                        raise ValueError("Duplicate broker order ID across intents")
+                    order_ids.add(order_id)
+            else:
+                raise ValueError("Unknown broker intent status")
+        if len(pending) > 1:
+            raise ValueError("Multiple unresolved broker intents detected")
+        return {
+            "status": "local_intent_integrity_verified",
+            "live_orders_approved": False,
+            "intent_count": len(records),
+            "unresolved_count": len(pending),
+            "new_intents_permitted": len(pending) == 0,
+            "warning": "Local state verification does not validate external broker evidence",
+        }
