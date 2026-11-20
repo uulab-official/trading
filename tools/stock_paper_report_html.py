@@ -4,6 +4,8 @@ No server, JavaScript, CDN, account credentials or order execution.
 The database is inspected read-only before generating any view.
 """
 import argparse
+from decimal import Decimal, Context, localcontext
+import sqlite3
 import html
 import json
 import os
@@ -25,15 +27,19 @@ def generate(fixture, database, *, initial_cash, fee_pct="0.1",
         fixture, database, initial_cash=initial_cash,
         fee_pct=fee_pct, fast=fast, slow=slow, allocation_pct=allocation_pct,
     )
-    closes = [float(row[4]) for row in fixture["candles"]]
-    lo, hi = min(closes), max(closes)
-    width, height = 900, 230
-    span = hi - lo or 1
-    coords = [
-        f"{16 + i * (width - 32) / max(1, len(closes)-1):.2f},"
-        f"{height-16-(value-lo)*(height-32)/span:.2f}"
-        for i, value in enumerate(closes)
-    ]
+    with localcontext(Context(prec=28)):
+        closes = [Decimal(str(row[4])) for row in fixture["candles"]]
+        if not closes or any(not value.is_finite() or value <= 0 for value in closes):
+            raise ValueError("Cannot chart invalid stock closing values")
+        lo, hi = min(closes), max(closes)
+        width, height = 900, 230
+        span = hi - lo
+        coords = []
+        for i, value in enumerate(closes):
+            ratio = float((value - lo) / span) if span else 0.5
+            x = 16 + i * (width - 32) / max(1, len(closes) - 1)
+            y = height - 16 - ratio * (height - 32)
+            coords.append(f"{x:.2f},{y:.2f}")
     cards = [
         ("모드", "PAPER ONLY"),
         ("종목", audit["symbol"]),
@@ -119,7 +125,7 @@ def main(argv=None):
             stream.write(page)
             stream.flush()
             os.fsync(stream.fileno())
-    except (ValueError, OSError, TypeError, KeyError, ArithmeticError):
+    except (ValueError, OSError, TypeError, KeyError, ArithmeticError, sqlite3.Error):
         print("Paper stock HTML report refused invalid data; ledger was not changed.",
               file=sys.stderr)
         return 2
