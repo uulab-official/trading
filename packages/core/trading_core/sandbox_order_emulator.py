@@ -5,6 +5,7 @@ This adapter is for fault-injection and accounting-contract experiments only.
 """
 from decimal import Decimal, InvalidOperation
 import hashlib
+import re
 
 
 def _positive(value, label, *, allow_zero=False):
@@ -41,8 +42,12 @@ class SandboxOrderEmulator:
             raise ValueError("Duplicate submission is forbidden; query order state")
         if side not in ("buy", "sell"):
             raise ValueError("Spot side must be buy or sell")
-        if not isinstance(symbol, str) or "/" not in symbol:
+        if not isinstance(symbol, str) or not re.fullmatch(
+            r"[A-Z0-9]{2,20}/(?:KRW|USDT)", symbol
+        ):
             raise ValueError("Invalid spot market")
+        if symbol.split("/")[0] == symbol.split("/")[1]:
+            raise ValueError("Self-quoted spot market forbidden")
         qty = _positive(quantity, "quantity")
         order_id = "sandbox-" + str(self.next_id)
         self.next_id += 1
@@ -69,6 +74,8 @@ class SandboxOrderEmulator:
         qty = _positive(quantity, "fill quantity")
         rate = _positive(price, "fill price")
         fee = _positive(fee_pct, "fee percentage", allow_zero=True)
+        if fee >= 100:
+            raise ValueError("Sandbox fee percentage must be below 100")
         current = Decimal(row["filled"])
         requested = Decimal(row["quantity"])
         if current + qty > requested:
