@@ -103,3 +103,19 @@ on-demand nonaggregated crypto/stock auditing, see
 [stock PAPER backup and unified monitor](STOCK_PAPER_BACKUP_MONITOR.md).
 Stop active writers before backup. There is still no live broker order
 connection or autonomous stock-market scheduler.
+
+## Transactional economic reconciliation (2026-11-20)
+
+An important strategy-ledger safety issue was corrected: independently
+replayed equity was previously compared with stored equity **after**
+committing the SQLite strategy cursor and simulated fills. The full
+expected-equity comparison now occurs **inside the same IMMEDIATE write
+transaction**, before commit. Any difference rolls back both the new
+fill events and the updated processed-bar cursor; the caller cannot
+observe a rejected economic replay with partially persisted state.
+
+The regression suite injects a deliberately incorrect expected equity,
+verifies unchanged cursor and fill counts, then confirms the valid
+unmodified replay can resume from the original position. This fix is
+specific to local offline paper state. It is not authenticated broker
+reconciliation or an exchange execution guarantee.
