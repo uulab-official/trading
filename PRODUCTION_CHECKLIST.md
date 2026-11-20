@@ -61,7 +61,8 @@ may automatically enable live order placement.
 - [ ] Clock and nonce, API authentication, and least-privilege credentials
 - [ ] No withdrawal permission; IP restrictions where supported
 - [ ] Broker reconcilation of balances, orders, trades, and fee currency
-- [ ] Durable order-intent journal BEFORE network submission
+- [x] Durable offline SQLite order-intent journal with unknown-ACK state, unique client IDs, and concurrent-writer tests
+- [ ] Integrate journal BEFORE network submission in a verified broker sandbox adapter (not connected yet)
 - [ ] Broker idempotency: client IDs, unknown-result lookup, deduplication
 - [ ] Partial fills, cancel/replace, timeout, reconnect, and retry semantics
 - [ ] Fail-closed start: no new orders until all prior intents reconcile
