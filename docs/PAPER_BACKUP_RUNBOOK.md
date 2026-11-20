@@ -8,8 +8,10 @@ state automatically. It only accepts an independently replay-verified
 
 ## Create a backup
 
-Stop continuous supervision first or let the command refuse when the paper
-writer owns either state lock. From the repository root:
+Stop continuous supervision first. The backup operation now requires the
+same long-lived supervisor ownership lock as one-shot/loop paper execution;
+it refuses immediately when a daemon is active, including its idle interval.
+It also independently locks the archive and checkpoint while copying. From the repository root:
 
 ```sh
 python tools/paper_backup.py create \
