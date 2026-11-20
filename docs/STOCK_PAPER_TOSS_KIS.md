@@ -71,3 +71,57 @@ python tools/offline_checks.py
 
 A passing synthetic test is evidence of calculation correctness under
 its assumptions, not of investment returns or live order compatibility.
+
+## Durable stock paper milestone (2026-11-20)
+
+`packages/core/trading_core/stock_paper_ledger.py` now persists
+simulated stock fills in a local SQLite WAL ledger. Before every new
+fill, it replays the existing ordered log into the original cash
+simulator, compares each saved execution record with the reconstructed
+result, then commits one new record under `BEGIN IMMEDIATE`. This
+makes identical client-ID replays duplicate-free and prevents two
+local writers from overspending the same cash balance.
+
+**Manual paper-only commands:**
+
+```sh
+python tools/stock_paper_cli.py \
+  --mode paper --database data/stock-krw-paper.sqlite \
+  --currency KRW --initial-cash 1000000 --fee-pct 0.1 \
+  trade --client-id demo-buy-001 --symbol 005930 \
+  --side buy --shares 1 --price 80000
+
+python tools/stock_paper_cli.py \
+  --mode paper --database data/stock-krw-paper.sqlite \
+  --currency KRW --initial-cash 1000000 --fee-pct 0.1 \
+  report --mark 005930=81000
+```
+
+All prices are **operator-supplied synthetic assumptions** here. The
+report refuses to value holdings unless every held symbol is given
+an explicit positive mark. It does not fetch Toss prices, model stock
+splits, tick sizes, markets, actual fees/taxes, exchange holidays,
+partial broker fills, FX, or account balances.
+
+The database configuration (currency, initial cash, fees) is fixed
+upon initialization; mismatched restarts are rejected. The stored
+execution log provides local crash persistence but not signatures
+against a hostile database administrator. Archive and operational
+backup procedures for this new stock database are still pending.
+The crypto paper ledger remains separate.
+
+## Official Toss reference
+
+- Official OpenAPI index:
+  https://openapi.tossinvest.com/openapi-docs/latest/api-reference/README.md
+- Official market data:
+  https://developers.tossinvest.com/docs/market-data
+- Official OAuth:
+  https://developers.tossinvest.com/docs/auth
+
+Toss market data needs OAuth access, even for read-only price queries,
+and requires registered allowed client IPs per the official guide.
+Do **not** use the order-creation endpoints when testing paper
+transactions. A production read-only connector must be separately
+written and verified against the canonical OpenAPI schema and
+market-data permissions before connecting these prices to the ledger.
