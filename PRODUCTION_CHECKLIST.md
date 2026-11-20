@@ -62,6 +62,8 @@ may automatically enable live order placement.
 - [ ] No withdrawal permission; IP restrictions where supported
 - [ ] Broker reconcilation of balances, orders, trades, and fee currency
 - [x] Durable offline SQLite order-intent journal with unknown-ACK state, unique client IDs, and concurrent-writer tests
+- [x] Local read-only SQLite intent preflight rejects corrupt state, unresolved orders and duplicate broker IDs
+- [ ] Independently verify all broker evidence identifiers against authenticated sandbox responses
 - [ ] Integrate journal BEFORE network submission in a verified broker sandbox adapter (not connected yet)
 - [ ] Broker idempotency: client IDs, unknown-result lookup, deduplication
 - [ ] Partial fills, cancel/replace, timeout, reconnect, and retry semantics
