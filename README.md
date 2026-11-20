@@ -22,7 +22,11 @@ Audit an existing checkpoint without changing its paper state using\n`python too
 foundation for future broker sandbox integration. It records ambiguous
 client order IDs and prevents duplicate or conflicting order intentions;
 there is **no authenticated broker or live order implementation**.
-See [order intent journal safety design](docs/ORDER_INTENT_JOURNAL.md).
+Run `python tools/order_intent_preflight.py data/sandbox-intents.sqlite`
+against an **existing** local journal to check SQLite integrity and
+unresolved order intentions without creating or modifying the journal.
+An exit code of `3` blocks further intents; even exit `0` does not
+approve live trading. See [order intent journal safety design](docs/ORDER_INTENT_JOURNAL.md).
 
 Create an immutable **offline paper portfolio backup** only after economic
 replay validation with
