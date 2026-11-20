@@ -24,6 +24,7 @@ def main():
         ("packages/core/tests", "test_paper_ledger.py"),
         ("packages/core/tests", "test_order_intent_journal.py"),
         ("packages/core/tests", "test_sandbox_order_emulator.py"),
+        ("packages/core/tests", "test_stock_paper.py"),
         ("packages/core/tests", "test_daily_loss_contract.py"),
         ("packages/core/tests", "test_entry_equity_guard.py"),
         ("packages/core/tests", "test_zero_mark_valuation.py"),
