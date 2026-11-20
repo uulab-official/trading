@@ -40,6 +40,9 @@ may automatically enable live order placement.
 - [ ] Reliable timed ingestion with reconnect budgets, backoff/jitter, and validated multi-day runtime
 - [ ] Clock-skew detection and NTP operational checks; reject stale or future prices
 - [x] Bounded historical pagination to a **separate candidate** with overlap and no-gap checks
+- [x] Independent backfill-candidate/previous-ledger review before manual promotion
+- [x] Manual backup/candidate review excludes an active local paper supervisor
+- [x] Consecutive paper failure budget persisted atomically across process restarts
 - [ ] Operator-validated complete backfill integration for live paper supervisor (not automated)
 - [ ] Crash-safe archive+strategy state orchestration and startup reconciliation
 - [ ] Circuit breaker for network instability, schema drift, data gaps, bad ticks
