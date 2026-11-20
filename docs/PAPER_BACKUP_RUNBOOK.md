@@ -25,6 +25,10 @@ Three files are created in a **new** output directory:
 - `manifest.json`: UTC backup timestamp, market/timeframe, bars and
   SHA-256 hashes for both components
 
+The optional deep verification operates on private temporary copies so its
+POSIX checkpoint lock files cannot alter the backed-up directory. This ensures
+that the verified backup retains only its three intended files.
+
 The tool independently replays the saved strategy prefix before locking
 and copying. After acquiring both local POSIX locks, it checks the bytes
 still match the verified hashes. It writes staging files with owner-only
