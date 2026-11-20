@@ -18,7 +18,26 @@ The existing backtest engine now has separate
 `python tools/offline_checks.py --include-backtest` with pandas/numpy available
 to check causal fills, spot balances, fees, marked equity, and repeatable runs.
 
-Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nFor **stock trading experiments**, a separate credential-free
+Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nFor local Toss Korean/US equity paper research, the repository now has
+**three deliberately separated paths**: saved JSON/opt-in OAuth **read-only
+1m candles**, deterministic next-open **stock MA paper backtesting**, and a
+durable SQLite **manual stock cash ledger**. No path submits actual orders.
+See [stock paper + Toss/KIS runbook](docs/STOCK_PAPER_TOSS_KIS.md).
+
+```sh
+# First obtain an operator-approved Toss read-only 1m paper fixture.
+python tools/stock_paper_backtest.py data/toss-005930-paper-bars.json \
+  --initial-cash 1000000 --fast 5 --slow 20
+
+# Separately, try a manual virtual fill in a persistent local paper book.
+python tools/stock_paper_cli.py --mode paper \
+  --database data/stock-krw-paper.sqlite \
+  --currency KRW --initial-cash 1000000 --fee-pct 0.1 \
+  trade --client-id example-buy-001 --symbol 005930 \
+  --side buy --shares 1 --price 80000
+```
+
+For **stock trading experiments**, a separate credential-free
 `StockPaperBook` now simulates whole-share KRW/USD transactions,
 fees, marked equity, and duplicate-order refusal. The Toss Securities
 Open API supports Korean and US stocks, but this stock emulator does
