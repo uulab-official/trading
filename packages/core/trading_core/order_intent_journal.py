@@ -101,6 +101,9 @@ class OrderIntentJournal:
         client_id = _identifier(client_id, "client_id")
         if not isinstance(symbol, str) or not re.fullmatch(r"[A-Z0-9]{2,20}/(?:KRW|USDT)", symbol):
             raise ValueError("Journal supports explicit KRW/USDT spot symbols only")
+        base, quote = symbol.split("/")
+        if base == quote:
+            raise ValueError("Spot base and quote currencies must differ")
         if side not in ("buy", "sell"):
             raise ValueError("Invalid spot order side")
         qty = _quantity(quantity)
@@ -219,6 +222,9 @@ class OrderIntentJournal:
             _identifier(row["client_id"], "client_id")
             if not re.fullmatch(r"[A-Z0-9]{2,20}/(?:KRW|USDT)", row["symbol"]):
                 raise ValueError("Unrecognized journal symbol")
+            asset, quoted = row["symbol"].split("/")
+            if asset == quoted:
+                raise ValueError("Invalid self-quoted spot symbol")
             if row["side"] not in ("buy", "sell"):
                 raise ValueError("Unrecognized journal side")
             if _quantity(row["quantity"]) != row["quantity"]:
