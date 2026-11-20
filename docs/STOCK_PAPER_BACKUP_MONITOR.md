@@ -123,3 +123,12 @@ that an independent audit reconstructs state, that SQLite backup deep
 verification succeeds, and that the Korean report contains only offline
 paper information. The smoke does not authenticate Toss, invoke KIS VTS,
 place any real orders, or prove future trading profitability.
+
+
+## Optional static dashboard view
+
+Render a local, read-only, CSP-restricted HTML dashboard using
+`tools/paper_portfolio_report_html.py` against the output of
+`tools/paper_portfolio_status.py`. This view never aggregates currencies
+or connects to a live brokerage account. See
+[PAPER_PORTFOLIO_DASHBOARD.md](PAPER_PORTFOLIO_DASHBOARD.md).
