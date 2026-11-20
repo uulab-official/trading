@@ -41,6 +41,7 @@ def main():
         ("apps/server/tests", "test_upbit_public_paper_snapshot.py"),
         ("apps/server/tests", "test_upbit_paper_archive.py"),
         ("apps/server/tests", "test_upbit_paper_backfill.py"),
+        ("apps/server/tests", "test_review_paper_backfill.py"),
         ("apps/server/tests", "test_upbit_paper_cycle.py"),
         ("apps/server/tests", "test_paper_supervisor.py"),
         ("apps/server/tests", "test_paper_healthcheck.py"),
