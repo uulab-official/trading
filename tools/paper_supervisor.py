@@ -68,7 +68,7 @@ def _safe_heartbeat(path, payload):
 
 def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
                         balance, cycle=run_cycle, now=time.time, kill_switch=None,
-                        _owner_locked=False):
+                        _owner_locked=False, _previous_failures=0):
     if not _owner_locked:
         # One-shot calls must be excluded while the daemon owns the portfolio,
         # including during its idle period; do not race heartbeat writes.
@@ -78,7 +78,7 @@ def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
                 archive=archive, checkpoint=checkpoint, heartbeat=heartbeat,
                 market=market, unit=unit, count=count, balance=balance,
                 cycle=cycle, now=now, kill_switch=kill_switch,
-                _owner_locked=True)
+                _owner_locked=True, _previous_failures=_previous_failures)
     if len({Path(archive).resolve(), Path(checkpoint).resolve(),
             Path(heartbeat).resolve()}) != 3:
         raise ValueError("Archive, checkpoint, and heartbeat must be distinct paths")
@@ -113,6 +113,12 @@ def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
                        last_error_type=type(error).__name__)
         if isinstance(error, PaperEmergencyStop):
             failure["operator_stop"] = True
+        else:
+            # Persist the failure budget in the SAME atomic error heartbeat.
+            # A crash before the loop's exception handler cannot erase it.
+            if type(_previous_failures) is not int or _previous_failures < 0:
+                raise ValueError("Invalid prior paper failure budget")
+            failure["consecutive_failures"] = _previous_failures + 1
         _safe_heartbeat(heartbeat, failure)
         raise
 
@@ -157,7 +163,8 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
                 run_supervised_once(archive=archive, checkpoint=checkpoint,
                                     heartbeat=heartbeat, market=market, unit=unit,
                                     count=count, balance=balance, cycle=cycle, now=now,
-                                    kill_switch=kill_switch, _owner_locked=True)
+                                    kill_switch=kill_switch, _owner_locked=True,
+                                _previous_failures=consecutive)
                 consecutive = 0
             except PaperHaltLatched:
                 return 2
