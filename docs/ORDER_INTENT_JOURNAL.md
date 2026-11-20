@@ -75,3 +75,38 @@ broker, or network connection.
 **Do not connect this journal to real-money order APIs until the full
 sandbox and independent security/test gates in
 [PRODUCTION_CHECKLIST.md](../PRODUCTION_CHECKLIST.md) are passed.**
+
+## Independent local preflight (2026-11-20)
+
+The journal now exposes a read-only preflight that opens an **existing**
+SQLite database in `mode=ro` with `query_only=ON`. It does not create
+an absent database, change trading settings, place orders, or fetch broker
+account information.
+
+```sh
+python tools/order_intent_preflight.py data/sandbox-intents.sqlite
+```
+
+Output contains `local_intent_integrity_verified`, recorded and
+unresolved intent counts, and an explicit
+`live_orders_approved: false` flag.
+
+Exit statuses:
+- `0`: local database checks passed with no unresolved intent; **not
+  authorization to submit broker orders**
+- `3`: at least one `reserved` or `uncertain` intent remains; do not
+  submit or retry an order
+- `2`: journal absent, corrupt, or internally inconsistent
+
+The preflight validates SQLite quick integrity, canonical spot order
+identifiers and quantities, pending-versus-final state invariants, and
+unique external broker order IDs across intents. A unique SQL index now
+prevents a single broker order ID from being reconciled to two local
+client IDs. An existing database with conflicting broker order IDs
+fails index initialization rather than being repaired or silently
+accepted. Preflight can identify corrupted *local* records; it cannot
+verify whether `evidence_ref` refers to authentic exchange evidence.
+
+Sandbox deployment remains unapproved until a separate connector
+authenticates broker evidence, handles partial fills, and passes
+fault-injection and security review gates.
