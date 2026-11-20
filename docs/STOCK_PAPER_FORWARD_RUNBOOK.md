@@ -94,3 +94,12 @@ restart idempotency, conflicting configurations, tampered fills, manual
 order separation, read-only auditing, and static report safety. Tests
 and CI must actually pass before these commands are operated without
 supervision.
+
+
+## Independent database backup and cross-market status
+
+For native SQLite WAL-consistent snapshots, deep backup replay, and
+on-demand nonaggregated crypto/stock auditing, see
+[stock PAPER backup and unified monitor](STOCK_PAPER_BACKUP_MONITOR.md).
+Stop active writers before backup. There is still no live broker order
+connection or autonomous stock-market scheduler.
