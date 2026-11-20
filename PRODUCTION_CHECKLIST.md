@@ -64,6 +64,10 @@ may automatically enable live order placement.
 - [x] Completed-bar MA-cross paper stock backtest with next-available-open fills
 - [x] Transactional completed-bar stock strategy cursor and simulated fills in SQLite
 - [x] Read-only full replay audit and static local stock PAPER HTML report
+- [x] SQLite native stock-paper strategy backup with SHA-256, deep replay and non-overwriting output
+- [x] Single offline crypto + stock audit command (portfolio totals intentionally unaggregated)
+- [ ] Test stock paper backup/restore under actual operational failures and establish RPO/RTO
+- [ ] Real-time multi-asset monitoring with authenticated operators, fresh data checks and verified FX
 - [ ] Validate real Toss quote credentials and feed, market calendar, operational monitoring and stock-ledger backup
 - [ ] Validate actual Toss OAuth/IP allowlisting and real quote ingestion against live API
 - [ ] Production-grade OAuth token reuse (one active token per client), rate-limit budgets, and 429 recovery
