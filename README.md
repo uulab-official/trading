@@ -18,7 +18,15 @@ The existing backtest engine now has separate
 `python tools/offline_checks.py --include-backtest` with pandas/numpy available
 to check causal fills, spot balances, fees, marked equity, and repeatable runs.
 
-Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nA **deterministic offline broker emulator** now exercises synthetic partial fills,
+Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nFor **stock trading experiments**, a separate credential-free
+`StockPaperBook` now simulates whole-share KRW/USD transactions,
+fees, marked equity, and duplicate-order refusal. The Toss Securities
+Open API supports Korean and US stocks, but this stock emulator does
+**not** call Toss order APIs or use real money. KIS has a separate
+official virtual-trading environment for future broker-level testing.
+See [stock paper and Toss/KIS integration plan](docs/STOCK_PAPER_TOSS_KIS.md).
+
+A **deterministic offline broker emulator** now exercises synthetic partial fills,
 lost acknowledgments, cancellation and duplicate-submission refusal.
 It does not connect to any exchange or approve real orders.
 See [sandbox order fault-injection limits](docs/SANDBOX_ORDER_LIFECYCLE.md).
