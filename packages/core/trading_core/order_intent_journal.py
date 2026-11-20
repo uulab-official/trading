@@ -61,12 +61,19 @@ class OrderIntentJournal:
                     WHERE broker_order_id IS NOT NULL;
             """)
 
-    def _connect(self):
-        con = sqlite3.connect(str(self.path), timeout=5.0, isolation_level=None)
+    def _connect(self, *, read_only=False):
+        if read_only:
+            # No implicit schema creation, data mutations, or journal
+            # mode writes during a safety preflight.
+            con = sqlite3.connect(self.path.as_uri() + "?mode=ro",
+                                  uri=True, timeout=5.0, isolation_level=None)
+            con.execute("PRAGMA query_only=ON")
+        else:
+            con = sqlite3.connect(str(self.path), timeout=5.0, isolation_level=None)
+            con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA synchronous=FULL")
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA busy_timeout=5000")
-        con.execute("PRAGMA journal_mode=WAL")
-        con.execute("PRAGMA synchronous=FULL")
         return con
 
     @staticmethod
@@ -180,7 +187,7 @@ class OrderIntentJournal:
         This is not proof broker evidence is authentic. Never submit orders
         based only on this local database report.
         """
-        with closing(self._connect()) as db:
+        with closing(self._connect(read_only=True)) as db:
             if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                 raise ValueError("SQLite integrity check failed")
             records = [dict(row) for row in db.execute(
