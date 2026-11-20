@@ -89,6 +89,47 @@ class OrderIntentJournalTests(unittest.TestCase):
             self.store.reconcile("missing", outcome="filled", evidence_ref="note",
                                  broker_order_id="order-1")
 
+    def test_audit_integrity_reports_unresolved_without_approving_orders(self):
+        initial = self.store.audit_integrity()
+        self.assertEqual(0, initial["intent_count"])
+        self.assertFalse(initial["live_orders_approved"])
+        self.store.reserve("client-001", "BTC/KRW", "buy", "0.001")
+        blocked = OrderIntentJournal(self.path).audit_integrity()
+        self.assertEqual(1, blocked["unresolved_count"])
+        self.assertFalse(blocked["new_intents_permitted"])
+        self.store.mark_uncertain("client-001")
+        self.assertFalse(self.store.audit_integrity()["new_intents_permitted"])
+        self.store.reconcile("client-001", outcome="filled",
+                             evidence_ref="broker-evidence-001",
+                             broker_order_id="upbit-001")
+        checked = self.store.audit_integrity()
+        self.assertEqual(0, checked["unresolved_count"])
+        self.assertEqual(1, checked["intent_count"])
+        self.assertFalse(checked["live_orders_approved"])
+
+    def test_one_broker_order_cannot_reconcile_multiple_client_ids(self):
+        self.store.reserve("client-001", "BTC/KRW", "buy", "0.001")
+        self.store.reconcile("client-001", outcome="filled",
+                             evidence_ref="evidence-001",
+                             broker_order_id="upbit-001")
+        self.store.reserve("client-002", "BTC/KRW", "sell", "0.001")
+        import sqlite3
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.reconcile("client-002", outcome="filled",
+                                 evidence_ref="evidence-002",
+                                 broker_order_id="upbit-001")
+        self.assertEqual("reserved", self.store.get("client-002")["status"])
+        self.assertEqual(1, self.store.audit_integrity()["unresolved_count"])
+
+    def test_manual_invalid_journal_rows_are_detected_by_preflight(self):
+        self.store.reserve("client-001", "BTC/KRW", "buy", "0.001")
+        import sqlite3
+        with sqlite3.connect(self.path) as db:
+            db.execute("UPDATE intents SET outcome='filled' WHERE client_id=?",
+                       ("client-001",))
+        with self.assertRaises(ValueError):
+            self.store.audit_integrity()
+
     def test_rejected_submission_can_be_reconciled_without_order_id(self):
         self.store.reserve("client-001", "BTC/KRW", "buy", "0.001")
         result = self.store.reconcile("client-001", outcome="rejected",
