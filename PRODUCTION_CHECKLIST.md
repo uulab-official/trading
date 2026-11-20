@@ -66,7 +66,8 @@ may automatically enable live order placement.
 - [ ] Independently verify all broker evidence identifiers against authenticated sandbox responses
 - [ ] Integrate journal BEFORE network submission in a verified broker sandbox adapter (not connected yet)
 - [ ] Broker idempotency: client IDs, unknown-result lookup, deduplication
-- [ ] Partial fills, cancel/replace, timeout, reconnect, and retry semantics
+- [x] Offline synthetic broker emulator and regression tests for partial fills, cancellation, lost ACK and overfill refusal
+- [ ] Actual broker partial fills, cancel/replace, timeout, reconnect, and retry semantics (not connected)
 - [ ] Fail-closed start: no new orders until all prior intents reconcile
 - [ ] Explicit operator kill switch, exits and exposure reduction drill
 - [ ] Negative testing (HTTP 429, 5xx, lost ACK, clock drift, network partitions)
