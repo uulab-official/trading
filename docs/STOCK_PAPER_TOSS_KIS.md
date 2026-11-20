@@ -168,3 +168,49 @@ This adapter is not a Toss OAuth connector or proof that a user's
 credentials/IP allow API access. A future live read-only connector
 must confirm the canonical JSON schema, allowed IP, query budget,
 token handling, and market-data terms before production operation.
+
+## Opt-in Toss read-only OAuth quote collector (2026-11-20)
+
+A separate `tools/toss_readonly_snapshot.py` collector now implements
+exactly **two** documented Toss Open API calls: OAuth token issuance
+(`POST /oauth2/token`) and one stock 1-minute-candle read
+(`GET /api/v1/candles`). It does **not** include any private-account,
+balance, or order endpoint. Automatic HTTP redirects are refused.
+There is no live trading mode and no automatic periodic service.
+
+This is opt-in and requires the operator's own valid Toss developer
+credentials and allowed client IP configuration. Never put credentials
+in command-line options, Git, logged URLs, a public website, or ChatGPT.
+Use secured local environment variables:
+
+```sh
+# Set locally in your private shell/session; do not paste credentials here.
+export TOSS_CLIENT_ID="your-local-client-id"
+export TOSS_CLIENT_SECRET="your-local-client-secret"
+
+python tools/toss_readonly_snapshot.py \
+  --mode paper --allow-network-readonly \
+  --symbol 005930 --currency KRW \
+  --count 100 --adjusted true \
+  --output data/toss-005930-authenticated-paper-bars.json
+```
+
+Only the normalized paper OHLCV records are saved; OAuth secrets,
+bearer token, and raw market/account response are never placed in
+the resulting file. Every invocation issues a new OAuth token, which
+can invalidate previously issued tokens for the same client according
+to Toss's official token contract. **Do not** run this on a frequent
+scheduler until safe token caching/reuse, rate limiting, IP authorization,
+429 behavior, and multi-process coordination are implemented.
+The collector makes no automatic retry. Invalid prices, malformed
+currency, timezone-less timestamps, and no completed bars fail closed.
+
+The real API path has **not** been exercised against a connected Toss
+account, so successful data retrieval and production behavior remain
+unverified. Tests inject an offline fake network adapter and ensure only
+the OAuth and read-only candle URLs are invoked. Data acquisition is
+separate from the stock paper ledger, and imported bars do not trigger
+simulated orders automatically.
+
+Official source of truth: <https://openapi.tossinvest.com/openapi-docs/latest/api-reference/README.md>
+and <https://openapi.tossinvest.com/openapi-docs/latest/api-reference/Apis/MarketDataApi.md>.
