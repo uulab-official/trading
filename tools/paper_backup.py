@@ -108,14 +108,24 @@ def verify_backup(directory: Path, *, deep=False):
     manifest = json.loads(_read_bounded(directory / "manifest.json", 65536))
     if not isinstance(manifest, dict) or manifest.get("schema_version") != 1 or manifest.get("type") != "offline_paper_pair_backup" or manifest.get("live_orders_enabled") is not False:
         raise ValueError("Invalid offline-paper backup manifest")
+    verified_bytes = {}
     for name, key, maximum in (
         ("archive.json", "archive_sha256", MAX_ARCHIVE_BYTES),
         ("checkpoint.json", "checkpoint_sha256", MAX_CHECKPOINT_BYTES),
     ):
-        if hashlib.sha256(_read_bounded(directory / name, maximum)).hexdigest() != manifest.get(key):
+        content = _read_bounded(directory / name, maximum)
+        if hashlib.sha256(content).hexdigest() != manifest.get(key):
             raise ValueError("Backup file differs from manifest")
+        verified_bytes[name] = content
     if deep:
-        verification = audit(directory / "archive.json", directory / "checkpoint.json")
+        # The auditor uses POSIX locks and creates persistent .lock files.
+        # Replay private copies instead; never introduce new files inside an
+        # immutable-by-policy backup directory while verifying it.
+        with tempfile.TemporaryDirectory(prefix="paper-deep-audit-") as workspace:
+            isolated = Path(workspace)
+            for name, content in verified_bytes.items():
+                (isolated / name).write_bytes(content)
+            verification = audit(isolated / "archive.json", isolated / "checkpoint.json")
         if (verification["fixture_sha256"] != manifest["archive_sha256"]
                 or verification["checkpoint_sha256"] != manifest["checkpoint_sha256"]
                 or verification["processed_bars"] != manifest["processed_bars"]
