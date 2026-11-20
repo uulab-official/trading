@@ -85,6 +85,9 @@ class OrderIntentJournalTests(unittest.TestCase):
             self.store.reserve("bad-id;drop table", "BTC/KRW", "buy", "1")
         with self.assertRaises(ValueError):
             self.store.reserve("id", "BTC/BTC", "buy", "1")
+        for pair in ("KRW/KRW", "USDT/USDT"):
+            with self.subTest(pair=pair), self.assertRaises(ValueError):
+                self.store.reserve("self-quote", pair, "buy", "1")
         with self.assertRaises(ValueError):
             self.store.reconcile("missing", outcome="filled", evidence_ref="note",
                                  broker_order_id="order-1")
