@@ -18,7 +18,14 @@ The existing backtest engine now has separate
 `python tools/offline_checks.py --include-backtest` with pandas/numpy available
 to check causal fills, spot balances, fees, marked equity, and repeatable runs.
 
-Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nA **zero-credential synthetic end-to-end stock demo** can be exercised
+Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nThe stock strategy now verifies independently calculated paper equity
+**before committing** fills and its bar cursor, and offers a separate
+read-only maximum-drawdown audit via
+`python tools/stock_paper_risk_audit.py`. This is retrospective paper
+risk analysis, not real-time broker-side loss protection. See
+[stock paper runbook](docs/STOCK_PAPER_FORWARD_RUNBOOK.md).
+
+A **zero-credential synthetic end-to-end stock demo** can be exercised
 using `python tools/stock_paper_smoke.py`. It verifies 55 explicitly
 synthetic 1m candles, strategy replay, duplicate refusal, read-only
 audit, SQLite WAL backup/deep verification and static report generation.
