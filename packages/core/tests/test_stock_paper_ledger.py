@@ -28,8 +28,8 @@ class StockPaperLedgerTests(unittest.TestCase):
         )
         self.assertEqual(buy, reopened.execute("buy-1", "005930", "buy", 2, price="10000"))
         self.assertEqual(1, reopened.report(marks={"005930": "12000"})["simulated_fills"])
-        self.assertEqual("103980", str(Decimal(
-            reopened.report(marks={"005930": "12000"})["marked_equity"])))
+        self.assertEqual(Decimal("103980"), Decimal(
+            reopened.report(marks={"005930": "12000"})["marked_equity"]))
 
     def test_restarted_sell_keeps_cash_and_holdings_exact(self):
         self.ledger.execute("b1", "005930", "buy", 2, price="10000")
@@ -38,7 +38,7 @@ class StockPaperLedgerTests(unittest.TestCase):
         )
         reopened.execute("s1", "005930", "sell", 2, price="11000")
         result = reopened.report()
-        self.assertEqual("101958", str(Decimal(result["cash"])))
+        self.assertEqual(Decimal("101958"), Decimal(result["cash"]))
         self.assertEqual({}, result["holdings"])
         self.assertEqual(2, result["simulated_fills"])
 
