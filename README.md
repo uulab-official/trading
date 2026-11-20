@@ -30,6 +30,12 @@ one VTS GET current-price route, and does not create orders or produce
 completed-bar strategy signals. See
 [KIS VTS read-only operator guide](docs/KIS_VTS_READONLY_QUOTE.md).
 
+A private static **crypto + stock PAPER dashboard** can now be
+rendered from an independently audited JSON snapshot, without any
+web server, JavaScript, account credentials, exchange order calls or
+currency aggregation. See
+[local paper portfolio dashboard](docs/PAPER_PORTFOLIO_DASHBOARD.md).
+
 The stock PAPER SQLite strategy can now be **backed up consistently**
 and independently replay-verified; the separate crypto and stock
 portfolios can be inspected through one **read-only, nonaggregating**
