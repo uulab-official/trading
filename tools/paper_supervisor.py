@@ -164,7 +164,7 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
                                     heartbeat=heartbeat, market=market, unit=unit,
                                     count=count, balance=balance, cycle=cycle, now=now,
                                     kill_switch=kill_switch, _owner_locked=True,
-                                _previous_failures=consecutive)
+                                    _previous_failures=consecutive)
                 consecutive = 0
             except PaperHaltLatched:
                 return 2
