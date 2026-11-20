@@ -214,3 +214,35 @@ simulated orders automatically.
 
 Official source of truth: <https://openapi.tossinvest.com/openapi-docs/latest/api-reference/README.md>
 and <https://openapi.tossinvest.com/openapi-docs/latest/api-reference/Apis/MarketDataApi.md>.
+
+## Causal single-stock paper backtest (2026-11-20)
+
+With a previously normalized Toss 1m paper fixture — either an offline
+saved response converted using `toss_stock_fixture.py`, or a separately
+opted-in **read-only** OAuth quotation snapshot — run the independent
+cash-only MA-cross research tool:
+
+```sh
+python tools/stock_paper_backtest.py \
+  data/toss-005930-paper-bars.json \
+  --initial-cash 1000000 \
+  --fee-pct 0.1 --allocation-pct 20 \
+  --fast 5 --slow 20
+```
+
+This strategy evaluates an MA crossover using **completed bars only**
+(up to the prior bar) and simulates any resulting buy/sell at the
+**following available bar open**. The tool never queries account
+balances or creates orders. It includes synthetic fees and a
+whole-share affordability check, and marks remaining positions using
+the final supplied close. This is a standalone backtest whose results
+are not automatically persisted to the separate manual stock ledger.
+A full forward-paper scheduler must be built with a market calendar,
+exchange session coverage, delayed feeds, checkpointing, and operator
+alerts before unattended evaluation.
+
+The report includes `mode: paper`, `live_orders_enabled: false`,
+cash, holdings, marked equity, return and simulated fills.
+Observed historical performance **cannot establish future returns**;
+real spreads, bid/ask impact, actual commissions, taxes, FX, splits,
+corporate actions, queue priority and market closures are not modeled.
