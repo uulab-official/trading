@@ -97,8 +97,11 @@ class OrderIntentJournal:
                     "INSERT INTO intents (client_id,symbol,side,quantity,status) VALUES (?,?,?,?,?)",
                     (client_id, symbol, side, qty, "reserved"),
                 )
+                inserted = db.execute(
+                    "SELECT * FROM intents WHERE client_id=?", (client_id,)
+                ).fetchone()
                 db.execute("COMMIT")
-                return self.get(client_id)
+                return self._row(inserted)
             except BaseException:
                 db.execute("ROLLBACK")
                 raise
