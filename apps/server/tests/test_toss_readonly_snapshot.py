@@ -93,6 +93,24 @@ class TossReadOnlyTests(unittest.TestCase):
                 main(live)
             self.assertEqual(2, exc.exception.code)
 
+    def test_existing_snapshot_refused_before_oauth_rotation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "quote.json"
+            output.write_text("existing paper evidence")
+            args = [
+                "--mode", "paper", "--allow-network-readonly",
+                "--symbol", "005930", "--currency", "KRW",
+                "--output", str(output)
+            ]
+            from contextlib import redirect_stderr
+            from io import StringIO
+            with patch("tools.toss_readonly_snapshot.fetch_readonly_minute",
+                       side_effect=AssertionError("OAuth must not run")):
+                with self.assertRaises(SystemExit) as error, redirect_stderr(StringIO()):
+                    main(args)
+            self.assertEqual(2, error.exception.code)
+            self.assertEqual("existing paper evidence", output.read_text())
+
     def test_invalid_token_rejected_before_market_request(self):
         def invalid(request, *, timeout):
             self.requests.append(request)
