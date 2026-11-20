@@ -10,7 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/core"))
-from tools.stock_paper_forward import replay_forward
+from tools.stock_paper_forward import replay_forward, audit_forward
 from trading_core.stock_paper_ledger import StockPaperLedger
 
 
@@ -58,6 +58,24 @@ class DurableStockForwardTests(unittest.TestCase):
         self.assertEqual(2, resumed["appended_bars"])
         self.assertEqual(0, resumed["new_simulated_fills"])
         self.assertEqual(1, resumed["total_simulated_fills"])
+
+    def test_readonly_audit_checks_cursor_fills_and_valuation(self):
+        replay_forward(self.fixture, self.path, **self.kwargs)
+        original_size = self.path.stat().st_size
+        report = audit_forward(self.fixture, self.path, **self.kwargs)
+        self.assertEqual("audited_stock_paper", report["status"])
+        self.assertFalse(report["live_orders_enabled"])
+        self.assertEqual(1, report["simulated_fills"])
+        self.assertEqual(original_size, self.path.stat().st_size)
+
+    def test_readonly_audit_rejects_truncated_history_and_modified_fills(self):
+        replay_forward(self.fixture, self.path, **self.kwargs)
+        with self.assertRaises(ValueError):
+            audit_forward(fixture(self.prices[:-1]), self.path, **self.kwargs)
+        with sqlite3.connect(self.path) as db:
+            db.execute("UPDATE paper_fills SET result_json='{}' WHERE sequence=1")
+        with self.assertRaises(ValueError):
+            audit_forward(self.fixture, self.path, **self.kwargs)
 
     def test_historical_candle_mutation_refused_before_new_fills(self):
         replay_forward(self.fixture, self.path, **self.kwargs)
