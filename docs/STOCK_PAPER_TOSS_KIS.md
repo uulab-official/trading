@@ -125,3 +125,46 @@ Do **not** use the order-creation endpoints when testing paper
 transactions. A production read-only connector must be separately
 written and verified against the canonical OpenAPI schema and
 market-data permissions before connecting these prices to the ledger.
+
+## Offline Toss 1-minute candle adapter (2026-11-20)
+
+The documentation-backed adapter in
+`packages/data/trading_data/toss_stock_candles.py`
+accepts **caller-saved** JSON responses from Toss
+`GET /api/v1/candles?symbol=...&interval=1m`.
+It requires no OAuth, network access, secrets, or real account.
+
+Toss 1m candles use **the candle CLOSE timestamp** (e.g. a bar
+covering 09:29–09:30 carries `timestamp=09:30`), whereas the old
+cryptocurrency fixture uses an opening timestamp. This adapter
+converts 1m close timestamps into Unix-ms **opening** timestamps,
+rejects timezone-less or duplicate timestamps, and drops bars too
+close to the caller-supplied observation time.
+
+Run after manually saving the read-only market response locally:
+
+```sh
+python tools/toss_stock_fixture.py \
+  --input local-toss-minute-response.json \
+  --output data/toss-005930-paper-bars.json \
+  --symbol 005930 --currency KRW --interval 1m \
+  --observed-at 2026-03-25T09:31:10+09:00
+```
+
+The output is `mode: paper` only, annotated as
+`operator_supplied_response_not_authenticated`; it **does not**
+place or simulate orders by itself. New files are created exclusively,
+never overwrite source or a preexisting candidate, and no token or
+account response fields are copied to the paper output.
+
+**Use genuine 1m responses only.** Toss 1d candles use local-midnight
+trading-date timestamps and cannot be safely interpreted as 1m.
+Market-session holes are not automatically filled. Before any
+end-to-end strategy backtest, add official exchange-calendar validation,
+replay the data from a recorded provenance/source, and verify the
+data adjustment choice (`adjusted=true/false`).
+
+This adapter is not a Toss OAuth connector or proof that a user's
+credentials/IP allow API access. A future live read-only connector
+must confirm the canonical JSON schema, allowed IP, query budget,
+token handling, and market-data terms before production operation.
