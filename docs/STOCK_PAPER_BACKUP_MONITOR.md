@@ -109,3 +109,17 @@ monitoring, exchange sandbox orders, stock-specific recovery drills,
 authenticated access controls, and independent deployment/CI checks.
 
 **Live automated trading remains unapproved.**
+
+
+## Zero-credential end-to-end synthetic smoke
+
+Run `python tools/stock_paper_smoke.py` from the repository root.
+The smoke uses
+`config/examples/synthetic_toss_stock_paper_1m.json` (55 explicitly
+**synthetic** bars, not actual Toss prices), and creates all strategy,
+report and backup artifacts inside a disposable private temporary
+directory. It checks that identical replay produces zero duplicate fills,
+that an independent audit reconstructs state, that SQLite backup deep
+verification succeeds, and that the Korean report contains only offline
+paper information. The smoke does not authenticate Toss, invoke KIS VTS,
+place any real orders, or prove future trading profitability.
