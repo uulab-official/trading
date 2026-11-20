@@ -49,9 +49,11 @@ def replay_forward(fixture, database, *, initial_cash, fee_pct="0.1",
         fixture, identity=identity,
         expected_fills=outcome["simulated_fills"],
         marks={outcome["symbol"]: latest_mark},
+        expected_equity=outcome["marked_equity"],
     )
+    # Equity was checked within the same SQLite write transaction.
     if Decimal(report["marked_equity"]) != Decimal(outcome["marked_equity"]):
-        raise ValueError("Durable paper ledger differs from independent strategy replay")
+        raise ValueError("Unexpected post-commit valuation mismatch")
     return report
 
 
