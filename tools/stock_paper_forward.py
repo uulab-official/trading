@@ -138,6 +138,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("fixture", type=Path)
     parser.add_argument("--database", required=True, type=Path)
+    parser.add_argument("--audit-only", action="store_true",
+                        help="Read-only audit of an existing paper strategy ledger")
     parser.add_argument("--mode", required=True, choices=("paper",))
     parser.add_argument("--initial-cash", type=Decimal, required=True)
     parser.add_argument("--fee-pct", type=Decimal, default=Decimal("0.1"))
@@ -153,7 +155,8 @@ def main(argv=None):
         if args.fixture.resolve() == args.database.resolve():
             raise ValueError("Stock fixture cannot be used as the ledger database")
         data = json.loads(raw)
-        outcome = replay_forward(
+        run = audit_forward if args.audit_only else replay_forward
+        outcome = run(
             data, args.database, initial_cash=args.initial_cash,
             fee_pct=args.fee_pct, fast=args.fast, slow=args.slow,
             allocation_pct=args.allocation_pct,
