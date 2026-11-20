@@ -77,6 +77,35 @@ class DurableStockForwardTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             audit_forward(self.fixture, self.path, **self.kwargs)
 
+    def test_equity_mismatch_rolls_back_new_fills_and_cursor_atomically(self):
+        from unittest.mock import patch
+        replay_forward(self.fixture, self.path, **self.kwargs)
+        appended = fixture(self.prices + [22, 23])
+        with sqlite3.connect(self.path) as db:
+            before = db.execute(
+                "SELECT bars,prefix_sha256 FROM paper_strategy_state WHERE id=1"
+            ).fetchone()
+            before_fills = db.execute("SELECT COUNT(*) FROM paper_fills").fetchone()[0]
+        original = StockPaperLedger.apply_strategy_replay
+
+        def incorrect_equity(ledger, payload, **kwargs):
+            kwargs["expected_equity"] = "999999999"
+            return original(ledger, payload, **kwargs)
+
+        with patch.object(StockPaperLedger, "apply_strategy_replay", incorrect_equity):
+            with self.assertRaises(ValueError):
+                replay_forward(appended, self.path, **self.kwargs)
+        with sqlite3.connect(self.path) as db:
+            after = db.execute(
+                "SELECT bars,prefix_sha256 FROM paper_strategy_state WHERE id=1"
+            ).fetchone()
+            after_fills = db.execute("SELECT COUNT(*) FROM paper_fills").fetchone()[0]
+        self.assertEqual(before, after)
+        self.assertEqual(before_fills, after_fills)
+        # Recovery after a failed transaction must remain possible.
+        recovered = replay_forward(appended, self.path, **self.kwargs)
+        self.assertEqual(2, recovered["appended_bars"])
+
     def test_historical_candle_mutation_refused_before_new_fills(self):
         replay_forward(self.fixture, self.path, **self.kwargs)
         edited = fixture(self.prices + [22])
