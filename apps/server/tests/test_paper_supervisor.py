@@ -130,6 +130,54 @@ class PaperSupervisorTests(unittest.TestCase):
         self.assertEqual("halted", report["status"])
         self.assertTrue(report["operator_stop"])
 
+    def test_failed_cycle_counter_survives_process_restart(self):
+        def fail(*args, **kwargs):
+            raise RuntimeError("simulated public data outage")
+        times = []
+        attempts = [0]
+        # Simulate first process exiting after a single failure.
+        code = run_loop(**self.kwargs, cycle=fail, now=lambda: 1700000000,
+                        interval_seconds=3600, max_failures=3,
+                        sleep=lambda duration: times.append(duration),
+                        should_stop=lambda: bool(times))
+        self.assertEqual(0, code)
+        # Graceful stop explicitly reports stopped. To emulate a crash before
+        # the graceful heartbeat, reinstate the previous degraded pulse.
+        self.heartbeat.write_text(json.dumps({
+            "mode": "paper", "live_orders_enabled": False,
+            "status": "degraded", "last_attempt_utc": "2023-11-14T22:13:20+00:00",
+            "consecutive_failures": 1,
+        }))
+        # The restarted process should only need two more failures to halt.
+        second_attempts = []
+        def restarted(*args, **kwargs):
+            second_attempts.append(1)
+            raise RuntimeError("second process still offline")
+        code = run_loop(**self.kwargs, cycle=restarted, now=lambda: 1700000000,
+                        interval_seconds=3600, max_failures=3,
+                        sleep=lambda duration: None)
+        self.assertEqual(2, code)
+        self.assertEqual(2, len(second_attempts))
+        health = json.loads(self.heartbeat.read_text())
+        self.assertEqual("halted", health["status"])
+        self.assertEqual(3, health["consecutive_failures"])
+
+    def test_lowered_failure_threshold_halts_before_fetch(self):
+        self.heartbeat.write_text(json.dumps({
+            "mode": "paper", "live_orders_enabled": False,
+            "status": "degraded", "consecutive_failures": 2,
+        }))
+        touched = []
+        def unexpected(*args, **kwargs):
+            touched.append(True)
+            return success_cycle()
+        code = run_loop(**self.kwargs, cycle=unexpected, now=lambda: 1700000000,
+                        interval_seconds=3600, max_failures=2,
+                        sleep=lambda duration: None)
+        self.assertEqual(2, code)
+        self.assertEqual([], touched)
+        self.assertEqual("halted", json.loads(self.heartbeat.read_text())["status"])
+
     def test_halted_process_cannot_resume_trading_on_restart(self):
         from tools.paper_supervisor import PaperHaltLatched
         attempts = []
