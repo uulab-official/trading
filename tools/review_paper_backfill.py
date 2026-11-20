@@ -20,6 +20,16 @@ from trading_bot.paper_checkpoint import locked_checkpoint
 
 
 def review_candidate(archive: Path, checkpoint: Path, candidate: Path):
+    """Manual candidate review requires that the paper supervisor be stopped."""
+    archive, checkpoint, candidate = (Path(x).resolve() for x in (archive, checkpoint, candidate))
+    if len({archive, checkpoint, candidate}) != 3:
+        raise ValueError("Paper inputs must be distinct")
+    owner = checkpoint.with_name(checkpoint.name + ".supervisor")
+    with locked_checkpoint(owner):
+        return _review_candidate_stopped(archive, checkpoint, candidate)
+
+
+def _review_candidate_stopped(archive: Path, checkpoint: Path, candidate: Path):
     archive, checkpoint, candidate = (Path(x).resolve() for x in (archive, checkpoint, candidate))
     if len({archive, checkpoint, candidate}) != 3:
         raise ValueError("Original archive, checkpoint and candidate must be distinct")
