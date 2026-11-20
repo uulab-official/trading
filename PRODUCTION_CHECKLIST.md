@@ -62,6 +62,9 @@ may automatically enable live order placement.
 - [x] Saved Toss 1m JSON parser with closing-time to opening-time conversion
 - [x] Opt-in Toss OAuth + read-only candle collector (code only; genuine authenticated endpoint not yet exercised)
 - [x] Completed-bar MA-cross paper stock backtest with next-available-open fills
+- [x] Transactional completed-bar stock strategy cursor and simulated fills in SQLite
+- [x] Read-only full replay audit and static local stock PAPER HTML report
+- [ ] Validate real Toss quote credentials and feed, market calendar, operational monitoring and stock-ledger backup
 - [ ] Validate actual Toss OAuth/IP allowlisting and real quote ingestion against live API
 - [ ] Production-grade OAuth token reuse (one active token per client), rate-limit budgets, and 429 recovery
 - [ ] Verify US/KR market calendars, stock splits, tick sizes, tax/fee schedules and FX independently
