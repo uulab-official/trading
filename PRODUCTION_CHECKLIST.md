@@ -1,6 +1,6 @@
 # Production readiness gate — trading monorepo
 
-**State (2026-11-17): LIVE TRADING IS NOT APPROVED.**
+**State (2026-11-20): LIVE TRADING IS NOT APPROVED.**
 
 This project has an offline spot paper replay engine with deterministic
 accounting and checkpoint tests. The new Upbit quotation snapshot and
@@ -63,6 +63,8 @@ may automatically enable live order placement.
 - [x] Opt-in Toss OAuth + read-only candle collector (code only; genuine authenticated endpoint not yet exercised)
 - [x] Completed-bar MA-cross paper stock backtest with next-available-open fills
 - [ ] Validate actual Toss OAuth/IP allowlisting and real quote ingestion against live API
+- [ ] Production-grade OAuth token reuse (one active token per client), rate-limit budgets, and 429 recovery
+- [ ] Verify US/KR market calendars, stock splits, tick sizes, tax/fee schedules and FX independently
 - [ ] Forward-only scheduled stock paper trading with exchange session calendar and durable strategy cursor
 - [ ] Simulated stock ledger backups, replay monitoring, and unified market risk controls
 - [ ] Connect authenticated read-only Toss stock data to validated paper candles
