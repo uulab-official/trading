@@ -46,6 +46,17 @@ class PaperCandidateReviewTests(unittest.TestCase):
         self.assertEqual(before_archive, self.archive.read_bytes())
         self.assertEqual(before_checkpoint, self.checkpoint.read_bytes())
 
+    def test_active_supervisor_denies_manual_candidate_review(self):
+        from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
+        owner = self.checkpoint.with_name(self.checkpoint.name + ".supervisor")
+        before = self.archive.read_bytes(), self.checkpoint.read_bytes(), self.candidate.read_bytes()
+        with locked_checkpoint(owner):
+            with self.assertRaises(CheckpointInUseError):
+                review_candidate(self.archive, self.checkpoint, self.candidate)
+        self.assertEqual(before, (self.archive.read_bytes(),
+                                  self.checkpoint.read_bytes(),
+                                  self.candidate.read_bytes()))
+
     def test_changed_history_rejected(self):
         changed = json.loads(self.candidate.read_text())
         changed["candles"][10][4] = "10000"
