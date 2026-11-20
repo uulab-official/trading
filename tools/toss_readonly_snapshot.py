@@ -92,6 +92,8 @@ def fetch_readonly_minute(symbol, currency, *, count=100, adjusted=True,
         observed_at=now,
     )
     normalized["source"] = "toss_readonly_authenticated_quote"
+    normalized["adjusted"] = adjusted
+    normalized["observed_at_utc"] = now.astimezone(timezone.utc).isoformat()
     normalized["warning"] = (
         "No broker orders; quote source was authenticated but fills remain hypothetical"
     )
@@ -111,6 +113,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not args.allow_network_readonly:
         parser.error("Opt in to read-only OAuth market data with --allow-network-readonly")
+    # Checking the destination before OAuth avoids issuing a new token
+    # (which can invalidate the current token) for a duplicate snapshot.
+    target = args.output.resolve()
+    if target.exists():
+        parser.error("Output already exists: use a new snapshot filename")
     try:
         snapshot = fetch_readonly_minute(
             args.symbol, args.currency, count=args.count,
@@ -118,7 +125,6 @@ def main(argv=None):
             client_id=os.environ.get("TOSS_CLIENT_ID"),
             client_secret=os.environ.get("TOSS_CLIENT_SECRET"),
         )
-        target = args.output.resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         handle = os.open(target, flags, 0o600)
