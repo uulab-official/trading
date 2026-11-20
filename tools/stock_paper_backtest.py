@@ -4,7 +4,7 @@ Never fetches market data or places broker orders. Signals use bars through
 i-1 and simulated fills execute at the next available bar i open.
 """
 import argparse
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, localcontext, Context
 import json
 from pathlib import Path
 import sys
@@ -18,6 +18,14 @@ from trading_data import Candle
 
 def run_backtest(fixture, *, initial_cash, fee_pct="0.1",
                  fast=5, slow=20, allocation_pct="20"):
+    with localcontext(Context(prec=28)):
+        return _run_backtest(
+            fixture, initial_cash=initial_cash, fee_pct=fee_pct,
+            fast=fast, slow=slow, allocation_pct=allocation_pct
+        )
+
+
+def _run_backtest(fixture, *, initial_cash, fee_pct, fast, slow, allocation_pct):
     if not isinstance(fixture, dict) or fixture.get("mode") != "paper":
         raise ValueError("Only paper stock fixtures supported")
     if (fixture.get("interval") != "1m" or fixture.get("no_live_orders") is not True
