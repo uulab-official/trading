@@ -55,7 +55,7 @@ class StockPaperBook:
         price = _amount(price)
         request = (symbol, side, shares, price)
         if client_id in self._requests:
-            if self._requests[client_id] != request:
+            if self._requests[client_id][:4] != request:
                 raise ValueError("Paper client ID reused for different execution")
             return dict(self._requests[client_id][4])
         with localcontext(_CONTEXT):
