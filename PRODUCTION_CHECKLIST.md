@@ -63,6 +63,9 @@ may automatically enable live order placement.
 - [x] Opt-in Toss OAuth + read-only candle collector (code only; genuine authenticated endpoint not yet exercised)
 - [x] Completed-bar MA-cross paper stock backtest with next-available-open fills
 - [x] Transactional completed-bar stock strategy cursor and simulated fills in SQLite
+- [x] Mandatory independent expected-equity check inside SQLite transaction before strategy fills/cursor commit
+- [x] Read-only stock paper bar-close maximum drawdown audit checked against recorded fills
+- [ ] Exchange-side max loss/drawdown enforcement and independently verified live risk controls
 - [x] Read-only full replay audit and static local stock PAPER HTML report
 - [x] SQLite native stock-paper strategy backup with SHA-256, deep replay and non-overwriting output
 - [x] Single offline crypto + stock audit command (portfolio totals intentionally unaggregated)
