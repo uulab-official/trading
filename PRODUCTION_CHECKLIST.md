@@ -66,6 +66,7 @@ may automatically enable live order placement.
 - [x] Read-only full replay audit and static local stock PAPER HTML report
 - [x] SQLite native stock-paper strategy backup with SHA-256, deep replay and non-overwriting output
 - [x] Single offline crypto + stock audit command (portfolio totals intentionally unaggregated)
+- [x] Bundled synthetic 55-bar stock fixture and one-command end-to-end offline smoke test (CI test added; pass unverified)
 - [ ] Test stock paper backup/restore under actual operational failures and establish RPO/RTO
 - [ ] Real-time multi-asset monitoring with authenticated operators, fresh data checks and verified FX
 - [ ] Validate real Toss quote credentials and feed, market calendar, operational monitoring and stock-ledger backup
