@@ -34,8 +34,17 @@ def _time_ms(utc_text):
     return int(moment.timestamp() * 1000)
 
 
-def _request_candles(unit, market, count):
-    query = urlencode({"market": market, "count": count})
+def _request_candles(unit, market, count, to=None):
+    params = {"market": market, "count": count}
+    if to is not None:
+        # The public Upbit API defines 'to' as an exclusive UTC cutoff.
+        # Never infer or substitute a local-time cutoff.
+        if not isinstance(to, int) or to < 0:
+            raise ValueError("Historical cutoff must be Unix milliseconds")
+        params["to"] = datetime.fromtimestamp(
+            to / 1000, tz=timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    query = urlencode(params)
     request = Request(
         ENDPOINT + str(unit) + "?" + query,
         headers={"Accept": "application/json", "User-Agent": "uulab-offline-paper/1"},
