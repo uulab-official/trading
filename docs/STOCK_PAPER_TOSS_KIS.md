@@ -246,3 +246,11 @@ cash, holdings, marked equity, return and simulated fills.
 Observed historical performance **cannot establish future returns**;
 real spreads, bid/ask impact, actual commissions, taxes, FX, splits,
 corporate actions, queue priority and market closures are not modeled.
+
+
+### KIS VTS quote-only preflight
+
+The initial VTS integration is deliberately limited to a single
+current-price GET on the virtual-trading host. It does not authenticate
+or execute any orders and is distinct from the completed-bar stock
+paper backtest. See [KIS VTS read-only quote runbook](KIS_VTS_READONLY_QUOTE.md).
