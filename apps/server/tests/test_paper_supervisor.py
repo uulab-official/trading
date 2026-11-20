@@ -61,6 +61,18 @@ class PaperSupervisorTests(unittest.TestCase):
         self.assertEqual("ValueError", health["last_error_type"])
         self.assertNotIn("SECRET_FAKE_TOKEN", self.heartbeat.read_text())
 
+    def test_first_degraded_heartbeat_atomically_records_failure_budget(self):
+        def failing(*args, **kwargs):
+            raise RuntimeError("simulated market data outage")
+        with self.assertRaises(RuntimeError):
+            run_supervised_once(**self.kwargs, cycle=failing,
+                                now=lambda: 1700000000,
+                                _previous_failures=2)
+        report = json.loads(self.heartbeat.read_text())
+        self.assertEqual("degraded", report["status"])
+        self.assertEqual(3, report["consecutive_failures"])
+        self.assertFalse(report["live_orders_enabled"])
+
     def test_repeated_failure_halts_instead_of_endless_retries(self):
         sleeps = []
         def failing(*args, **kwargs):
