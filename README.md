@@ -18,7 +18,12 @@ The existing backtest engine now has separate
 `python tools/offline_checks.py --include-backtest` with pandas/numpy available
 to check causal fills, spot balances, fees, marked equity, and repeatable runs.
 
-Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nA **durable SQLite order-intent journal** now exists as an offline-only
+Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nA **deterministic offline broker emulator** now exercises synthetic partial fills,
+lost acknowledgments, cancellation and duplicate-submission refusal.
+It does not connect to any exchange or approve real orders.
+See [sandbox order fault-injection limits](docs/SANDBOX_ORDER_LIFECYCLE.md).
+
+A **durable SQLite order-intent journal** now exists as an offline-only
 foundation for future broker sandbox integration. It records ambiguous
 client order IDs and prevents duplicate or conflicting order intentions;
 there is **no authenticated broker or live order implementation**.
