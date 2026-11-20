@@ -60,6 +60,23 @@ class OrderIntentJournalTests(unittest.TestCase):
         self.assertEqual("BTC/KRW", self.store.get("client-001")["symbol"])
         self.assertEqual(1, len(self.store.unresolved()))
 
+    def test_competing_writers_cannot_reserve_two_pending_orders(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        barrier = Barrier(2)
+        def attempt(identity):
+            barrier.wait(timeout=5)
+            try:
+                return ("ok", self.store.reserve(identity, "BTC/KRW", "buy", "0.001"))
+            except ValueError:
+                return ("blocked", identity)
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            futures = [workers.submit(attempt, key) for key in ("client-001", "client-002")]
+            results = [future.result(timeout=10) for future in futures]
+        self.assertEqual(1, sum(status == "ok" for status, _ in results))
+        self.assertEqual(1, sum(status == "blocked" for status, _ in results))
+        self.assertEqual(1, len(self.store.unresolved()))
+
     def test_invalid_values_and_unverified_outcomes_rejected(self):
         for qty in (0, "-1", "NaN", "Infinity"):
             with self.subTest(qty=qty), self.assertRaises(ValueError):
