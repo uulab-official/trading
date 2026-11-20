@@ -18,7 +18,13 @@ The existing backtest engine now has separate
 `python tools/offline_checks.py --include-backtest` with pandas/numpy available
 to check causal fills, spot balances, fees, marked equity, and repeatable runs.
 
-Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nCreate an immutable **offline paper portfolio backup** only after economic
+Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nA **durable SQLite order-intent journal** now exists as an offline-only
+foundation for future broker sandbox integration. It records ambiguous
+client order IDs and prevents duplicate or conflicting order intentions;
+there is **no authenticated broker or live order implementation**.
+See [order intent journal safety design](docs/ORDER_INTENT_JOURNAL.md).
+
+Create an immutable **offline paper portfolio backup** only after economic
 replay validation with
 `python tools/paper_backup.py create --archive data/upbit-btc-1h-archive.json --checkpoint data/upbit-btc-1h-paper.json --destination data/backups/paper-001`.
 Verify file hashes with `python tools/paper_backup.py verify data/backups/paper-001` or independently replay backed-up paper economics with `python tools/paper_backup.py verify data/backups/paper-001 --deep`.
