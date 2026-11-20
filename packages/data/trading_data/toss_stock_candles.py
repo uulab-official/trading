@@ -4,8 +4,8 @@ Toss's 1m candle timestamp is the *closing* boundary, unlike Upbit's
 opening timestamp. No authentication, API access, account, or order calls.
 Never treat 1d local-midnight timestamps as completed 1m bars.
 """
-from datetime import datetime, timezone
-from decimal import Decimal
+from datetime import datetime, timezone, timedelta
+from decimal import Decimal, InvalidOperation
 import re
 
 
@@ -50,13 +50,15 @@ def parse_toss_minute_candles(document, *, symbol, quote_currency, observed_at,
         if stamp in times:
             raise ValueError("Duplicate minute candle")
         times.add(stamp)
-        if closed_at > observed.replace(microsecond=0) - __import__(
-            "datetime").timedelta(seconds=safety_seconds):
+        if closed_at > observed - timedelta(seconds=safety_seconds):
             # A just-ending / future bar cannot influence a paper decision.
             continue
         numeric = []
         for field in ("openPrice", "highPrice", "lowPrice", "closePrice", "volume"):
-            value = Decimal(str(raw[field]))
+            try:
+                value = Decimal(str(raw[field]))
+            except (InvalidOperation, KeyError, TypeError) as error:
+                raise ValueError("Invalid stock OHLCV field") from error
             if not value.is_finite() or (value < 0 if field == "volume" else value <= 0):
                 raise ValueError("Invalid stock OHLCV field")
             numeric.append(value)
