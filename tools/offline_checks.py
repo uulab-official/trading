@@ -53,6 +53,7 @@ def main():
         ("apps/server/tests", "test_paper_healthcheck.py"),
         ("apps/server/tests", "test_paper_backup.py"),
         ("apps/server/tests", "test_stock_paper_cli.py"),
+        ("apps/server/tests", "test_toss_stock_fixture.py"),
         ("apps/server/tests", "test_order_intent_preflight.py"),
         ("apps/server/tests", "test_stock_paper_cli.py"),
         ("apps/server/tests", "test_paper_currency.py"),
