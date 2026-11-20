@@ -50,6 +50,9 @@ class PaperBackupTests(unittest.TestCase):
         before = (self.backup / "checkpoint.json").read_bytes()
         self.assertEqual(0, main(["verify", str(self.backup), "--deep"]))
         self.assertEqual(before, (self.backup / "checkpoint.json").read_bytes())
+        self.assertEqual({"archive.json", "checkpoint.json", "manifest.json"},
+                         {child.name for child in self.backup.iterdir()},
+                         "Deep auditing must not create .lock files in the immutable backup")
 
     def test_existing_backup_cannot_be_overwritten(self):
         backup_pair(self.archive, self.checkpoint, self.backup)
