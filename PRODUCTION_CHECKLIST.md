@@ -48,6 +48,7 @@ may automatically enable live order placement.
 - [ ] Credential-free paper environment continuously exercised for at least 2 weeks
 - [x] Immutable-by-policy paper archive/checkpoint pair backup and SHA-256 manifest verification added
 - [x] Optional full economic/risk replay on a backed-up paper pair, including forged balance rejection
+- [x] Manual backup and candidate review require exclusive stopped-supervisor ownership lock
 - [x] Full pre-capture checkpoint audit rejects tampering before altering public history
 - [ ] Disaster-recovery and backup/restore drill completed (manual recovery test pending)
 
