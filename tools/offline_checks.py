@@ -60,6 +60,7 @@ def main():
         ("apps/server/tests", "test_stock_paper_report_html.py"),
         ("apps/server/tests", "test_stock_paper_backup.py"),
         ("apps/server/tests", "test_paper_portfolio_status.py"),
+        ("apps/server/tests", "test_paper_portfolio_report_html.py"),
         ("apps/server/tests", "test_stock_paper_smoke.py"),
         ("apps/server/tests", "test_order_intent_preflight.py"),
         ("apps/server/tests", "test_paper_currency.py"),
