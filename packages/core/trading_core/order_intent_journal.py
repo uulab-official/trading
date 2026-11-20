@@ -80,10 +80,12 @@ class OrderIntentJournal:
             con.execute("PRAGMA query_only=ON")
         else:
             con = sqlite3.connect(str(self.path), timeout=5.0, isolation_level=None)
+            # Set busy handling before attempting the WAL mode transition
+            # so competing writers wait rather than fail spuriously.
+            con.execute("PRAGMA busy_timeout=5000")
             con.execute("PRAGMA journal_mode=WAL")
             con.execute("PRAGMA synchronous=FULL")
         con.row_factory = sqlite3.Row
-        con.execute("PRAGMA busy_timeout=5000")
         return con
 
     @staticmethod
