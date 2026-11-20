@@ -61,6 +61,16 @@ class OrderIntentJournal:
                     WHERE broker_order_id IS NOT NULL;
             """)
 
+    @classmethod
+    def open_existing_readonly(cls, path):
+        """Create an audit-only view; never create a missing journal."""
+        resolved = Path(path).expanduser().resolve()
+        if not resolved.is_file():
+            raise ValueError("Existing SQLite order intent journal required")
+        instance = object.__new__(cls)
+        instance.path = resolved
+        return instance
+
     def _connect(self, *, read_only=False):
         if read_only:
             # No implicit schema creation, data mutations, or journal
