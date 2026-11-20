@@ -22,6 +22,7 @@ def main():
     checks = [
         ("packages/core/tests", "*execution_safety.py"),
         ("packages/core/tests", "test_paper_ledger.py"),
+        ("packages/core/tests", "test_order_intent_journal.py"),
         ("packages/core/tests", "test_daily_loss_contract.py"),
         ("packages/core/tests", "test_entry_equity_guard.py"),
         ("packages/core/tests", "test_zero_mark_valuation.py"),
