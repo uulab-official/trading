@@ -119,3 +119,32 @@ verifies unchanged cursor and fill counts, then confirms the valid
 unmodified replay can resume from the original position. This fix is
 specific to local offline paper state. It is not authenticated broker
 reconciliation or an exchange execution guarantee.
+
+## Independent retrospective risk report (2026-11-20)
+
+The offline command below audits the existing SQLite stock strategy,
+independently rebuilds all simulated fills, and calculates a
+**bar-close paper-equity maximum drawdown** across the supplied
+historical minute bars:
+
+```sh
+python tools/stock_paper_risk_audit.py data/toss-005930-paper.json \
+  --database data/stock-strategy.sqlite \
+  --initial-cash 1000000 --fee-pct 0.1 \
+  --fast 5 --slow 20 --allocation-pct 20
+```
+
+The report includes initial paper cash, final independently verified
+equity, highest/lowest hypothetical bar-close equity, maximum
+peak-to-trough percentage drawdown, trade count and candle SHA-256.
+The calculation uses exactly the previously simulated next-open fills;
+it cannot authorize new orders or silently repair a historical fill.
+If the SQLite ledger, candle history or strategy identity differs,
+the report refuses to produce a valid result.
+
+**This measures historical simulated bar-close risk, NOT real-time
+drawdown protection.** It excludes intrabar liquidation/stop loss,
+real spreads, taxes, splits, leveraged positions, broker execution
+constraints and unknown missing session candles. Never interpret
+the resulting number as a proven future risk budget or replace
+server-side risk controls with this report.
