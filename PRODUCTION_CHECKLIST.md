@@ -57,6 +57,9 @@ may automatically enable live order placement.
 
 ## Gate C — broker sandbox order lifecycle (NOT complete)
 
+- [x] Separate offline cash-only KRW/USD stock paper book, with whole-share fills and duplicate order safeguards
+- [ ] Connect authenticated read-only Toss stock data to validated paper candles
+- [ ] Validate KIS official virtual-trading API end-to-end
 - [ ] Exchange-specific symbol and step/min-notional filters
 - [ ] Clock and nonce, API authentication, and least-privilege credentials
 - [ ] No withdrawal permission; IP restrictions where supported
