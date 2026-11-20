@@ -85,6 +85,13 @@ class StockPaperLedger:
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
+                has_strategy = db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='paper_strategy_state'"
+                ).fetchone()
+                if has_strategy and db.execute(
+                    "SELECT 1 FROM paper_strategy_state WHERE id=1"
+                ).fetchone():
+                    raise ValueError("Manual fill cannot mutate a strategy-managed stock ledger")
                 book, count = self._rebuild(
                     db, self.quote_currency, self.initial_cash, self.fee_pct
                 )
