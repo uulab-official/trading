@@ -253,3 +253,21 @@ stop the daemon first, confirm its heartbeat becomes `stopped`, and
 then run the diagnostic. Never remove lock files to bypass this check.
 External code calling the paper cycle directly should separately
 coordinate access; the cycle maintains its own narrower replay lock.
+
+
+## Failure budget survives restarts (2026-11-20)
+
+The supervisor now records `consecutive_failures` after **every**
+degraded capture/replay cycle, not merely on terminal `halted`.
+On process restart it restores the previous degraded count instead of
+starting at zero; a previous degraded heartbeat without a count is
+conservatively interpreted as one failure. If a newly configured
+`--max-failures` is already met by the persisted count, startup
+halts **before polling public prices**. A successful paper cycle resets
+the transient budget; a terminal `halted` state still requires
+the explicit operator recovery process above.
+
+Manual backups and recovery candidate reviews also require the same
+long-lived supervisor owner lock used by the poller. They refuse while
+the active daemon holds its lock, including when it is sleeping.
+Stop the process before inspecting or backing up live paper files.
