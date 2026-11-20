@@ -69,6 +69,17 @@ class StockPaperLedgerTests(unittest.TestCase):
                 StockPaperLedger(self.path, quote_currency=currency,
                                  initial_cash=balance, fee_pct=fee)
 
+    def test_open_instance_refuses_metadata_mutation_after_initialization(self):
+        self.ledger.execute("b1", "005930", "buy", 1, price="10000")
+        with sqlite3.connect(self.path) as db:
+            db.execute("UPDATE paper_meta SET value='USD' WHERE key='quote_currency'")
+        with self.assertRaises(ValueError):
+            self.ledger.execute("b2", "005930", "buy", 1, price="10000")
+        with self.assertRaises(ValueError):
+            self.ledger.report(marks={"005930": "10000"})
+        with sqlite3.connect(self.path) as db:
+            self.assertEqual(1, db.execute("SELECT COUNT(*) FROM paper_fills").fetchone()[0])
+
     def test_two_racing_order_ids_cannot_overspend_shared_cash(self):
         def attempt(client):
             try:
