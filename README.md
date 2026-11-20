@@ -24,6 +24,12 @@ synthetic 1m candles, strategy replay, duplicate refusal, read-only
 audit, SQLite WAL backup/deep verification and static report generation.
 No real quotes or orders are involved.
 
+A KIS **virtual-trading host read-only quote probe** is available as
+`tools/kis_vts_readonly_quote.py`; it requires explicit opt-in, uses only
+one VTS GET current-price route, and does not create orders or produce
+completed-bar strategy signals. See
+[KIS VTS read-only operator guide](docs/KIS_VTS_READONLY_QUOTE.md).
+
 The stock PAPER SQLite strategy can now be **backed up consistently**
 and independently replay-verified; the separate crypto and stock
 portfolios can be inspected through one **read-only, nonaggregating**
