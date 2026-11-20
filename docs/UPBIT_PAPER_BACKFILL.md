@@ -31,6 +31,26 @@ the count of appended candles, and the number of historical pages fetched.
 One bounded request is made for the most recent complete candle window;
 up to three additional requests are made for backfill.
 
+## Independent pre-promotion review
+
+After creating a candidate, verify the original archive and paper
+checkpoint, compare every historical candle, and independently replay
+the saved economic state against the candidate:
+
+```sh
+python tools/review_paper_backfill.py \
+  --archive data/upbit-btc-1h-archive.json \
+  --checkpoint data/upbit-btc-1h-paper.json \
+  --candidate data/upbit-btc-1h-recovery-candidate.json
+```
+
+The command returns `candidate_verified_for_manual_review` only after
+the complete original prefix, contiguous appended prices, manual-review
+metadata, and persisted paper ledger all agree. It reports
+`promotion_performed: false` and does not write to the archive,
+checkpoint or candidate. It uses local cooperative locks and may create
+persistent sibling lock files. The result is **not** an approval to trade.
+
 **Operator review is mandatory.** Before using a candidate, verify its
 OHLCV values against the public exchange records, confirm chronological
 consistency, investigate any missing intervals, and test a copy of the
