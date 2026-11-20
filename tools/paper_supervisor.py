@@ -133,6 +133,21 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
     owner = Path(checkpoint).with_name(Path(checkpoint).name + ".supervisor")
     with locked_checkpoint(owner):
         consecutive = 0
+        # A process crash after one or more failed cycles must not reset the
+        # failure budget. Health is owner-locked across the entire loop.
+        health_path = Path(heartbeat)
+        if health_path.exists():
+            prior_bytes = health_path.read_bytes()
+            if len(prior_bytes) > 65536:
+                raise ValueError("Prior supervisor heartbeat exceeds size limit")
+            prior = json.loads(prior_bytes)
+            if not isinstance(prior, dict) or prior.get("mode") != "paper" or prior.get("live_orders_enabled") is not False:
+                raise ValueError("Invalid prior paper heartbeat")
+            if prior.get("status") == "degraded":
+                prior_failures = prior.get("consecutive_failures", 1)
+                if type(prior_failures) is not int or not (1 <= prior_failures <= 10):
+                    raise ValueError("Invalid prior consecutive failure count")
+                consecutive = prior_failures
         while not should_stop():
             try:
                 run_supervised_once(archive=archive, checkpoint=checkpoint,
@@ -150,12 +165,16 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
                 return 3
             except Exception:
                 consecutive += 1
+                # Persist the failure counter after EACH attempt, not only
+                # at the terminal halt threshold. Reboots cannot reset it.
+                previous = json.loads(Path(heartbeat).read_text(encoding="utf-8"))
+                if previous.get("mode") != "paper" or previous.get("live_orders_enabled") is not False:
+                    raise ValueError("Refusing to overwrite invalid paper heartbeat")
+                previous["consecutive_failures"] = consecutive
                 if consecutive >= max_failures:
-                    # Never spin through broken state or silently auto-restart.
-                    previous = json.loads(Path(heartbeat).read_text(encoding="utf-8"))
                     previous["status"] = "halted"
-                    previous["consecutive_failures"] = consecutive
-                    _safe_heartbeat(heartbeat, previous)
+                _safe_heartbeat(heartbeat, previous)
+                if consecutive >= max_failures:
                     return 2
             if should_stop():
                 break
