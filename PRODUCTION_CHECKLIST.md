@@ -58,6 +58,13 @@ may automatically enable live order placement.
 ## Gate C — broker sandbox order lifecycle (NOT complete)
 
 - [x] Separate offline cash-only KRW/USD stock paper book, with whole-share fills and duplicate order safeguards
+- [x] Durable SQLite stock-paper execution journal with replay, idempotence and cash protection
+- [x] Saved Toss 1m JSON parser with closing-time to opening-time conversion
+- [x] Opt-in Toss OAuth + read-only candle collector (code only; genuine authenticated endpoint not yet exercised)
+- [x] Completed-bar MA-cross paper stock backtest with next-available-open fills
+- [ ] Validate actual Toss OAuth/IP allowlisting and real quote ingestion against live API
+- [ ] Forward-only scheduled stock paper trading with exchange session calendar and durable strategy cursor
+- [ ] Simulated stock ledger backups, replay monitoring, and unified market risk controls
 - [ ] Connect authenticated read-only Toss stock data to validated paper candles
 - [ ] Validate KIS official virtual-trading API end-to-end
 - [ ] Exchange-specific symbol and step/min-notional filters
