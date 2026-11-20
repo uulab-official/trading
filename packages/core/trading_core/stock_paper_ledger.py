@@ -6,6 +6,7 @@ On each command the full ledger is replayed from an immutable ordered log.
 """
 from contextlib import closing
 from decimal import Decimal
+import hashlib
 from pathlib import Path
 import json
 import sqlite3
@@ -99,6 +100,98 @@ class StockPaperLedger:
                     )
                 db.execute("COMMIT")
                 return result
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+
+    def apply_strategy_replay(self, fixture, *, identity, expected_fills, marks):
+        """Atomically advance one paper-only strategy and its simulated fills.
+
+        Full saved candle-prefix SHA is checked before mutation, and the
+        strategy-generated prior fills must equal persisted fill history.
+        This is an OFFLINE replay, not a timed market-connected service.
+        """
+        if not isinstance(fixture, dict) or fixture.get("mode") != "paper":
+            raise ValueError("Strategy replay requires paper fixture")
+        candles = fixture.get("candles")
+        if not isinstance(candles, list) or not candles:
+            raise ValueError("Strategy replay requires completed candles")
+        if not isinstance(expected_fills, list):
+            raise ValueError("Expected fills must be a list")
+        if not isinstance(identity, dict) or not identity:
+            raise ValueError("Strategy configuration identity is required")
+        identity_json = json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        with closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                db.execute("""CREATE TABLE IF NOT EXISTS paper_strategy_state (
+                    id INTEGER PRIMARY KEY CHECK (id=1),
+                    identity_json TEXT NOT NULL,
+                    bars INTEGER NOT NULL,
+                    prefix_sha256 TEXT NOT NULL
+                )""")
+                saved = db.execute(
+                    "SELECT identity_json,bars,prefix_sha256 FROM paper_strategy_state WHERE id=1"
+                ).fetchone()
+                if saved is None:
+                    if db.execute("SELECT COUNT(*) FROM paper_fills").fetchone()[0]:
+                        raise ValueError("Strategy cannot attach to existing manual stock fills")
+                    prior_bars = 0
+                else:
+                    stored_identity, prior_bars, prefix_sha = saved
+                    if stored_identity != identity_json:
+                        raise ValueError("Stock strategy assumptions changed")
+                    if type(prior_bars) is not int or prior_bars < 1 or prior_bars > len(candles):
+                        raise ValueError("Stock paper strategy cursor invalid")
+                    prefix = json.dumps(candles[:prior_bars], sort_keys=True,
+                                        separators=(",", ":"), allow_nan=False)
+                    if hashlib.sha256(prefix.encode()).hexdigest() != prefix_sha:
+                        raise ValueError("Previous completed stock candles were changed")
+                book, previous_fill_count = self._rebuild(
+                    db, self.quote_currency, self.initial_cash, self.fee_pct
+                )
+                if previous_fill_count > len(expected_fills):
+                    raise ValueError("Strategy replay removed historical paper fills")
+                if book.fills != expected_fills[:previous_fill_count]:
+                    raise ValueError("Historical strategy fill events differ")
+                new_fills = expected_fills[previous_fill_count:]
+                for fill in new_fills:
+                    if not isinstance(fill, dict) or fill.get("mode") != "paper":
+                        raise ValueError("Strategy emitted a non-paper fill")
+                    actual = book.execute(fill["client_id"], fill["symbol"], fill["side"],
+                                          fill["shares"], price=fill["price"])
+                    if actual != fill:
+                        raise ValueError("Strategy fill cannot be reconstructed")
+                    db.execute(
+                        "INSERT INTO paper_fills (client_id,symbol,side,shares,price,result_json) "
+                        "VALUES (?,?,?,?,?,?)",
+                        (fill["client_id"], fill["symbol"], fill["side"], fill["shares"],
+                         fill["price"], json.dumps(fill, sort_keys=True, allow_nan=False))
+                    )
+                valuation = str(book.marked_equity(marks))
+                full_prefix = json.dumps(candles, sort_keys=True, separators=(",", ":"),
+                                         allow_nan=False)
+                digest = hashlib.sha256(full_prefix.encode()).hexdigest()
+                if saved is None:
+                    db.execute(
+                        "INSERT INTO paper_strategy_state (id,identity_json,bars,prefix_sha256) "
+                        "VALUES (1,?,?,?)", (identity_json, len(candles), digest)
+                    )
+                else:
+                    db.execute(
+                        "UPDATE paper_strategy_state SET bars=?,prefix_sha256=? WHERE id=1",
+                        (len(candles), digest)
+                    )
+                db.execute("COMMIT")
+                return {
+                    "mode": "paper", "live_orders_enabled": False,
+                    "bars": len(candles), "appended_bars": len(candles) - prior_bars,
+                    "new_simulated_fills": len(new_fills),
+                    "total_simulated_fills": len(book.fills),
+                    "marked_equity": valuation,
+                    "quote_currency": self.quote_currency,
+                    "status": "paper_replayed",
+                }
             except BaseException:
                 db.execute("ROLLBACK")
                 raise
