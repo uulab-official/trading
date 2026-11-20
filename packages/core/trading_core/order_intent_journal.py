@@ -1,0 +1,166 @@
+"""Durable order-intent journal for future BROKER SANDBOX integration.
+
+This module contains NO HTTP/API client and never submits or retries an order.
+An ambiguous order outcome must be reconciled against independent broker
+evidence, never guessed from a network timeout.
+"""
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+import re
+import sqlite3
+
+
+FINAL = frozenset(("filled", "canceled", "rejected"))
+PENDING = frozenset(("reserved", "uncertain"))
+
+
+def _quantity(value):
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, TypeError) as error:
+        raise ValueError("Quantity must be a finite positive decimal") from error
+    if not number.is_finite() or number <= 0:
+        raise ValueError("Quantity must be a finite positive decimal")
+    return str(number.normalize())
+
+
+def _identifier(value, label):
+    if not isinstance(value, str) or not 1 <= len(value) <= 120:
+        raise ValueError(label + " must be 1..120 characters")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", value):
+        raise ValueError(label + " contains unsupported characters")
+    return value
+
+
+class OrderIntentJournal:
+    """SQLite WAL journal, single-writer transaction, no broker adapter."""
+
+    def __init__(self, path):
+        self.path = Path(path).expanduser().resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.exists() and not self.path.is_file():
+            raise ValueError("Journal must be a regular file")
+        with self._connect() as db:
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS intents (
+                    client_id TEXT PRIMARY KEY,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    quantity TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('reserved','uncertain','reconciled')),
+                    outcome TEXT,
+                    evidence_ref TEXT,
+                    broker_order_id TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_intents_status ON intents(status);
+            """)
+
+    def _connect(self):
+        con = sqlite3.connect(str(self.path), timeout=5.0, isolation_level=None)
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA busy_timeout=5000")
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA synchronous=FULL")
+        return con
+
+    @staticmethod
+    def _row(row):
+        return dict(row) if row is not None else None
+
+    def reserve(self, client_id, symbol, side, quantity):
+        """Commit intent first; caller must never infer permission to send.
+
+        Duplicate exact IDs return existing state without submitting an order.
+        Distinct new intents are blocked while any unresolved intent exists.
+        """
+        client_id = _identifier(client_id, "client_id")
+        if not isinstance(symbol, str) or not re.fullmatch(r"[A-Z0-9]{2,20}/(?:KRW|USDT)", symbol):
+            raise ValueError("Journal supports explicit KRW/USDT spot symbols only")
+        if side not in ("buy", "sell"):
+            raise ValueError("Invalid spot order side")
+        qty = _quantity(quantity)
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                old = db.execute("SELECT * FROM intents WHERE client_id=?", (client_id,)).fetchone()
+                if old is not None:
+                    if (old["symbol"], old["side"], old["quantity"]) != (symbol, side, qty):
+                        raise ValueError("Client intent ID reused with different order details")
+                    db.execute("COMMIT")
+                    return self._row(old)
+                active = db.execute(
+                    "SELECT client_id FROM intents WHERE status IN ('reserved','uncertain') LIMIT 1"
+                ).fetchone()
+                if active is not None:
+                    raise ValueError("Unresolved broker intent blocks new order intents")
+                db.execute(
+                    "INSERT INTO intents (client_id,symbol,side,quantity,status) VALUES (?,?,?,?,?)",
+                    (client_id, symbol, side, qty, "reserved"),
+                )
+                db.execute("COMMIT")
+                return self.get(client_id)
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+
+    def mark_uncertain(self, client_id):
+        """Ambiguous submission/ACK: never automatically retry or erase."""
+        client_id = _identifier(client_id, "client_id")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                row = db.execute("SELECT status FROM intents WHERE client_id=?", (client_id,)).fetchone()
+                if row is None or row["status"] == "reconciled":
+                    raise ValueError("Cannot mark missing or reconciled intent uncertain")
+                db.execute("UPDATE intents SET status='uncertain' WHERE client_id=?", (client_id,))
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+        return self.get(client_id)
+
+    def reconcile(self, client_id, *, outcome, evidence_ref, broker_order_id=None):
+        """Record EXTERNAL verified evidence; does not query broker itself."""
+        client_id = _identifier(client_id, "client_id")
+        if outcome not in FINAL:
+            raise ValueError("Outcome must be filled, canceled or rejected")
+        evidence_ref = _identifier(evidence_ref, "evidence_ref")
+        if broker_order_id is not None:
+            broker_order_id = _identifier(broker_order_id, "broker_order_id")
+        if outcome == "filled" and not broker_order_id:
+            raise ValueError("Filled orders require a confirmed broker order ID")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                row = db.execute("SELECT * FROM intents WHERE client_id=?", (client_id,)).fetchone()
+                if row is None:
+                    raise ValueError("Cannot reconcile an unknown client intent")
+                if row["status"] == "reconciled":
+                    if (row["outcome"], row["evidence_ref"], row["broker_order_id"]) != (
+                        outcome, evidence_ref, broker_order_id
+                    ):
+                        raise ValueError("Final broker evidence is immutable")
+                else:
+                    db.execute(
+                        "UPDATE intents SET status='reconciled', outcome=?, evidence_ref=?, "
+                        "broker_order_id=? WHERE client_id=?",
+                        (outcome, evidence_ref, broker_order_id, client_id),
+                    )
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+        return self.get(client_id)
+
+    def get(self, client_id):
+        client_id = _identifier(client_id, "client_id")
+        with self._connect() as db:
+            return self._row(db.execute(
+                "SELECT * FROM intents WHERE client_id=?", (client_id,)
+            ).fetchone())
+
+    def unresolved(self):
+        with self._connect() as db:
+            return [self._row(row) for row in db.execute(
+                "SELECT * FROM intents WHERE status IN ('reserved','uncertain') ORDER BY client_id"
+            ).fetchall()]
