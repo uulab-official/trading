@@ -4,6 +4,7 @@ This module contains NO HTTP/API client and never submits or retries an order.
 An ambiguous order outcome must be reconciled against independent broker
 evidence, never guessed from a network timeout.
 """
+from contextlib import closing
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
@@ -40,7 +41,7 @@ class OrderIntentJournal:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists() and not self.path.is_file():
             raise ValueError("Journal must be a regular file")
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS intents (
                     client_id TEXT PRIMARY KEY,
@@ -79,7 +80,7 @@ class OrderIntentJournal:
         if side not in ("buy", "sell"):
             raise ValueError("Invalid spot order side")
         qty = _quantity(quantity)
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 old = db.execute("SELECT * FROM intents WHERE client_id=?", (client_id,)).fetchone()
@@ -109,7 +110,7 @@ class OrderIntentJournal:
     def mark_uncertain(self, client_id):
         """Ambiguous submission/ACK: never automatically retry or erase."""
         client_id = _identifier(client_id, "client_id")
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 row = db.execute("SELECT status FROM intents WHERE client_id=?", (client_id,)).fetchone()
@@ -132,7 +133,7 @@ class OrderIntentJournal:
             broker_order_id = _identifier(broker_order_id, "broker_order_id")
         if outcome == "filled" and not broker_order_id:
             raise ValueError("Filled orders require a confirmed broker order ID")
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 row = db.execute("SELECT * FROM intents WHERE client_id=?", (client_id,)).fetchone()
@@ -157,13 +158,13 @@ class OrderIntentJournal:
 
     def get(self, client_id):
         client_id = _identifier(client_id, "client_id")
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             return self._row(db.execute(
                 "SELECT * FROM intents WHERE client_id=?", (client_id,)
             ).fetchone())
 
     def unresolved(self):
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             return [self._row(row) for row in db.execute(
                 "SELECT * FROM intents WHERE status IN ('reserved','uncertain') ORDER BY client_id"
             ).fetchall()]
