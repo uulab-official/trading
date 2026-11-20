@@ -39,7 +39,8 @@ may automatically enable live order placement.
 - [x] macOS launchd paper-only template with no auto-restart after halted state
 - [ ] Reliable timed ingestion with reconnect budgets, backoff/jitter, and validated multi-day runtime
 - [ ] Clock-skew detection and NTP operational checks; reject stale or future prices
-- [ ] Historical pagination/backfill after gaps > 200 candles
+- [x] Bounded historical pagination to a **separate candidate** with overlap and no-gap checks
+- [ ] Operator-validated complete backfill integration for live paper supervisor (not automated)
 - [ ] Crash-safe archive+strategy state orchestration and startup reconciliation
 - [ ] Circuit breaker for network instability, schema drift, data gaps, bad ticks
 - [ ] Single source of truth for positions, trades, and portfolio in operator UI
