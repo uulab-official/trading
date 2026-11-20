@@ -92,6 +92,14 @@ class PaperBackupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_backup(self.backup, deep=True)
 
+    def test_running_supervisor_prevents_manual_backup(self):
+        from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
+        owner = self.checkpoint.with_name(self.checkpoint.name + ".supervisor")
+        with locked_checkpoint(owner):
+            with self.assertRaises(CheckpointInUseError):
+                backup_pair(self.archive, self.checkpoint, self.backup)
+        self.assertFalse(self.backup.exists())
+
     def test_source_collision_rejected(self):
         with self.assertRaises(ValueError):
             backup_pair(self.archive, self.checkpoint, self.archive)
