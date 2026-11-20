@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 import sys
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages/data"))
@@ -21,6 +21,15 @@ from trading_data.toss_stock_candles import parse_toss_minute_candles
 
 HOST = "https://openapi.tossinvest.com"
 MAX_RESPONSE = 2_000_000
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, target):
+        raise ValueError("Cross-endpoint redirects are forbidden for Toss OAuth")
+
+
+def _open_no_redirect(request, *, timeout):
+    return build_opener(_NoRedirect()).open(request, timeout=timeout)
 
 
 def _read_json(request, opener):
@@ -39,7 +48,7 @@ def _read_json(request, opener):
 
 def fetch_readonly_minute(symbol, currency, *, count=100, adjusted=True,
                           client_id=None, client_secret=None,
-                          opener=urlopen, observed_at=None):
+                          opener=_open_no_redirect, observed_at=None):
     if not isinstance(symbol, str) or not re.fullmatch(r"[A-Za-z0-9.-]{1,20}", symbol):
         raise ValueError("Invalid symbol")
     if currency not in ("KRW", "USD"):
