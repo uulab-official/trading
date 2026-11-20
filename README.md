@@ -18,7 +18,13 @@ The existing backtest engine now has separate
 `python tools/offline_checks.py --include-backtest` with pandas/numpy available
 to check causal fills, spot balances, fees, marked equity, and repeatable runs.
 
-Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nThe stock PAPER SQLite strategy can now be **backed up consistently**
+Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nA **zero-credential synthetic end-to-end stock demo** can be exercised
+using `python tools/stock_paper_smoke.py`. It verifies 55 explicitly
+synthetic 1m candles, strategy replay, duplicate refusal, read-only
+audit, SQLite WAL backup/deep verification and static report generation.
+No real quotes or orders are involved.
+
+The stock PAPER SQLite strategy can now be **backed up consistently**
 and independently replay-verified; the separate crypto and stock
 portfolios can be inspected through one **read-only, nonaggregating**
 CLI. See [stock backups and unified paper monitor](docs/STOCK_PAPER_BACKUP_MONITOR.md).
