@@ -10,7 +10,6 @@ from decimal import Decimal
 import json
 import sqlite3
 from pathlib import Path
-import sqlite3
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
