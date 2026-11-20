@@ -63,6 +63,21 @@ class StockPaperLedger:
         db.execute("PRAGMA synchronous=FULL")
         return db
 
+    def _assert_identity(self, db):
+        """Verify account/currency config inside EVERY active transaction.
+
+        An already-created instance must not keep writing if another
+        operator or process modified its SQLite metadata after startup.
+        """
+        current = dict(db.execute("SELECT key,value FROM paper_meta").fetchall())
+        expected = {
+            "schema_version": "1", "mode": "paper",
+            "quote_currency": self.quote_currency,
+            "initial_cash": self.initial_cash, "fee_pct": self.fee_pct,
+        }
+        if current != expected:
+            raise ValueError("Paper ledger configuration changed after initialization")
+
     @staticmethod
     def _rebuild(db, quote_currency, initial_cash, fee_pct):
         book = StockPaperBook(quote_currency, initial_cash, fee_pct)
@@ -85,6 +100,7 @@ class StockPaperLedger:
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
+                self._assert_identity(db)
                 has_strategy = db.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='paper_strategy_state'"
                 ).fetchone()
@@ -131,6 +147,7 @@ class StockPaperLedger:
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
+                self._assert_identity(db)
                 db.execute("""CREATE TABLE IF NOT EXISTS paper_strategy_state (
                     id INTEGER PRIMARY KEY CHECK (id=1),
                     identity_json TEXT NOT NULL,
@@ -209,6 +226,7 @@ class StockPaperLedger:
         with closing(self._connect()) as db:
             db.execute("BEGIN")
             try:
+                self._assert_identity(db)
                 book, count = self._rebuild(
                     db, self.quote_currency, self.initial_cash, self.fee_pct
                 )
