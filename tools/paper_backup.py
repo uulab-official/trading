@@ -35,6 +35,16 @@ def _read_bounded(path, maximum):
 
 
 def backup_pair(archive: Path, checkpoint: Path, destination: Path):
+    """Snapshot only while the local paper supervisor is stopped."""
+    archive, checkpoint, destination = (Path(v).resolve() for v in (archive, checkpoint, destination))
+    if len({archive, checkpoint, destination}) != 3:
+        raise ValueError("Backup, archive and checkpoint paths must differ")
+    owner = checkpoint.with_name(checkpoint.name + ".supervisor")
+    with locked_checkpoint(owner):
+        return _backup_pair_stopped(archive, checkpoint, destination)
+
+
+def _backup_pair_stopped(archive: Path, checkpoint: Path, destination: Path):
     """Snapshot a fully verified pair; refuse concurrent or mismatched state."""
     archive, checkpoint, destination = (Path(v).resolve() for v in (archive, checkpoint, destination))
     if len({archive, checkpoint, destination}) != 3:
