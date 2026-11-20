@@ -127,7 +127,7 @@ class StockPaperLedger:
                 db.execute("ROLLBACK")
                 raise
 
-    def apply_strategy_replay(self, fixture, *, identity, expected_fills, marks):
+    def apply_strategy_replay(self, fixture, *, identity, expected_fills, marks, expected_equity=None):
         """Atomically advance one paper-only strategy and its simulated fills.
 
         Full saved candle-prefix SHA is checked before mutation, and the
@@ -192,7 +192,13 @@ class StockPaperLedger:
                         (fill["client_id"], fill["symbol"], fill["side"], fill["shares"],
                          fill["price"], json.dumps(fill, sort_keys=True, allow_nan=False))
                     )
-                valuation = str(book.marked_equity(marks))
+                valuation_decimal = book.marked_equity(marks)
+                # Verify independently computed expected equity BEFORE
+                # committing new fill events and strategy cursor. Previously
+                # the caller performed this check only AFTER COMMIT.
+                if expected_equity is not None and valuation_decimal != _amount(expected_equity, zero=True):
+                    raise ValueError("Paper strategy equity reconciliation failed before commit")
+                valuation = str(valuation_decimal)
                 full_prefix = json.dumps(candles, sort_keys=True, separators=(",", ":"),
                                          allow_nan=False)
                 digest = hashlib.sha256(full_prefix.encode()).hexdigest()
