@@ -54,6 +54,7 @@ def main():
         ("apps/server/tests", "test_stock_paper_cli.py"),
         ("apps/server/tests", "test_toss_stock_fixture.py"),
         ("apps/server/tests", "test_toss_readonly_snapshot.py"),
+        ("apps/server/tests", "test_kis_vts_readonly_quote.py"),
         ("apps/server/tests", "test_stock_paper_backtest.py"),
         ("apps/server/tests", "test_stock_paper_forward.py"),
         ("apps/server/tests", "test_stock_paper_report_html.py"),
