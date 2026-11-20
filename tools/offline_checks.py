@@ -58,6 +58,7 @@ def main():
         ("apps/server/tests", "test_stock_paper_backtest.py"),
         ("apps/server/tests", "test_stock_paper_forward.py"),
         ("apps/server/tests", "test_stock_paper_report_html.py"),
+        ("apps/server/tests", "test_stock_paper_risk_audit.py"),
         ("apps/server/tests", "test_stock_paper_backup.py"),
         ("apps/server/tests", "test_paper_portfolio_status.py"),
         ("apps/server/tests", "test_paper_portfolio_report_html.py"),
