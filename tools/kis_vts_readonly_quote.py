@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 import sys
 from urllib.parse import urlencode
-from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 
 VTS_BASE = "https://openapivts.koreainvestment.com:29443"
 QUOTE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-price"
@@ -30,7 +30,7 @@ class _DenyRedirect(HTTPRedirectHandler):
 
 
 def _open_vts_quote(request, *, timeout):
-    return build_opener(_DenyRedirect()).open(request, timeout=timeout)
+    # Never forward bearer/app-secret headers through an environment proxy.\n    return build_opener(ProxyHandler({}), _DenyRedirect()).open(request, timeout=timeout)
 
 
 def _text(label, value):
@@ -85,7 +85,7 @@ def fetch_quote(symbol, *, token, appkey, appsecret,
     if not price.is_finite() or price <= 0:
         raise ValueError("KIS spot quote must be finite and positive")
     observed = now() if now is not None else datetime.now(timezone.utc)
-    if not isinstance(observed, datetime) or observed.tzinfo is None:
+    if (not isinstance(observed, datetime) or observed.tzinfo is None\n            or observed.utcoffset() is None):
         raise ValueError("Observation time must be timezone aware")
     return {
         "mode": "paper", "live_orders_enabled": False,
