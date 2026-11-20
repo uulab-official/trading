@@ -200,11 +200,19 @@ class OrderIntentJournal:
         based only on this local database report.
         """
         with closing(self._connect(read_only=True)) as db:
-            if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
-                raise ValueError("SQLite integrity check failed")
-            records = [dict(row) for row in db.execute(
-                "SELECT * FROM intents ORDER BY client_id"
-            ).fetchall()]
+            # Keep a consistent SQLite read snapshot while validating both
+            # the storage integrity and the order records.
+            db.execute("BEGIN")
+            try:
+                if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                    raise ValueError("SQLite integrity check failed")
+                records = [dict(row) for row in db.execute(
+                    "SELECT * FROM intents ORDER BY client_id"
+                ).fetchall()]
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
         pending = []
         order_ids = set()
         for row in records:
