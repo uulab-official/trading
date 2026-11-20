@@ -76,6 +76,7 @@ may automatically enable live order placement.
 - [ ] Forward-only scheduled stock paper trading with exchange session calendar and durable strategy cursor
 - [ ] Simulated stock ledger backups, replay monitoring, and unified market risk controls
 - [ ] Connect authenticated read-only Toss stock data to validated paper candles
+- [x] KIS VTS-host-only current-price read-only probe with mock tests (actual API not yet exercised)
 - [ ] Validate KIS official virtual-trading API end-to-end
 - [ ] Exchange-specific symbol and step/min-notional filters
 - [ ] Clock and nonce, API authentication, and least-privilege credentials
