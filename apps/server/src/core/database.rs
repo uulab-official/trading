@@ -1,7 +1,7 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use sqlx::{migrate::MigrateDatabase, sqlite::SqlitePool, Row};
-use tracing::{error, info};
+use tracing::info;
 
 use crate::core::models::{Order, OrderSide, OrderStatus, OrderType, Position, Trade};
 
@@ -19,7 +19,7 @@ impl Database {
         let pool = SqlitePool::connect(db_url).await?;
         let db = Self { pool };
         db.init_tables().await?;
-        
+
         info!("Database connected and initialized");
         Ok(db)
     }
@@ -294,8 +294,14 @@ impl Database {
             quantity: row.try_get("quantity")?,
             price: row.try_get("price")?,
             status: parse_order_status(&status_str),
-            created_at: row.try_get::<String, _>("created_at")?.parse().unwrap_or_else(|_| Utc::now()),
-            updated_at: row.try_get::<String, _>("updated_at")?.parse().unwrap_or_else(|_| Utc::now()),
+            created_at: row
+                .try_get::<String, _>("created_at")?
+                .parse()
+                .unwrap_or_else(|_| Utc::now()),
+            updated_at: row
+                .try_get::<String, _>("updated_at")?
+                .parse()
+                .unwrap_or_else(|_| Utc::now()),
             exchange_order_id: row.try_get("exchange_order_id")?,
             filled_quantity: row.try_get("filled_quantity")?,
             average_price: row.try_get("average_price")?,
@@ -315,7 +321,10 @@ impl Database {
             current_price: row.try_get("current_price")?,
             unrealized_pnl: row.try_get("unrealized_pnl")?,
             realized_pnl: row.try_get("realized_pnl")?,
-            opened_at: row.try_get::<String, _>("opened_at")?.parse().unwrap_or_else(|_| Utc::now()),
+            opened_at: row
+                .try_get::<String, _>("opened_at")?
+                .parse()
+                .unwrap_or_else(|_| Utc::now()),
             leverage: row.try_get("leverage")?,
         })
     }
@@ -349,7 +358,7 @@ fn parse_order_status(s: &str) -> OrderStatus {
 }
 
 pub async fn run_migrations() -> anyhow::Result<()> {
-    let db = Database::new("sqlite://data/trading.db").await?;
+    let _db = Database::new("sqlite://data/trading.db").await?;
     info!("Database migrations completed");
     Ok(())
 }

@@ -26,6 +26,7 @@ may automatically enable live order placement.
 - [x] Linux Python 3.10/3.11/3.12, required lint and Docker verified for published `8aaaf71` ([run 44904305168](https://github.com/uulab-official/trading/actions/runs/44904305168)); every later revision still requires its own exact-head CI
 - [x] Black/isort failures now block CI across packages, apps and tools; pinned direct tools and 148-file local check recorded in [quality verification](docs/QUALITY_UTC_VERIFICATION_2026_11_21.md)
 - [x] Deprecated UTC clock calls removed while preserving legacy timestamp formats; timezone-independent historical request epochs regression-tested
+- [x] Rust binary reuses the public library, package compiler warnings are errors, and parser-only compatibility checks cover every CLI mode; operational Rust broker paths remain unvalidated
 - [ ] Obtain real market sample and manually verify candles against exchange history
 - [ ] Evaluate long history and market regime diversity; remove survivorship/lookahead biases
 

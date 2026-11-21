@@ -1,22 +1,21 @@
 use anyhow::Result;
 use chrono::Utc;
-use serde_json::{json, Value};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
 use tracing::info;
 
 use crate::core::models::Order;
-use crate::exchange::{Exchange, ExchangeConfig, ExchangeEvent, OrderBook};
+use crate::exchange::{Exchange, ExchangeConfig, ExchangeEvent};
 
 pub struct BithumbClient {
-    config: ExchangeConfig,
     event_tx: broadcast::Sender<ExchangeEvent>,
 }
 
 impl BithumbClient {
-    pub fn new(config: ExchangeConfig) -> Self {
+    pub fn new(_config: ExchangeConfig) -> Self {
+        // The current stub adapter does not consume exchange configuration.
         let (event_tx, _) = broadcast::channel(1000);
-        Self { config, event_tx }
+        Self { event_tx }
     }
 }
 
@@ -40,7 +39,10 @@ impl Exchange for BithumbClient {
     }
 
     async fn subscribe_candles(&mut self, symbol: &str, timeframe: &str) -> Result<()> {
-        info!("Subscribed to {} candles ({}) on Bithumb", symbol, timeframe);
+        info!(
+            "Subscribed to {} candles ({}) on Bithumb",
+            symbol, timeframe
+        );
         Ok(())
     }
 

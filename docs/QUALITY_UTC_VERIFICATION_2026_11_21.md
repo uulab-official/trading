@@ -139,6 +139,9 @@ Python 3.10·3.11·3.12 각각 **751개 테스트·1523개 subtest**와 기본 o
 검증합니다. setuptools의 editable-install 안내는 정상적인 개발 설치 방식의
 설명이며, 경고를 숨기기 위해 설치 모드를 바꾸지 않았습니다.
 
+이후 Rust 컴파일 경고와 CLI 구조는 별도 변경에서 정리했습니다.
+[Rust 품질 검증 기록](RUST_QUALITY_VERIFICATION_2026_11_21.md)을 참고합니다.
+
 후속 변경의 로컬 검증에서는 CI 계약 **6개 테스트·3개 subtest**가 통과했습니다.
 `pip wheel --no-deps --no-build-isolation --no-index`로 네 패키지 wheel을 만들고,
 각 `METADATA`에 Markdown README 본문이 포함되는 것과 누락 경고가 없는 것을

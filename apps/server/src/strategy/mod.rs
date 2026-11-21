@@ -1,4 +1,4 @@
-use crate::core::models::{Candle, OrderSide};
+use crate::core::models::Candle;
 
 pub mod ma_cross;
 pub mod rsi;

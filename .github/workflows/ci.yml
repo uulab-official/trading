@@ -138,6 +138,7 @@ jobs:
         docker run --rm --network none trading-bot:latest ./trading-server master --help
         docker run --rm --network none trading-bot:latest ./trading-server worker --help
         docker run --rm --network none trading-bot:latest ./trading-server deploy --help
+        docker run --rm --network none trading-bot:latest ./trading-server migrate --help
 
   build-and-push:
     runs-on: ubuntu-latest

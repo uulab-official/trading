@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use tracing::{info, warn};
 
 use crate::core::models::{Order, OrderSide, Position};

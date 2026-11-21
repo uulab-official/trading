@@ -1,17 +1,14 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
-use hmac::{Hmac, Mac};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::Sha256;
 use std::collections::HashMap;
 use tokio::net::TcpStream;
 use tokio::sync::broadcast;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tracing::{error, info, warn};
 
-use crate::core::models::{Candle, Order, OrderSide, OrderStatus, OrderType, Ticker};
+use crate::core::models::{Candle, Order, Ticker};
 use crate::exchange::{Exchange, ExchangeConfig, ExchangeEvent, OrderBook};
 
 pub struct BinanceClient {
@@ -56,7 +53,7 @@ impl BinanceClient {
         match msg {
             Message::Text(text) => {
                 let data: Value = serde_json::from_str(&text)?;
-                
+
                 if let Some(event_type) = data.get("e").and_then(|v| v.as_str()) {
                     match event_type {
                         "aggTrade" => self.parse_trade(&data).await?,
@@ -76,24 +73,67 @@ impl BinanceClient {
     }
 
     async fn parse_trade(&self, data: &Value) -> Result<()> {
-        let symbol = data.get("s").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let price = data.get("p").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
-        let qty = data.get("q").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
-        
+        let symbol = data
+            .get("s")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let price = data
+            .get("p")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0")
+            .parse::<f64>()
+            .unwrap_or(0.0);
+        let qty = data
+            .get("q")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0")
+            .parse::<f64>()
+            .unwrap_or(0.0);
+
         info!("Trade: {} @ {} x {}", symbol, price, qty);
         Ok(())
     }
 
     async fn parse_kline(&self, data: &Value) -> Result<()> {
         if let Some(k) = data.get("k") {
-            let symbol = k.get("s").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let open = k.get("o").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
-            let high = k.get("h").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
-            let low = k.get("l").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
-            let close = k.get("c").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
-            let volume = k.get("v").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
+            let symbol = k
+                .get("s")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let open = k
+                .get("o")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0")
+                .parse::<f64>()
+                .unwrap_or(0.0);
+            let high = k
+                .get("h")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0")
+                .parse::<f64>()
+                .unwrap_or(0.0);
+            let low = k
+                .get("l")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0")
+                .parse::<f64>()
+                .unwrap_or(0.0);
+            let close = k
+                .get("c")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0")
+                .parse::<f64>()
+                .unwrap_or(0.0);
+            let volume = k
+                .get("v")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0")
+                .parse::<f64>()
+                .unwrap_or(0.0);
             let is_closed = k.get("x").and_then(|v| v.as_bool()).unwrap_or(false);
-            
+
             if is_closed {
                 let candle = Candle {
                     symbol: symbol.clone(),
@@ -111,12 +151,36 @@ impl BinanceClient {
     }
 
     async fn parse_ticker(&self, data: &Value) -> Result<()> {
-        let symbol = data.get("s").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let bid = data.get("b").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
-        let ask = data.get("a").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
-        let last = data.get("c").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
-        let volume = data.get("v").and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
-        
+        let symbol = data
+            .get("s")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let bid = data
+            .get("b")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0")
+            .parse::<f64>()
+            .unwrap_or(0.0);
+        let ask = data
+            .get("a")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0")
+            .parse::<f64>()
+            .unwrap_or(0.0);
+        let last = data
+            .get("c")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0")
+            .parse::<f64>()
+            .unwrap_or(0.0);
+        let volume = data
+            .get("v")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0")
+            .parse::<f64>()
+            .unwrap_or(0.0);
+
         let ticker = Ticker {
             symbol,
             bid,
@@ -125,15 +189,20 @@ impl BinanceClient {
             volume,
             timestamp: Utc::now(),
         };
-        
+
         let _ = self.event_tx.send(ExchangeEvent::Ticker(ticker));
         Ok(())
     }
 
     async fn parse_orderbook(&self, data: &Value) -> Result<()> {
-        let symbol = data.get("s").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        
-        let bids = data.get("b")
+        let symbol = data
+            .get("s")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let bids = data
+            .get("b")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -151,8 +220,9 @@ impl BinanceClient {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        
-        let asks = data.get("a")
+
+        let asks = data
+            .get("a")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -170,26 +240,16 @@ impl BinanceClient {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        
+
         let orderbook = OrderBook {
             symbol,
             bids,
             asks,
             timestamp: Utc::now(),
         };
-        
+
         let _ = self.event_tx.send(ExchangeEvent::OrderBook(orderbook));
         Ok(())
-    }
-
-    fn generate_signature(&self, query_string: &str) -> String {
-        type HmacSha256 = Hmac<Sha256>;
-        let mut mac = HmacSha256::new_from_slice(self.config.api_secret.as_bytes())
-            .expect("HMAC can take key of any size");
-        mac.update(query_string.as_bytes());
-        let result = mac.finalize();
-        let code_bytes = result.into_bytes();
-        hex::encode(code_bytes)
     }
 
     pub async fn run_message_loop(&mut self) -> Result<()> {
@@ -197,9 +257,10 @@ impl BinanceClient {
 
         loop {
             let msg = {
-                let ws_stream = self.ws_stream.as_mut().ok_or_else(|| {
-                    anyhow::anyhow!("WebSocket not connected")
-                })?;
+                let ws_stream = self
+                    .ws_stream
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("WebSocket not connected"))?;
                 ws_stream.next().await
             };
 
@@ -229,9 +290,7 @@ impl BinanceClient {
     where
         Self: 'static,
     {
-        tokio::spawn(async move {
-            self.run_message_loop().await
-        })
+        tokio::spawn(async move { self.run_message_loop().await })
     }
 }
 
@@ -285,23 +344,25 @@ impl Exchange for BinanceClient {
     async fn subscribe_ticker(&mut self, symbol: &str) -> Result<()> {
         let symbol_lower = symbol.to_lowercase().replace("/", "");
         let stream_name = format!("{}@ticker", symbol_lower);
-        
+
         if self.is_connected {
             let subscribe_msg = json!({
                 "method": "SUBSCRIBE",
                 "params": [stream_name],
                 "id": 1
             });
-            
+
             if let Some(ref mut stream) = self.ws_stream {
-                stream.send(Message::Text(subscribe_msg.to_string())).await?;
+                stream
+                    .send(Message::Text(subscribe_msg.to_string()))
+                    .await?;
                 info!("Subscribed to {} ticker", symbol);
             }
         } else {
             self.pending_streams.push(stream_name);
             info!("Queued {} ticker subscription for connection", symbol);
         }
-        
+
         Ok(())
     }
 
@@ -316,25 +377,27 @@ impl Exchange for BinanceClient {
             "1d" => "1d",
             _ => "1h",
         };
-        
+
         let stream_name = format!("{}@kline_{}", symbol_lower, interval);
-        
+
         if self.is_connected {
             let subscribe_msg = json!({
                 "method": "SUBSCRIBE",
                 "params": [stream_name],
                 "id": 2
             });
-            
+
             if let Some(ref mut stream) = self.ws_stream {
-                stream.send(Message::Text(subscribe_msg.to_string())).await?;
+                stream
+                    .send(Message::Text(subscribe_msg.to_string()))
+                    .await?;
                 info!("Subscribed to {} candles ({})", symbol, timeframe);
             }
         } else {
             self.pending_streams.push(stream_name);
             info!("Queued {} candles subscription for connection", symbol);
         }
-        
+
         Ok(())
     }
 
@@ -345,12 +408,14 @@ impl Exchange for BinanceClient {
             "params": [format!("{}@depth", symbol_lower)],
             "id": 3
         });
-        
+
         if let Some(ref mut stream) = self.ws_stream {
-            stream.send(Message::Text(subscribe_msg.to_string())).await?;
+            stream
+                .send(Message::Text(subscribe_msg.to_string()))
+                .await?;
             info!("Subscribed to {} orderbook", symbol);
         }
-        
+
         Ok(())
     }
 

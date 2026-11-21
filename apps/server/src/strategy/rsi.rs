@@ -1,4 +1,4 @@
-use crate::core::models::{Candle, OrderSide};
+use crate::core::models::Candle;
 use crate::strategy::{Signal, Strategy};
 use serde_json::json;
 

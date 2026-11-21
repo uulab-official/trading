@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use dashmap::DashMap;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 
 use crate::core::models::{Order, OrderSide, OrderStatus, OrderType};
 use crate::exchange::ExchangeEvent;
@@ -68,7 +68,12 @@ impl OrderManager {
     pub fn get_open_orders(&self) -> Vec<Order> {
         self.orders
             .iter()
-            .filter(|entry| matches!(entry.value().status, OrderStatus::Open | OrderStatus::PartiallyFilled))
+            .filter(|entry| {
+                matches!(
+                    entry.value().status,
+                    OrderStatus::Open | OrderStatus::PartiallyFilled
+                )
+            })
             .map(|entry| entry.value().clone())
             .collect()
     }

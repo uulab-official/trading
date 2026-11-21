@@ -107,10 +107,21 @@ class CoverageWorkflowTests(unittest.TestCase):
             if step.get("name") == "Test Rust Docker CLI without network access"
         )
         commands = cli["run"].strip().splitlines()
-        self.assertEqual(len(commands), 4)
-        self.assertTrue(
-            all("--network none" in command and command.endswith("--help") for command in commands)
-        )
+        expected_commands = [
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "trading-bot:latest",
+                "./trading-server",
+                *arguments,
+                "--help",
+            ]
+            for arguments in ([], ["master"], ["worker"], ["deploy"], ["migrate"])
+        ]
+        self.assertEqual([shlex.split(command) for command in commands], expected_commands)
 
     def test_image_publication_stays_explicit_and_depends_on_verification(self):
         publish = self.jobs["build-and-push"]

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
@@ -43,7 +42,9 @@ impl StateStore {
     pub async fn save_position(&self, position: &Position) -> Result<()> {
         self.db.save_position(position).await?;
         let mut cache = self.cache.write().await;
-        cache.positions.insert(position.symbol.clone(), position.clone());
+        cache
+            .positions
+            .insert(position.symbol.clone(), position.clone());
         Ok(())
     }
 

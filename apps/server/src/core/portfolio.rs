@@ -10,7 +10,6 @@ pub struct PortfolioManager {
     positions: Arc<DashMap<String, Position>>,
     balance: Arc<dashmap::DashMap<String, f64>>,
     trades: Arc<dashmap::DashMap<String, Trade>>,
-    total_value: f64,
 }
 
 impl PortfolioManager {
@@ -19,7 +18,6 @@ impl PortfolioManager {
             positions: Arc::new(DashMap::new()),
             balance: Arc::new(dashmap::DashMap::new()),
             trades: Arc::new(dashmap::DashMap::new()),
-            total_value: 0.0,
         }
     }
 

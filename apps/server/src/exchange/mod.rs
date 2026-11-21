@@ -1,17 +1,11 @@
 use anyhow::Result;
 use chrono::Utc;
-use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::net::TcpStream;
 use tokio::sync::{broadcast, RwLock};
-use tokio::time::{interval, Duration};
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
-use tracing::{error, info, warn};
+use tracing::info;
 
-use crate::core::models::{Candle, Order, OrderSide, OrderStatus, OrderType, Ticker};
+use crate::core::models::{Candle, Order, Ticker};
 
 pub mod binance;
 pub mod bithumb;
