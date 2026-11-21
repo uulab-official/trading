@@ -30,6 +30,10 @@ class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, request, file_pointer, code, message, headers, target):
         raise ValueError("Toss request redirects are forbidden")
 
+    def http_error_308(self, request, file_pointer, code, message, headers):
+        # Python 3.10 does not dispatch HTTP 308 through redirect_request.
+        raise ValueError("Toss request redirects are forbidden")
+
 
 def _open_no_redirect(request, *, timeout):
     # Never send client credentials or bearer headers through environment proxies.

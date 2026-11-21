@@ -51,9 +51,9 @@ Linux / Python 3.12.14에서 필요한 패키지를 설치한 뒤 실행했다.
 
 | 검증 | 최종 관측 결과 |
 | --- | --- |
-| 전체 pytest 및 core/data/strategy/backtest 커버리지 XML 생성 | 549 passed; 753 subtests passed |
-| 네트워크·DNS 차단 오프라인 실행기, 백테스트 포함 | 539 tests, OK |
-| 토스 수집기 개별 unittest | 30 tests, OK |
+| 전체 pytest 및 core/data/strategy/backtest 커버리지 XML 생성 | 550 passed; 757 subtests passed |
+| 네트워크·DNS 차단 오프라인 실행기, 백테스트 포함 | 540 tests, OK |
+| 토스 수집기 개별 unittest | 31 tests, OK |
 | KIS 코어·실제 CLI 개별 unittest | 25 + 10 tests, OK |
 | compileall: packages, apps/server, tools | 종료 코드 0 |
 | fatal flake8: E9,F63,F7,F82 | 오류 0개 |
@@ -121,6 +121,20 @@ python tools/kis_vts_order_plan.py --mode paper \
 ```
 
 ## 원격 검증과 남은 연결 단계
+
+첫 구현 커밋 `d46620e`의
+[CI 실행 44880466103](https://github.com/uulab-official/trading/actions/runs/44880466103)에서
+Python 3.10의 HTTP 308 두 하위 테스트가 실패했다. 이 버전의 urllib에는
+기본 308 핸들러가 없어 리다이렉트를 거부하면서 `HTTPError`를 냈고,
+다른 버전은 사용자 정의 거부의 `ValueError`를 냈다. 요청이 리다이렉트된
+실패는 아니었다. Python 3.11의 전체 테스트 단계는 통과했으나 matrix
+fail-fast로 나머지 작업은 취소 또는 생략됐다.
+
+모든 지원 버전에서 동일한 거부 정책을 사용하도록 명시적인 308 핸들러를
+추가했다. 상속된 표준 핸들러가 없는 환경을 재현하고, GET과 OAuth POST가
+같은 호스트·다른 호스트 어느 쪽으로도 재요청하지 않는 네 경우를 확인했다.
+[CPython 3.10의 공식 구현](https://github.com/python/cpython/blob/3.10/Lib/urllib/request.py)
+과 실제 실패 로그를 대조한 수정이다. 위 로컬 최종 수치는 이 수정을 포함한다.
 
 이 문서는 커밋 전 로컬 검증 기록이다. 동일 소스가 반영된 정확한 커밋의
 Python 3.10/3.11/3.12, lint, Docker 결과는

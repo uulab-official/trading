@@ -67,7 +67,7 @@ no HTTP transport. The CLI accepts explicit paper mode and a new output path.
 - [x] Run CLI examples with synthetic inputs; review generated plan structure.
 - [x] Independent review of both changes and fix substantive findings.
 - [x] Run full pytest, offline checks with backtest, compileall and fatal lint.
-- [ ] Atomically commit to the authorized remote main using expected-SHA lease.
+- [x] Atomically commit to the authorized remote main using expected-SHA lease.
 - [ ] Verify CI for the exact resulting head, then report implemented scope and
   the remaining credential-dependent integration boundary.
 
@@ -79,8 +79,13 @@ no extra design-approval stop is introduced. The local repository is a verified
 snapshot with local-only tracking history; GitHub API commits preserve remote
 history. Each independent subsystem has one writer, with root-owned integration.
 
-Local verification completed: 549 pytest tests, 753 subtests and 539 offline
+Local verification completed: 550 pytest tests, 757 subtests and 540 offline
 checks passed. Independent review is complete; the concrete Toss non-directory
 output-ancestor issue was reproduced, fixed and included in the final suite.
 Remote publication and exact-commit CI are recorded in GitHub Actions and the
 completion message, after this pre-publication plan snapshot.
+
+Initial remote CI d46620e exposed Python 3.10 HTTP 308 exception dispatch
+differences. An explicit refusal handler and a GET/POST, same/cross-host
+regression reproduced the missing-stdlib-handler case before the fix; the
+updated full local verification above includes the compatibility correction.

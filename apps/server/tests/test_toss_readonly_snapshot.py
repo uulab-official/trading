@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs
+from urllib.request import HTTPRedirectHandler
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
@@ -49,6 +50,9 @@ class _Response:
 
     def read(self, length):
         return self.data[:length]
+
+    def close(self):
+        pass
 
 
 class TossReadOnlyTests(unittest.TestCase):
@@ -378,6 +382,37 @@ class TossReadOnlyTests(unittest.TestCase):
                                 observed_at=self.observed,
                             )
                     self.assertEqual(["GET"], [r.get_method() for r in self.requests])
+
+    def test_http_308_is_refused_even_without_stdlib_redirect_support(self):
+        # Python 3.10 has no inherited 308 handler. Exercise that same capability
+        # boundary on newer runtimes too, restoring the shared class afterward.
+        absent = object()
+        inherited = HTTPRedirectHandler.__dict__.get("http_error_308", absent)
+        if inherited is not absent:
+            delattr(HTTPRedirectHandler, "http_error_308")
+        try:
+            for method in ("GET", "POST"):
+                for destination in ("https://openapi.tossinvest.com/other",
+                                    "https://different-host.invalid/steal"):
+                    with self.subTest(method=method, destination=destination):
+                        self.requests.clear()
+
+                        def redirected(handler, request):
+                            self.requests.append(request)
+                            return _Response({}, status=308, location=destination)
+
+                        auth = {"access_token": TOKEN} if method == "GET" else {
+                            "issue_token": True, "client_id": "client", "client_secret": "secret",
+                        }
+                        with patch("urllib.request.HTTPSHandler.https_open", redirected):
+                            with self.assertRaisesRegex(ValueError, "redirects are forbidden"):
+                                fetch_readonly_minute(
+                                    "005930", "KRW", observed_at=self.observed, **auth,
+                                )
+                        self.assertEqual([method], [r.get_method() for r in self.requests])
+        finally:
+            if inherited is not absent:
+                HTTPRedirectHandler.http_error_308 = inherited
 
     def test_cli_reuses_environment_token_and_writes_only_private_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
