@@ -48,7 +48,9 @@ jobs:
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
+        # Shutdown tests install the offline CLI without build isolation.
+        # Python 3.12 virtualenvs do not bundle its setuptools backend.
+        python -m pip install --upgrade pip setuptools wheel
         pip install -e packages/core
         pip install -e packages/data
         pip install -e packages/strategy

@@ -27,6 +27,13 @@ GitHub Actions의 Python 3.10/3.11/3.12 및 Docker 결과는
 [해당 커밋의 실행 기록](https://github.com/uulab-official/trading/actions/workflows/ci.yml)
 에서 별도로 확인한다. 이 문서의 로컬 통과 기록이 원격 CI 통과를 대신하지 않는다.
 
+원격 첫 실행 `44865697509`에서 Python 3.12는 485개 통과 후 설치된
+CLI 종료 테스트 4개의 공통 준비 단계에서 `setuptools.build_meta` 누락을
+보고했다. 격리 빌드로 설치된 의존성은 테스트 런타임에 남지 않는데 해당
+테스트가 의도적으로 `--no-build-isolation`을 사용하기 때문이다.
+CI에 `pip setuptools wheel` 설치를 명시해 보완했다. 테스트나 커버리지
+게이트를 건너뛰는 변경은 하지 않았다.
+
 ## 재현한 문제와 수정
 
 1. **KIS 조회 모듈의 문법 오류:** 실제 줄바꿈 대신 들어간 두 `\\n` 때문에
