@@ -11,6 +11,9 @@ python tools/stock_paper_smoke.py
 # 주문 결과 불명 → 부분 체결 → 취소 경합 → 재시작·중복 통지 검증
 python tools/stock_order_lifecycle_smoke.py
 
+# 가짜 KIS 조회 → 주문 대조·HTML → 백업 검증 → 새 DB 복원까지
+python -B -S tools/stock_order_review_smoke.py
+
 # 네트워크와 DNS를 차단한 전체 오프라인 검증 (백테스트 의존성 필요)
 python tools/offline_checks.py --include-backtest
 ```
@@ -20,8 +23,13 @@ python tools/offline_checks.py --include-backtest
 시세 수집, KIS는 모의투자 서버의 읽기 전용 현재가·일별 주문 내역 조회와
 오프라인 지정가 주문 준비 기능을 제공합니다. 별도 주식 주문 이벤트 저널은
 부분 체결·취소·결과 불명 상태를 SQLite에 저장하고 재시작 때 재검증합니다.
+저장된 KIS 관측값과의 차이 점검, 비공개 HTML 보고서, 저널 백업·검증과
+새 경로의 복원 후보 생성까지 오프라인에서 실행할 수 있습니다.
 실제 인증·시세 대조와 KIS 모의 주문 체결은 아직 검증되지 않았습니다.
 
+- [주문 대조·백업·복원 통합 검증 결과](docs/STOCK_ORDER_REVIEW_VERIFICATION_2026_11_21.md)
+- [주문 대조·HTML 보고서·통합 모의 테스트](docs/STOCK_ORDER_REVIEW.md)
+- [주문 저널 백업·검증·복원 후보 가이드](docs/STOCK_ORDER_BACKUP.md)
 - [주식 주문 생명주기·KIS 주문 조회 검증 결과](docs/STOCK_ORDER_LIFECYCLE_VERIFICATION_2026_11_21.md)
 - [주식 주문 이벤트 저널·합성 시나리오 실행](docs/STOCK_ORDER_LIFECYCLE.md)
 - [KIS 모의 계좌의 읽기 전용 일별 주문 조회](docs/KIS_VTS_ORDER_SNAPSHOT.md)
@@ -75,6 +83,34 @@ KIS 일별 주문 조회는 기존 VTS 인증 정보로 별도 실행합니다. 
 검증한 관측값만 저장하며, 누적 주문 내역을 개별 체결로 바꾸거나 위 저널에
 자동 반영하지 않습니다. [조회 가이드](docs/KIS_VTS_ORDER_SNAPSHOT.md)에
 환경변수·명령·제한 사항을 정리했습니다.
+
+### 주문 대조·백업·복원 후보까지 한 번에
+
+```sh
+# 외부 패키지와 API 키 없이 임시 디렉터리에서 전체 흐름 검증
+python -B -S tools/stock_order_review_smoke.py
+
+# 새 전용 디렉터리에 합성 조회·점검 JSON/HTML·백업·복원 후보 보존
+mkdir -p data
+python -B -S tools/stock_order_review_smoke.py --output-dir data/order-review-demo
+
+# 보존된 원본 저널과 합성 관측값으로 새 보고서 생성
+python -B -S tools/stock_order_review.py --mode paper \
+  --database data/order-review-demo/journal.sqlite --account-ref demo-stock-orders \
+  --observations data/order-review-demo/synthetic-observations.json \
+  --output-json data/order-review-demo/review-latest.json \
+  --output-html data/order-review-demo/review-latest.html
+```
+
+저장된 조회 자료의 기본 신선도 기준은 300초입니다. 시간이 지난 뒤 다시 점검하면
+유효한 보고서를 만들면서도 확인 필요를 뜻하는 종료 코드 `3`이 나올 수 있습니다.
+일치 판정은 비교한 누적 관측값의 일치를 뜻하며, 실제 계좌·개별 체결·잔고 검증이나
+주문 재전송 허용을 뜻하지 않습니다. 미해결 주문은 그대로 차단 상태를 유지합니다.
+
+[일치 예제 HTML](docs/examples/stock_order_review_equal.html)과
+[차이 예제 HTML](docs/examples/stock_order_review_difference.html)은 합성 데이터로
+생성한 정적 보고서입니다. 실제 계좌 정보를 넣은 보고서는 비공개로 보관하세요.
+복원은 기존 DB를 덮어쓰지 않고 새 후보 파일을 만드는 방식입니다.
 
 ## Verified offline paper workflow
 

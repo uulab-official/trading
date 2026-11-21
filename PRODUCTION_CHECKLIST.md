@@ -102,6 +102,10 @@ may automatically enable live order placement.
 - [x] Separate durable offline stock-order event journal with exact KRW deltas, partial fills, cancellation races and duplicate delivery protection
 - [x] Stock-order journal replay/hash/tail audits, concurrent writers, rollback and real process-exit recovery tests
 - [x] Stock-order init/record/read-only status CLI and a 14-event synthetic lifecycle demonstration with four unique executions
+- [x] Read-only comparison of audited local orders with strict saved KIS observations; mismatch, unknown, related-history and stale/future findings (no automatic reconciliation)
+- [x] Private Korean static order-review JSON/HTML reports with scoped counts, escaped text, no external resources and permanent unverified/no-submit flags
+- [x] Native SQLite stock-order backup, strict SHA-256 plus full-replay verification and exclusive new-path paper restore candidates preserving unresolved states
+- [x] Synthetic collector-to-review-to-backup-to-restored-journal trial with deliberate discrepancy and duplicate-replay checks, without actual broker requests
 - [ ] Actual broker partial fills, cancel/replace, timeout, reconnect, and retry semantics (not connected)
 - [ ] Fail-closed start: no new orders until all prior intents reconcile
 - [ ] Explicit operator kill switch, exits and exposure reduction drill

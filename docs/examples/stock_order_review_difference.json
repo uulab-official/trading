@@ -1,0 +1,274 @@
+{
+  "account_binding_verified": false,
+  "account_ref": "demo-stock-orders",
+  "comparison_status": "needs_review",
+  "economic_reconciliation_verified": false,
+  "example_provenance": "synthetic_stock_order_review",
+  "findings": [
+    {
+      "broker_order_id": "0000000001",
+      "client_order_id": "stock-buy-001",
+      "code": "order_fields_differ"
+    }
+  ],
+  "generated_at_utc": "2026-11-21T11:50:14.922341+00:00",
+  "journal": {
+    "account_ref": "demo-stock-orders",
+    "blocked": false,
+    "cash_delta_krw": "5285",
+    "currency": "KRW",
+    "event_count": 14,
+    "execution_count": 4,
+    "live_orders_enabled": false,
+    "market": "KRX",
+    "mode": "paper",
+    "orders": [
+      {
+        "broker_order_id": "0000000001",
+        "broker_org_no": "06010",
+        "cash_delta_krw": "-49750",
+        "client_order_id": "stock-buy-001",
+        "executions": [
+          {
+            "cash_delta_krw": "-29730",
+            "execution_id": "fill-buy-1",
+            "fee_krw": "30",
+            "gross_krw": "29700",
+            "price": "9900",
+            "quantity": 3,
+            "tax_krw": "0"
+          },
+          {
+            "cash_delta_krw": "-20020",
+            "execution_id": "fill-buy-2",
+            "fee_krw": "20",
+            "gross_krw": "20000",
+            "price": "10000",
+            "quantity": 2,
+            "tax_krw": "0"
+          }
+        ],
+        "fee_krw": "50",
+        "filled_quantity": 5,
+        "gross_krw": "49700",
+        "limit_price": "10000",
+        "max_notional": "100000",
+        "order_date": "2026-11-21",
+        "quantity": 10,
+        "side": "buy",
+        "status": "canceled",
+        "symbol": "005930",
+        "tax_krw": "0",
+        "unfilled_quantity": 5,
+        "working_quantity": 0
+      },
+      {
+        "broker_order_id": "0000000002",
+        "broker_org_no": "06010",
+        "cash_delta_krw": "55035",
+        "client_order_id": "stock-sell-001",
+        "executions": [
+          {
+            "cash_delta_krw": "22134",
+            "execution_id": "fill-sell-1",
+            "fee_krw": "22",
+            "gross_krw": "22200",
+            "price": "11100",
+            "quantity": 2,
+            "tax_krw": "44"
+          },
+          {
+            "cash_delta_krw": "32901",
+            "execution_id": "fill-sell-2",
+            "fee_krw": "33",
+            "gross_krw": "33000",
+            "price": "11000",
+            "quantity": 3,
+            "tax_krw": "66"
+          }
+        ],
+        "fee_krw": "55",
+        "filled_quantity": 5,
+        "gross_krw": "55200",
+        "limit_price": "11000",
+        "max_notional": "55000",
+        "order_date": "2026-11-21",
+        "quantity": 5,
+        "side": "sell",
+        "status": "filled",
+        "symbol": "005930",
+        "tax_krw": "110",
+        "unfilled_quantity": 0,
+        "working_quantity": 0
+      }
+    ],
+    "pending_client_order_ids": [],
+    "position_deltas": {},
+    "provenance": "synthetic_or_caller_supplied_unverified"
+  },
+  "journal_blocked": false,
+  "kind": "stock_order_review",
+  "lifecycle_confirmation_verified": false,
+  "live_orders_enabled": false,
+  "mode": "paper",
+  "needs_attention": true,
+  "observation_summary": {
+    "age_seconds": 0.0,
+    "freshness": "fresh",
+    "inquiry_date": "2026-11-21",
+    "observed_at_utc": "2026-11-21T11:50:14.922341+00:00",
+    "pages_fetched": 1,
+    "row_count": 2
+  },
+  "orders": [
+    {
+      "comparison": "different",
+      "differences": [
+        {
+          "field": "filled_quantity",
+          "local": 5,
+          "observed": 4
+        },
+        {
+          "field": "gross_krw",
+          "local": "49700",
+          "observed": "39700"
+        }
+      ],
+      "local": {
+        "broker_order_id": "0000000001",
+        "broker_org_no": "06010",
+        "cash_delta_krw": "-49750",
+        "client_order_id": "stock-buy-001",
+        "executions": [
+          {
+            "cash_delta_krw": "-29730",
+            "execution_id": "fill-buy-1",
+            "fee_krw": "30",
+            "gross_krw": "29700",
+            "price": "9900",
+            "quantity": 3,
+            "tax_krw": "0"
+          },
+          {
+            "cash_delta_krw": "-20020",
+            "execution_id": "fill-buy-2",
+            "fee_krw": "20",
+            "gross_krw": "20000",
+            "price": "10000",
+            "quantity": 2,
+            "tax_krw": "0"
+          }
+        ],
+        "fee_krw": "50",
+        "filled_quantity": 5,
+        "gross_krw": "49700",
+        "limit_price": "10000",
+        "max_notional": "100000",
+        "order_date": "2026-11-21",
+        "quantity": 10,
+        "side": "buy",
+        "status": "canceled",
+        "symbol": "005930",
+        "tax_krw": "0",
+        "unfilled_quantity": 5,
+        "working_quantity": 0
+      },
+      "observed": {
+        "avg_prvs": "9940",
+        "cncl_cfrm_qty": "5",
+        "cncl_yn": "Y",
+        "excg_id_dvsn_cd": "KRX",
+        "odno": "0000000001",
+        "ord_dt": "20261121",
+        "ord_dvsn_cd": "00",
+        "ord_gno_brno": "06010",
+        "ord_qty": "10",
+        "ord_tmd": "091000",
+        "ord_unpr": "10000",
+        "orgn_odno": "0000000000",
+        "pdno": "005930",
+        "rjct_qty": "0",
+        "rmn_qty": "0",
+        "sll_buy_dvsn_cd": "02",
+        "tot_ccld_amt": "39700",
+        "tot_ccld_qty": "4"
+      }
+    },
+    {
+      "comparison": "observations_equal",
+      "differences": [],
+      "local": {
+        "broker_order_id": "0000000002",
+        "broker_org_no": "06010",
+        "cash_delta_krw": "55035",
+        "client_order_id": "stock-sell-001",
+        "executions": [
+          {
+            "cash_delta_krw": "22134",
+            "execution_id": "fill-sell-1",
+            "fee_krw": "22",
+            "gross_krw": "22200",
+            "price": "11100",
+            "quantity": 2,
+            "tax_krw": "44"
+          },
+          {
+            "cash_delta_krw": "32901",
+            "execution_id": "fill-sell-2",
+            "fee_krw": "33",
+            "gross_krw": "33000",
+            "price": "11000",
+            "quantity": 3,
+            "tax_krw": "66"
+          }
+        ],
+        "fee_krw": "55",
+        "filled_quantity": 5,
+        "gross_krw": "55200",
+        "limit_price": "11000",
+        "max_notional": "55000",
+        "order_date": "2026-11-21",
+        "quantity": 5,
+        "side": "sell",
+        "status": "filled",
+        "symbol": "005930",
+        "tax_krw": "110",
+        "unfilled_quantity": 0,
+        "working_quantity": 0
+      },
+      "observed": {
+        "avg_prvs": "11040",
+        "cncl_cfrm_qty": "0",
+        "cncl_yn": "N",
+        "excg_id_dvsn_cd": "KRX",
+        "odno": "0000000002",
+        "ord_dt": "20261121",
+        "ord_dvsn_cd": "00",
+        "ord_gno_brno": "06010",
+        "ord_qty": "5",
+        "ord_tmd": "091000",
+        "ord_unpr": "11000",
+        "orgn_odno": "0000000000",
+        "pdno": "005930",
+        "rjct_qty": "0",
+        "rmn_qty": "0",
+        "sll_buy_dvsn_cd": "01",
+        "tot_ccld_amt": "55200",
+        "tot_ccld_qty": "5"
+      }
+    }
+  ],
+  "safe_to_submit": false,
+  "schema_version": 1,
+  "summary": {
+    "different_order_count": 1,
+    "findings_count": 1,
+    "matched_order_count": 2,
+    "order_count": 2,
+    "scoped_order_count": 2,
+    "unmatched_observation_count": 0,
+    "unresolved_order_count": 0
+  },
+  "unmatched_observations": []
+}
