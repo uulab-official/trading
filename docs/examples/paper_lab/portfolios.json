@@ -1,0 +1,48 @@
+{
+  "cross_portfolio_total": null,
+  "generated_at_utc": "2026-11-21T12:26:29.840828+00:00",
+  "live_orders_enabled": false,
+  "mode": "paper",
+  "portfolios": [
+    {
+      "checkpoint_sha256": "764c76615342ede593064ff4a0d90861dbea555588d3d14e3926c94dbce2909a",
+      "daily_loss_halted": true,
+      "drawdown_halted": false,
+      "processed_bars": 90,
+      "status": "verified_offline_paper",
+      "symbol": "BTC/USDT",
+      "timeframe": "1h",
+      "trade_count": 2,
+      "type": "crypto"
+    },
+    {
+      "cash": "1001030.948",
+      "history_sha256": "52f6b7c5fad69673bd3b18d1801ea2255c7128e7005f0146f9741d92e6f96e32",
+      "holdings": {},
+      "marked_equity": "1001030.948",
+      "processed_bars": 55,
+      "quote_currency": "KRW",
+      "status": "audited_stock_paper",
+      "symbol": "005930",
+      "total_return_pct": "0.103094800",
+      "trade_count": 2,
+      "type": "stock"
+    },
+    {
+      "cash": "10011.598165",
+      "history_sha256": "30a573f53b8043c2a6afca0444fc57db382587c29aca504e1f3d1df8b5759fb2",
+      "holdings": {},
+      "marked_equity": "10011.598165",
+      "processed_bars": 55,
+      "quote_currency": "USD",
+      "status": "audited_stock_paper",
+      "symbol": "DEMO",
+      "total_return_pct": "0.1159816500",
+      "trade_count": 2,
+      "type": "stock"
+    }
+  ],
+  "provenance": "bundled_synthetic_examples",
+  "status": "audited_offline_only",
+  "warning": "Separate paper portfolios; no real broker balances, FX or live orders"
+}

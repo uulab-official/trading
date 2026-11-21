@@ -1,0 +1,28 @@
+{
+  "account_binding_verified": false,
+  "actual_broker_requests": 0,
+  "artifacts_retained": true,
+  "cash_delta_krw": "5285",
+  "checks": {
+    "backup_verified": true,
+    "deliberate_difference_detected": true,
+    "observations_equal": true,
+    "private_response_fields_filtered": true,
+    "restored_duplicate_replay_idempotent": true,
+    "restored_state_equal": true,
+    "source_backup_unchanged": true,
+    "source_journal_unchanged": true
+  },
+  "economic_reconciliation_verified": false,
+  "events": 14,
+  "executions": 4,
+  "fake_http_requests": 1,
+  "lifecycle_confirmation_verified": false,
+  "live_orders_enabled": false,
+  "mode": "paper",
+  "position_deltas": {},
+  "provenance": "synthetic_stock_order_review",
+  "safe_to_submit": false,
+  "status": "synthetic_stock_order_review_verified",
+  "warning": "Synthetic prices, orders and observations; no authenticated account or execution evidence"
+}

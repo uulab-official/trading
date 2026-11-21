@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src &#x27;none&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;">
+<title>Offline Paper Trading Audit</title>
+<style>
+:root{color-scheme:dark}body{margin:0;background:#0b1020;color:#e7eefb;font:15px system-ui,sans-serif}
+main{max-width:1100px;margin:auto;padding:32px 18px}h1{margin:0 0 6px}p{color:#b6c5de;line-height:1.6}
+.notice{border:1px solid #b67d31;background:#291e12;color:#ffd99c;padding:14px;border-radius:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:20px 0}
+.metric{background:#151e33;border:1px solid #2b3a56;border-radius:12px;padding:14px;min-width:0}
+.metric span{display:block;color:#a9bed9;font-size:12px}.metric strong{display:block;overflow-wrap:anywhere;margin-top:8px}
+section{background:#151e33;border-radius:12px;padding:16px;margin:18px 0;overflow-x:auto}
+svg{width:100%;height:auto;max-height:260px;background:#0e1729}
+table{width:100%;border-collapse:collapse;white-space:nowrap;text-align:left}th,td{padding:10px;border-bottom:1px solid #2b3a56}
+th{color:#9fb2ce}small{color:#9fb2ce}
+</style></head><body><main>
+<h1>Paper Trading — Offline Replay Audit</h1>
+<p>Verified against a deterministic local replay. Static document, no broker connection or network functionality.</p>
+<div class="notice"><strong>NOT LIVE TRADING.</strong> All prices and fills are from the supplied fixture.
+Neither profitability, a live exchange account, nor production readiness is verified.</div>
+<div class="grid"><div class="metric"><span>Mode</span><strong>PAPER ONLY</strong></div><div class="metric"><span>Symbol</span><strong>BTC/USDT</strong></div><div class="metric"><span>Bars replayed</span><strong>90</strong></div><div class="metric"><span>Cash (USDT)</span><strong>12021.2514619240438</strong></div><div class="metric"><span>Holdings (BTC)</span><strong>0.00000000</strong></div><div class="metric"><span>Marked equity (USDT)</span><strong>12021.2514619240438</strong></div><div class="metric"><span>Return (synthetic, %)</span><strong>20.2125</strong></div><div class="metric"><span>Paid fees (USDT)</span><strong>6.0232787361562</strong></div><div class="metric"><span>Daily loss entry block</span><strong>True</strong></div><div class="metric"><span>Drawdown entry block</span><strong>False</strong></div><div class="metric"><span>Pending signal</span><strong>none</strong></div><div class="metric"><span>Checkpoint SHA256</span><strong>764c76615342ede593064ff4a0d90861dbea555588d3d14e3926c94dbce2909a</strong></div></div>
+<section><h2>Fixture closing prices</h2><svg role="img" aria-label="Offline fixture close-price history (not portfolio equity)" viewBox="0 0 920 220" xmlns="http://www.w3.org/2000/svg"><polyline points="16.00,91.54 25.98,93.21 35.96,94.89 45.93,96.57 55.91,98.25 65.89,99.93 75.87,101.61 85.84,103.29 95.82,104.96 105.80,106.64 115.78,108.32 125.75,110.00 135.73,111.68 145.71,113.36 155.69,115.04 165.66,116.71 175.64,118.39 185.62,120.07 195.60,121.75 205.57,123.43 215.55,125.11 225.53,126.79 235.51,128.46 245.48,130.14 255.46,131.82 265.44,133.50 275.42,135.18 285.39,136.86 295.37,138.54 305.35,140.21 315.33,141.89 325.30,143.57 335.28,145.25 345.26,146.93 355.24,148.61 365.21,150.29 375.19,151.96 385.17,153.64 395.15,155.32 405.12,157.00 415.10,158.68 425.08,160.36 435.06,162.04 445.03,163.71 455.01,165.39 464.99,167.07 474.97,168.75 484.94,170.43 494.92,172.11 504.90,173.79 514.88,175.46 524.85,177.14 534.83,178.82 544.81,180.50 554.79,182.18 564.76,175.46 574.74,167.07 584.72,158.68 594.70,150.29 604.67,141.89 614.65,133.50 624.63,125.11 634.61,116.71 644.58,108.32 654.56,99.93 664.54,91.54 674.52,83.14 684.49,74.75 694.47,66.36 704.45,57.96 714.43,49.57 724.40,41.18 734.38,32.79 744.36,24.39 754.34,16.00 764.31,16.00 774.29,29.43 784.27,42.86 794.25,56.29 804.22,69.71 814.20,83.14 824.18,96.57 834.16,110.00 844.13,123.43 854.11,136.86 864.09,150.29 874.07,163.71 884.04,177.14 894.02,190.57 904.00,204.00" fill="none" stroke="#4fd1c5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<p><small>Price history only. This chart is not a strategy equity curve, and does not imply live returns.</small></p></section>
+<section><h2>Simulated fills (2)</h2>
+<table><thead><tr><th>UTC</th><th>Side</th><th>Amount</th><th>Price</th><th>Fee</th><th>Client ID</th></tr></thead>
+<tbody><tr><td>2023-11-16 09:00 UTC</td><td>buy</td><td>33.28339160</td><td>60.0300</td><td>1.9980019977480</td><td>fixture-56-buy</td></tr><tr><td>2023-11-17 06:00 UTC</td><td>sell</td><td>33.28339160</td><td>120.9395</td><td>4.0252767384082</td><td>fixture-77-sell</td></tr></tbody></table></section>
+<p><small>Generated from local state. Contains trade records; keep the HTML file private.
+Last validated bar: 2023-11-17T17:00:00+00:00.
+Live trading approved: NO.</small></p>
+</main></body></html>

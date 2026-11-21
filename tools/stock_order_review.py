@@ -127,6 +127,8 @@ def write_reports(outputs):
     targets = validate_destinations([], [path for path, _ in outputs])
     encoded = [text.encode("utf-8") for _, text in outputs]
     owned = []
+    closed = set()
+    close_identities = {}
     try:
         for target, data in zip(targets, encoded):
             descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
@@ -151,17 +153,38 @@ def write_reports(outputs):
         # cannot be reused and mistaken for the owned file during cleanup.
         for target, _descriptor, identity, _data in owned:
             _require_owned(target, identity)
+        # Include descriptor-close errors in the failure group. Mark a close as
+        # attempted before invoking it: an OS close can release the descriptor
+        # and still report an error, so retrying could close a reused number.
+        for _target_path, descriptor, _identity, _data in owned:
+            close_identities[descriptor] = os.fstat(descriptor)
+            closed.add(descriptor)
+            os.close(descriptor)
     except BaseException:
-        for target, _descriptor, identity, _data in owned:
+        for target, descriptor, identity, _data in owned:
             try:
                 _require_owned(target, identity)
+                if descriptor in closed:
+                    # Once closed, the inode is no longer pinned. Require its
+                    # final metadata as well before removing an owned name.
+                    current, final = target.lstat(), close_identities[descriptor]
+                    fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+                    if any(getattr(current, field) != getattr(final, field) for field in fields):
+                        continue
                 target.unlink()
             except (OSError, ValueError):
                 pass
         raise
     finally:
         for _target_path, descriptor, _identity, _data in owned:
-            os.close(descriptor)
+            if descriptor not in closed:
+                closed.add(descriptor)
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    # The primary failure already triggered owned-path cleanup.
+                    # Continue closing the remaining descriptors, never retry.
+                    pass
 
 
 def _text(value):

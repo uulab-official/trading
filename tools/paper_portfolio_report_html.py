@@ -62,6 +62,11 @@ def render(report):
             "독립 재생 검증 · 과거 시점</p>" + fields + "</article>"
         )
     checked = _escaped(report.get("generated_at_utc", "unknown"))
+    synthetic_notice = (
+        '<div class="alert"><strong>합성 데이터 예제</strong> — 표시한 가격·거래·수익률은 '
+        '저장소의 합성 입력으로 계산했습니다. 실제 시장 가격이나 투자 성과가 아닙니다.</div>'
+        if report.get("provenance") == "bundled_synthetic_examples" else ""
+    )
     return ("""<!doctype html><html lang="ko"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
@@ -88,7 +93,7 @@ padding:12px 0;font-size:14px}
 <div class="alert"><strong>실거래 아님</strong> — 실제 주문, 계좌,
 실시간 시세 또는 현재 운영 상태를 표시하지 않습니다. KRW·USD·USDT는
 환율·환산 규칙이 검증되지 않아 합산하지 않습니다.</div>
-<section class="grid">""" + "".join(cards) + """</section>
+""" + synthetic_notice + """<section class="grid">""" + "".join(cards) + """</section>
 <p><small>외부 API 호출 없음 · JavaScript 없음 · 거래 실행 기능 없음</small></p>
 </main></body></html>""")
 

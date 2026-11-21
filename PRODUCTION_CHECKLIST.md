@@ -23,7 +23,7 @@ may automatically enable live order placement.
 - [x] Strict historical OHLCV CSV import and provenance
 - [x] Public Upbit one-shot candle snapshot with completed-bar/staleness/gap guards
 - [x] Append-only archive with overlapping-history equality checks
-- [ ] Confirm all GitHub CI jobs on Linux for supported Python versions
+- [x] Linux Python 3.10/3.11/3.12, required lint and Docker verified for published `b4e2bad` ([run 44901201080](https://github.com/uulab-official/trading/actions/runs/44901201080)); every later revision still requires its own exact-head CI
 - [ ] Obtain real market sample and manually verify candles against exchange history
 - [ ] Evaluate long history and market regime diversity; remove survivorship/lookahead biases
 
@@ -106,6 +106,8 @@ may automatically enable live order placement.
 - [x] Private Korean static order-review JSON/HTML reports with scoped counts, escaped text, no external resources and permanent unverified/no-submit flags
 - [x] Native SQLite stock-order backup, strict SHA-256 plus full-replay verification and exclusive new-path paper restore candidates preserving unresolved states
 - [x] Synthetic collector-to-review-to-backup-to-restored-journal trial with deliberate discrepancy and duplicate-replay checks, without actual broker requests
+- [x] One-command synthetic crypto/KRW/USD paper lab with independent audits/backups, retained reports and separate order-lifecycle/recovery trials
+- [x] Offline Toss/KIS configuration-presence diagnostic with no secret values, token issuance or authentication claim
 - [ ] Actual broker partial fills, cancel/replace, timeout, reconnect, and retry semantics (not connected)
 - [ ] Fail-closed start: no new orders until all prior intents reconcile
 - [ ] Explicit operator kill switch, exits and exposure reduction drill

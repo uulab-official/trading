@@ -1,0 +1,15 @@
+{
+  "bars": 55,
+  "cash": "1001030.948",
+  "history_sha256": "52f6b7c5fad69673bd3b18d1801ea2255c7128e7005f0146f9741d92e6f96e32",
+  "holdings": {},
+  "live_orders_enabled": false,
+  "marked_equity": "1001030.948",
+  "mode": "paper",
+  "quote_currency": "KRW",
+  "simulated_fills": 2,
+  "status": "audited_stock_paper",
+  "symbol": "005930",
+  "total_return_pct": "0.103094800",
+  "warning": "Read-only local simulation audit; not authenticated brokerage balances"
+}

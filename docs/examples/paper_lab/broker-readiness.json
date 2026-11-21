@@ -1,0 +1,87 @@
+{
+  "actual_broker_requests": 0,
+  "capabilities": [
+    {
+      "authenticated": false,
+      "configuration_present": false,
+      "id": "toss_market_data",
+      "missing_variables": [
+        "TOSS_ACCESS_TOKEN"
+      ],
+      "required_variables": [
+        "TOSS_ACCESS_TOKEN"
+      ],
+      "variable_presence": {
+        "TOSS_ACCESS_TOKEN": false
+      }
+    },
+    {
+      "authenticated": false,
+      "configuration_present": false,
+      "id": "toss_token_issuance",
+      "missing_variables": [
+        "TOSS_CLIENT_ID",
+        "TOSS_CLIENT_SECRET"
+      ],
+      "required_variables": [
+        "TOSS_CLIENT_ID",
+        "TOSS_CLIENT_SECRET"
+      ],
+      "requires_explicit_opt_in": true,
+      "variable_presence": {
+        "TOSS_CLIENT_ID": false,
+        "TOSS_CLIENT_SECRET": false
+      }
+    },
+    {
+      "authenticated": false,
+      "configuration_present": false,
+      "id": "kis_vts_quote",
+      "missing_variables": [
+        "KIS_VTS_ACCESS_TOKEN",
+        "KIS_VTS_APPKEY",
+        "KIS_VTS_APPSECRET"
+      ],
+      "required_variables": [
+        "KIS_VTS_ACCESS_TOKEN",
+        "KIS_VTS_APPKEY",
+        "KIS_VTS_APPSECRET"
+      ],
+      "variable_presence": {
+        "KIS_VTS_ACCESS_TOKEN": false,
+        "KIS_VTS_APPKEY": false,
+        "KIS_VTS_APPSECRET": false
+      }
+    },
+    {
+      "authenticated": false,
+      "configuration_present": false,
+      "id": "kis_vts_order_inquiry",
+      "missing_variables": [
+        "KIS_VTS_ACCESS_TOKEN",
+        "KIS_VTS_APPKEY",
+        "KIS_VTS_APPSECRET",
+        "KIS_VTS_CANO",
+        "KIS_VTS_ACNT_PRDT_CD"
+      ],
+      "required_variables": [
+        "KIS_VTS_ACCESS_TOKEN",
+        "KIS_VTS_APPKEY",
+        "KIS_VTS_APPSECRET",
+        "KIS_VTS_CANO",
+        "KIS_VTS_ACNT_PRDT_CD"
+      ],
+      "variable_presence": {
+        "KIS_VTS_ACCESS_TOKEN": false,
+        "KIS_VTS_ACNT_PRDT_CD": false,
+        "KIS_VTS_APPKEY": false,
+        "KIS_VTS_APPSECRET": false,
+        "KIS_VTS_CANO": false
+      }
+    }
+  ],
+  "live_orders_enabled": false,
+  "mode": "paper",
+  "safe_to_submit": false,
+  "schema_version": 1
+}

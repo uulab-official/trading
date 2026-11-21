@@ -5,6 +5,17 @@
 ## 바로 실행하는 모의 테스트
 
 ```sh
+# 최소 의존성 설치 후 코인·KRW·USD·주문 검증을 모두 실행
+python -m pip install -r requirements-offline.txt
+python tools/paper_lab.py
+
+# 새 폴더에 원장·백업·복원 후보·보고서를 남기고 index.html 열기
+mkdir -p data
+python tools/paper_lab.py --output-dir data/paper-lab-demo
+
+# 증권사 환경변수 설정 여부 확인 (값 출력·인증 요청 없음)
+python -B -S tools/broker_readiness.py --format text
+
 # API 키 없이 합성 55개 분봉으로 실행 → 재시작 → 감사 → 백업 → HTML 검증
 python tools/stock_paper_smoke.py
 
@@ -27,6 +38,9 @@ python tools/offline_checks.py --include-backtest
 새 경로의 복원 후보 생성까지 오프라인에서 실행할 수 있습니다.
 실제 인증·시세 대조와 KIS 모의 주문 체결은 아직 검증되지 않았습니다.
 
+- [전체 모의 실험실 실행·결과 폴더 가이드](docs/PAPER_LAB.md)
+- [전체 모의 실험실 검증 결과](docs/PAPER_LAB_VERIFICATION_2026_11_21.md)
+- [증권사 설정 진단 가이드](docs/BROKER_READINESS.md)
 - [주문 대조·백업·복원 통합 검증 결과](docs/STOCK_ORDER_REVIEW_VERIFICATION_2026_11_21.md)
 - [주문 대조·HTML 보고서·통합 모의 테스트](docs/STOCK_ORDER_REVIEW.md)
 - [주문 저널 백업·검증·복원 후보 가이드](docs/STOCK_ORDER_BACKUP.md)
@@ -555,21 +569,24 @@ docker run -d \
 ## 🧪 로컬 개발
 
 ```bash
-# 가상환경 생성
+# Linux/macOS 로컬 환경 (체크포인트는 POSIX 잠금 사용)
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate
 
 # 패키지 설치
 pip install -e packages/core
 pip install -e packages/data
 pip install -e packages/strategy
-pip install -e apps/trading-bot
+pip install -e packages/backtest
+pip install -e packages/monitor
+pip install -e apps/server
+pip install pytest pytest-asyncio pytest-cov
 
 # 테스트
-pytest packages/ -v
+pytest packages/ apps/server/tests/ -v
 
-# 로컬 실행
-python apps/trading-bot/trading_bot/main.py
+# 전체 합성 모의 실험
+python tools/paper_lab.py
 ```
 
 ---
@@ -608,6 +625,6 @@ MIT License - 자유로운 상업용 사용 가능
 
 ---
 
-**Status**: Offline paper replay verified; live/Rust/legacy backtest unverified
+**Status**: Offline paper replay and synthetic recovery verified; authenticated broker execution unverified
 **Version**: 1.0.0  
-**Last Updated**: 2026-10-03
+**Last Updated**: 2026-11-21

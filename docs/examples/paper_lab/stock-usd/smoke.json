@@ -1,0 +1,22 @@
+{
+  "artifacts_retained": true,
+  "backup_verified": true,
+  "bars": 55,
+  "duplicate_replay_prevented": true,
+  "fixture": "synthetic_not_real_market_data",
+  "live_orders_enabled": false,
+  "mode": "paper",
+  "quote_currency": "USD",
+  "settings": {
+    "allocation_pct": "20",
+    "fast": 5,
+    "fee_pct": "0.1",
+    "initial_cash": "10000",
+    "slow": 20
+  },
+  "simulated_fills": 2,
+  "static_html_verified": true,
+  "status": "synthetic_stock_paper_smoke_verified",
+  "symbol": "DEMO",
+  "warning": "No actual Toss/KIS API calls, portfolio gains or broker orders"
+}

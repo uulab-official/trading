@@ -1,0 +1,228 @@
+{
+  "account_binding_verified": false,
+  "actual_broker_requests": 0,
+  "artifacts_retained": true,
+  "broker_readiness": {
+    "actual_broker_requests": 0,
+    "capabilities": [
+      {
+        "authenticated": false,
+        "configuration_present": false,
+        "id": "toss_market_data",
+        "missing_variables": [
+          "TOSS_ACCESS_TOKEN"
+        ],
+        "required_variables": [
+          "TOSS_ACCESS_TOKEN"
+        ],
+        "variable_presence": {
+          "TOSS_ACCESS_TOKEN": false
+        }
+      },
+      {
+        "authenticated": false,
+        "configuration_present": false,
+        "id": "toss_token_issuance",
+        "missing_variables": [
+          "TOSS_CLIENT_ID",
+          "TOSS_CLIENT_SECRET"
+        ],
+        "required_variables": [
+          "TOSS_CLIENT_ID",
+          "TOSS_CLIENT_SECRET"
+        ],
+        "requires_explicit_opt_in": true,
+        "variable_presence": {
+          "TOSS_CLIENT_ID": false,
+          "TOSS_CLIENT_SECRET": false
+        }
+      },
+      {
+        "authenticated": false,
+        "configuration_present": false,
+        "id": "kis_vts_quote",
+        "missing_variables": [
+          "KIS_VTS_ACCESS_TOKEN",
+          "KIS_VTS_APPKEY",
+          "KIS_VTS_APPSECRET"
+        ],
+        "required_variables": [
+          "KIS_VTS_ACCESS_TOKEN",
+          "KIS_VTS_APPKEY",
+          "KIS_VTS_APPSECRET"
+        ],
+        "variable_presence": {
+          "KIS_VTS_ACCESS_TOKEN": false,
+          "KIS_VTS_APPKEY": false,
+          "KIS_VTS_APPSECRET": false
+        }
+      },
+      {
+        "authenticated": false,
+        "configuration_present": false,
+        "id": "kis_vts_order_inquiry",
+        "missing_variables": [
+          "KIS_VTS_ACCESS_TOKEN",
+          "KIS_VTS_APPKEY",
+          "KIS_VTS_APPSECRET",
+          "KIS_VTS_CANO",
+          "KIS_VTS_ACNT_PRDT_CD"
+        ],
+        "required_variables": [
+          "KIS_VTS_ACCESS_TOKEN",
+          "KIS_VTS_APPKEY",
+          "KIS_VTS_APPSECRET",
+          "KIS_VTS_CANO",
+          "KIS_VTS_ACNT_PRDT_CD"
+        ],
+        "variable_presence": {
+          "KIS_VTS_ACCESS_TOKEN": false,
+          "KIS_VTS_ACNT_PRDT_CD": false,
+          "KIS_VTS_APPKEY": false,
+          "KIS_VTS_APPSECRET": false,
+          "KIS_VTS_CANO": false
+        }
+      }
+    ],
+    "live_orders_enabled": false,
+    "mode": "paper",
+    "safe_to_submit": false,
+    "schema_version": 1
+  },
+  "checks": {
+    "crypto_resume_and_duplicate_replay": true,
+    "no_actual_broker_requests": true,
+    "order_lifecycle_faults": true,
+    "order_observation_difference_detected": true,
+    "order_restore_and_duplicate_replay": true,
+    "three_deep_verified_portfolio_backups": true,
+    "three_independent_portfolio_audits": true
+  },
+  "components": {
+    "crypto": {
+      "backup_verified": true,
+      "bars": 90,
+      "duplicate_replay_prevented": true,
+      "live_orders_enabled": false,
+      "mode": "paper",
+      "paused_after_bars": 30,
+      "quote_currency": "USDT",
+      "resume_verified": true,
+      "simulated_fills": 2,
+      "static_html_verified": true,
+      "status": "synthetic_crypto_paper_verified",
+      "symbol": "BTC/USDT"
+    },
+    "order_lifecycle": {
+      "actual_broker_requests": 0,
+      "artifacts_retained": true,
+      "cash_delta_krw": "5285",
+      "checks": {
+        "accepted_order_blocks_new_intent": true,
+        "cancel_after_full_fill_refused": true,
+        "duplicate_replay_idempotent": true,
+        "late_fill_after_cancel_refused": true,
+        "overfill_refused": true,
+        "read_only_write_refused": true,
+        "reopen_after_each_event": true,
+        "uncertain_submission_blocked": true
+      },
+      "executions": 4,
+      "live_orders_enabled": false,
+      "mode": "paper",
+      "order_states": {
+        "stock-buy-001": "canceled",
+        "stock-sell-001": "filled"
+      },
+      "position_deltas": {},
+      "provenance": "synthetic_stock_order_events",
+      "recorded_events": 14,
+      "status": "synthetic_stock_order_lifecycle_verified",
+      "warning": "Synthetic events; deltas are not account balances or investment performance"
+    },
+    "order_review": {
+      "account_binding_verified": false,
+      "actual_broker_requests": 0,
+      "artifacts_retained": true,
+      "cash_delta_krw": "5285",
+      "checks": {
+        "backup_verified": true,
+        "deliberate_difference_detected": true,
+        "observations_equal": true,
+        "private_response_fields_filtered": true,
+        "restored_duplicate_replay_idempotent": true,
+        "restored_state_equal": true,
+        "source_backup_unchanged": true,
+        "source_journal_unchanged": true
+      },
+      "economic_reconciliation_verified": false,
+      "events": 14,
+      "executions": 4,
+      "fake_http_requests": 1,
+      "lifecycle_confirmation_verified": false,
+      "live_orders_enabled": false,
+      "mode": "paper",
+      "position_deltas": {},
+      "provenance": "synthetic_stock_order_review",
+      "safe_to_submit": false,
+      "status": "synthetic_stock_order_review_verified",
+      "warning": "Synthetic prices, orders and observations; no authenticated account or execution evidence"
+    },
+    "stock_krw": {
+      "artifacts_retained": true,
+      "backup_verified": true,
+      "bars": 55,
+      "duplicate_replay_prevented": true,
+      "fixture": "synthetic_not_real_market_data",
+      "live_orders_enabled": false,
+      "mode": "paper",
+      "quote_currency": "KRW",
+      "settings": {
+        "allocation_pct": "20",
+        "fast": 5,
+        "fee_pct": "0.1",
+        "initial_cash": "1000000",
+        "slow": 20
+      },
+      "simulated_fills": 2,
+      "static_html_verified": true,
+      "status": "synthetic_stock_paper_smoke_verified",
+      "symbol": "005930",
+      "warning": "No actual Toss/KIS API calls, portfolio gains or broker orders"
+    },
+    "stock_usd": {
+      "artifacts_retained": true,
+      "backup_verified": true,
+      "bars": 55,
+      "duplicate_replay_prevented": true,
+      "fixture": "synthetic_not_real_market_data",
+      "live_orders_enabled": false,
+      "mode": "paper",
+      "quote_currency": "USD",
+      "settings": {
+        "allocation_pct": "20",
+        "fast": 5,
+        "fee_pct": "0.1",
+        "initial_cash": "10000",
+        "slow": 20
+      },
+      "simulated_fills": 2,
+      "static_html_verified": true,
+      "status": "synthetic_stock_paper_smoke_verified",
+      "symbol": "DEMO",
+      "warning": "No actual Toss/KIS API calls, portfolio gains or broker orders"
+    }
+  },
+  "cross_portfolio_total": null,
+  "generated_at_utc": "2026-11-21T12:26:29.840828+00:00",
+  "live_orders_enabled": false,
+  "mode": "paper",
+  "network_attempts": 0,
+  "network_guard": "python_socket_and_dns",
+  "portfolio_count": 3,
+  "provenance": "bundled_synthetic_examples",
+  "safe_to_submit": false,
+  "schema_version": 1,
+  "status": "synthetic_paper_lab_verified",
+  "warning": "Synthetic experiments only; no authenticated accounts, actual fills, FX or investment performance"
+}

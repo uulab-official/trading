@@ -1,0 +1,15 @@
+{
+  "available_bars": 90,
+  "checkpoint_sha256": "764c76615342ede593064ff4a0d90861dbea555588d3d14e3926c94dbce2909a",
+  "daily_loss_halted": true,
+  "drawdown_halted": false,
+  "fixture_sha256": "ef0a6d6a78a82e93c8f94632cfa0f4221f6db12ed6ff659ed9e405d2821da637",
+  "live_trading_approved": false,
+  "mode": "paper",
+  "processed_bars": 90,
+  "status": "verified_offline_paper",
+  "symbol": "BTC/USDT",
+  "timeframe": "1h",
+  "trade_count": 2,
+  "warning": "Synthetic/offline verification is not live trading validation"
+}

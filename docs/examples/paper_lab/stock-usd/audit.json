@@ -1,0 +1,15 @@
+{
+  "bars": 55,
+  "cash": "10011.598165",
+  "history_sha256": "30a573f53b8043c2a6afca0444fc57db382587c29aca504e1f3d1df8b5759fb2",
+  "holdings": {},
+  "live_orders_enabled": false,
+  "marked_equity": "10011.598165",
+  "mode": "paper",
+  "quote_currency": "USD",
+  "simulated_fills": 2,
+  "status": "audited_stock_paper",
+  "symbol": "DEMO",
+  "total_return_pct": "0.1159816500",
+  "warning": "Read-only local simulation audit; not authenticated brokerage balances"
+}
