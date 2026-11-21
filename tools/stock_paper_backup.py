@@ -65,6 +65,11 @@ def create_backup(fixture, database, destination, *, initial_cash,
             database.as_uri() + "?mode=ro", uri=True, timeout=5.0
         )) as source, closing(sqlite3.connect(str(dbcopy), timeout=5.0)) as target:
             source.backup(target)
+            # backup() copies the source's WAL journal mode as well as its
+            # pages. Export a standalone database before hashing/auditing:
+            # the published backup must never depend on unmanifested WAL.
+            if target.execute("PRAGMA journal_mode=DELETE").fetchone()[0] != "delete":
+                raise ValueError("Could not finalize a standalone stock backup")
         if dbcopy.stat().st_size > MAX_DB_BYTES:
             raise ValueError("Stock paper database exceeds backup safety limit")
         os.chmod(dbcopy, 0o600)
@@ -112,6 +117,12 @@ def create_backup(fixture, database, destination, *, initial_cash,
 
 def verify_backup(directory, *, deep=True):
     directory = Path(directory).resolve()
+    # Reading only stock.sqlite would silently ignore committed changes in
+    # a WAL. Such a directory is no longer the standalone snapshot we made.
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = directory / ("stock.sqlite" + suffix)
+        if sidecar.exists() or sidecar.is_symlink():
+            raise ValueError("Paper backup contains an unmanifested SQLite sidecar")
     manifest = json.loads(_bounded(directory / "manifest.json", 65536))
     if (not isinstance(manifest, dict) or manifest.get("schema_version") != 1
             or manifest.get("kind") != "stock_paper_sqlite_backup"

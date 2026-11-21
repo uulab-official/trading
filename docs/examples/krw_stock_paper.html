@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>주식 모의매매 감사 리포트</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{font-family:system-ui,sans-serif;background:#0b1220;color:#eef3fc;margin:0}
+main{max-width:1120px;margin:auto;padding:32px 18px}
+h1{font-size:26px;margin:0 0 10px}
+p{color:#a9bad3;line-height:1.7}
+.warning{background:#241a17;border:1px solid #895538;border-radius:10px;padding:14px;color:#ffdfc4}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:20px 0}
+.metric{border:1px solid #2c3b56;border-radius:12px;background:#162036;padding:16px;min-width:0}
+.metric small{display:block;color:#9aadc9;margin-bottom:9px}
+.metric strong{font-size:16px;overflow-wrap:anywhere}
+section{background:#162036;border-radius:12px;padding:16px;margin:16px 0}
+svg{width:100%;height:auto;background:#0f1728;border-radius:10px}
+</style></head><body><main>
+<h1>주식 자동 모의매매 리포트</h1>
+<p>저장된 모의 거래 기록과 전략 재계산 결과를 대조한 보고서입니다.</p>
+<div class="warning"><strong>실거래 아님.</strong> 실제 토스증권 계좌, 주문,
+잔고 및 수익률을 나타내지 않습니다. 시세와 체결 가정이 포함된 연구용 모의 결과입니다.</div>
+<div class="grid"><div class="metric"><small>모드</small><strong>PAPER ONLY</strong></div><div class="metric"><small>종목</small><strong>005930</strong></div><div class="metric"><small>통화</small><strong>KRW</strong></div><div class="metric"><small>데이터</small><strong>합성 데이터 · 실제 시세 아님</strong></div><div class="metric"><small>입력 분봉</small><strong>55</strong></div><div class="metric"><small>가상 체결</small><strong>2</strong></div><div class="metric"><small>현금</small><strong>1001030.948</strong></div><div class="metric"><small>평가금액</small><strong>1001030.948</strong></div><div class="metric"><small>모의 수익률(%)</small><strong>0.103094800</strong></div><div class="metric"><small>보유 수량</small><strong>{}</strong></div><div class="metric"><small>시세 SHA-256</small><strong>52f6b7c5fad69673bd3b18d1801ea2255c7128e7005f0146f9741d92e6f96e32</strong></div></div>
+<section><h2>공급된 분봉 종가 추이</h2>
+<svg role="img" aria-label="검증된 분봉 종가, 자산 곡선 아님"
+viewBox="0 0 900 230" xmlns="http://www.w3.org/2000/svg">
+<polyline points="16.00,162.30 32.07,165.02 48.15,167.33 64.22,170.47 80.30,173.19 96.37,175.49 112.44,178.63 128.52,181.35 144.59,183.65 160.67,186.79 176.74,189.51 192.81,191.81 208.89,194.95 224.96,197.67 241.04,199.98 257.11,203.12 273.19,205.84 289.26,208.14 305.33,211.28 321.41,214.00 337.48,203.53 353.56,192.23 369.63,180.09 385.70,167.12 401.78,156.65 417.85,145.35 433.93,133.21 450.00,120.23 466.07,109.77 482.15,98.47 498.22,86.33 514.30,73.35 530.37,62.88 546.44,51.58 562.52,39.44 578.59,26.47 594.67,16.00 610.74,26.26 626.81,35.88 642.89,44.88 658.96,56.40 675.04,67.28 691.11,77.53 707.19,87.16 723.26,96.16 739.33,107.67 755.41,118.56 771.48,128.81 787.56,138.44 803.63,147.44 819.70,158.95 835.78,169.84 851.85,180.09 867.93,189.72 884.00,198.72" fill="none"
+stroke="#61d4b0" stroke-width="2.5" stroke-linecap="round"/></svg>
+<p>이 그래프는 종가 추이이며 자산곡선이나 실제 거래 체결 호가가 아닙니다.</p></section>
+<p>네트워크 요청 없음 · 외부 리소스 없음 · 거래 실행 기능 없음</p>
+</main></body></html>

@@ -1,6 +1,6 @@
 # Production readiness gate — trading monorepo
 
-**State (2026-11-20): LIVE TRADING IS NOT APPROVED.**
+**State (2026-11-21): LIVE TRADING IS NOT APPROVED.**
 
 This project has an offline spot paper replay engine with deterministic
 accounting and checkpoint tests. The new Upbit quotation snapshot and
@@ -12,7 +12,7 @@ No environment variable, version tag, Docker deployment, report export,
 dashboard screenshot, successful synthetic run, or positive backtest return
 may automatically enable live order placement.
 
-## Gate A — research / deterministic paper (implemented; CI not yet verified)
+## Gate A — research / deterministic paper
 
 - [x] Paper-only mode, no broker credentials required
 - [x] Completed-candle signal evaluation and next-available-open simulated fills
@@ -60,9 +60,12 @@ may automatically enable live order placement.
 - [x] Separate offline cash-only KRW/USD stock paper book, with whole-share fills and duplicate order safeguards
 - [x] Durable SQLite stock-paper execution journal with replay, idempotence and cash protection
 - [x] Saved Toss 1m JSON parser with closing-time to opening-time conversion
+- [x] KRW 15:30 aggregates excluded from fixed-minute replay to avoid later-trade leakage
 - [x] Opt-in Toss OAuth + read-only candle collector (code only; genuine authenticated endpoint not yet exercised)
 - [x] Completed-bar MA-cross paper stock backtest with next-available-open fills
 - [x] Transactional completed-bar stock strategy cursor and simulated fills in SQLite
+- [x] Exact committed-cursor fill reconciliation rejects deleted or extra historical fills
+- [x] Real SQLite concurrent append, cursor-write failure and abrupt process-exit recovery regressions
 - [x] Mandatory independent expected-equity check inside SQLite transaction before strategy fills/cursor commit
 - [x] Read-only stock paper bar-close maximum drawdown audit checked against recorded fills
 - [ ] Exchange-side max loss/drawdown enforcement and independently verified live risk controls
@@ -70,7 +73,7 @@ may automatically enable live order placement.
 - [x] SQLite native stock-paper strategy backup with SHA-256, deep replay and non-overwriting output
 - [x] Single offline crypto + stock audit command (portfolio totals intentionally unaggregated)
 - [x] Local CSP-restricted static crypto + stock paper HTML dashboard from pre-audited JSON
-- [x] Bundled synthetic 55-bar stock fixture and one-command end-to-end offline smoke test (CI test added; pass unverified)
+- [x] Bundled synthetic 55-bar stock fixture and one-command end-to-end offline smoke test (executed locally on 2026-11-21)
 - [ ] Test stock paper backup/restore under actual operational failures and establish RPO/RTO
 - [ ] Real-time multi-asset monitoring with authenticated operators, fresh data checks and verified FX
 - [ ] Validate real Toss quote credentials and feed, market calendar, operational monitoring and stock-ledger backup
@@ -78,7 +81,7 @@ may automatically enable live order placement.
 - [ ] Production-grade OAuth token reuse (one active token per client), rate-limit budgets, and 429 recovery
 - [ ] Verify US/KR market calendars, stock splits, tick sizes, tax/fee schedules and FX independently
 - [ ] Forward-only scheduled stock paper trading with exchange session calendar and durable strategy cursor
-- [ ] Simulated stock ledger backups, replay monitoring, and unified market risk controls
+- [ ] Unified market risk controls across simulated stock and crypto ledgers
 - [ ] Connect authenticated read-only Toss stock data to validated paper candles
 - [x] KIS VTS-host-only current-price read-only probe with mock tests (actual API not yet exercised)
 - [ ] Validate KIS official virtual-trading API end-to-end
@@ -88,6 +91,7 @@ may automatically enable live order placement.
 - [ ] Broker reconcilation of balances, orders, trades, and fee currency
 - [x] Durable offline SQLite order-intent journal with unknown-ACK state, unique client IDs, and concurrent-writer tests
 - [x] Local read-only SQLite intent preflight rejects corrupt state, unresolved orders and duplicate broker IDs
+- [x] Read-only journal instances refuse mutations; exact intent quantities are independent of Decimal context
 - [ ] Independently verify all broker evidence identifiers against authenticated sandbox responses
 - [ ] Integrate journal BEFORE network submission in a verified broker sandbox adapter (not connected yet)
 - [ ] Broker idempotency: client IDs, unknown-result lookup, deduplication
@@ -117,6 +121,9 @@ may automatically enable live order placement.
 - [ ] Monitoring distinguishes stale display from active broker positions
 - [ ] Fault-injection exercises repeated across planned release versions
 - [ ] Secrets never committed, echoed into logs, or copied into HTML reports
+
+Local verification evidence: [2026-11-21 report](docs/VERIFICATION_2026_11_21.md).
+Required remote CI results are recorded per commit in [GitHub Actions](https://github.com/uulab-official/trading/actions/workflows/ci.yml).
 
 ## Safe local commands (no actual orders)
 

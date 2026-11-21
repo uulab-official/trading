@@ -1,6 +1,13 @@
 """Keep optional coverage delivery separate from required CI verification."""
 
+import argparse
+import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 
 import yaml
@@ -40,11 +47,47 @@ class CoverageWorkflowTests(unittest.TestCase):
         for step in self.test["steps"]:
             if step.get("name") != "Upload coverage":
                 self.assertFalse(step.get("continue-on-error", False))
-        self.assertEqual(
-            self.steps["Run tests"]["run"].strip(),
-            "pytest packages/ -v --cov=trading_core --cov=trading_data "
-            "--cov=trading_strategy --cov=trading_backtest --cov-report=xml",
-        )
+        bash = shutil.which("bash")
+        self.assertIsNotNone(bash)
+        with tempfile.TemporaryDirectory() as directory:
+            recorded = Path(directory) / "pytest-args.json"
+            fake_pytest = Path(directory) / "pytest"
+            fake_pytest.write_text(
+                f"#!{sys.executable}\n"
+                "import json, os, sys\n"
+                "with open(os.environ['CI_TEST_ARGS_PATH'], 'w', encoding='utf-8') as output:\n"
+                "    json.dump(sys.argv[1:], output)\n"
+                "sys.exit(23)\n",
+                encoding="utf-8",
+            )
+            fake_pytest.chmod(0o700)
+            result = subprocess.run(
+                [bash, "--noprofile", "--norc", "-e", "-c",
+                 self.steps["Run tests"]["run"]],
+                # Only the fake pytest is on PATH, so this contract test
+                # cannot accidentally launch the real suite recursively.
+                env={**os.environ, "PATH": directory, "CI_TEST_ARGS_PATH": str(recorded)},
+                cwd=directory,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(23, result.returncode, result.stdout + result.stderr)
+            arguments = json.loads(recorded.read_text(encoding="utf-8"))
+
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument("paths", nargs="*")
+        parser.add_argument("-v", "--verbose", action="count")
+        parser.add_argument("--cov", action="append", default=[])
+        parser.add_argument("--cov-report", action="append", default=[])
+        configured = parser.parse_intermixed_args(arguments)
+        self.assertTrue({"packages", "apps/server/tests"}.issubset(
+            {Path(path).as_posix() for path in configured.paths}
+        ))
+        self.assertTrue({
+            "trading_core", "trading_data", "trading_strategy", "trading_backtest"
+        }.issubset(configured.cov))
+        self.assertIn("xml", configured.cov_report)
 
     def test_docker_validation_remains_blocking_and_network_isolated(self):
         docker = self.jobs["docker"]

@@ -44,7 +44,9 @@ def generate(fixture, database, *, initial_cash, fee_pct="0.1",
         ("모드", "PAPER ONLY"),
         ("종목", audit["symbol"]),
         ("통화", audit["quote_currency"]),
-        ("검증된 분봉", audit["bars"]),
+        ("데이터", "합성 데이터 · 실제 시세 아님" if fixture.get("provider") == "synthetic_fixture"
+         else "공급된 분봉 데이터"),
+        ("입력 분봉", audit["bars"]),
         ("가상 체결", audit["simulated_fills"]),
         ("현금", audit["cash"]),
         ("평가금액", audit["marked_equity"]),
@@ -79,7 +81,7 @@ section{{background:#162036;border-radius:12px;padding:16px;margin:16px 0}}
 svg{{width:100%;height:auto;background:#0f1728;border-radius:10px}}
 </style></head><body><main>
 <h1>주식 자동 모의매매 리포트</h1>
-<p>SQLite 전략 기록과 완성된 1분봉을 독립 재생하여 검증한 정적 스냅샷입니다.</p>
+<p>저장된 모의 거래 기록과 전략 재계산 결과를 대조한 보고서입니다.</p>
 <div class="warning"><strong>실거래 아님.</strong> 실제 토스증권 계좌, 주문,
 잔고 및 수익률을 나타내지 않습니다. 시세와 체결 가정이 포함된 연구용 모의 결과입니다.</div>
 <div class="grid">{items}</div>

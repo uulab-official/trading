@@ -50,6 +50,66 @@ class TossCandleParserTests(unittest.TestCase):
         result = self.parse()
         self.assertEqual(2, len(result["candles"]))
 
+    def test_krw_1530_aggregate_is_excluded_at_any_observation_time(self):
+        for timestamp, observed in (
+            ("2026-03-25T15:30:00+09:00", "2026-03-25T15:30:05+09:00"),
+            ("2026-03-25T15:30:00+09:00", "2026-03-25T15:59:59+09:00"),
+            ("2026-03-25T15:30:00+09:00", "2026-03-25T16:00:00+09:00"),
+            ("2026-03-25T06:30:00Z", "2026-03-25T07:00:04+00:00"),
+            ("2026-03-25T02:30:00-04:00", "2026-03-25T12:30:04+05:30"),
+            ("2026-03-25T15:30:00+09:00", "2026-03-25T16:00:05+09:00"),
+            ("2026-03-25T06:30:00Z", "2026-03-25T07:30:00+00:00"),
+            ("2026-03-25T02:30:00-04:00", "2026-03-26T09:00:00+09:00"),
+        ):
+            with self.subTest(timestamp=timestamp, observed=observed):
+                self.observed = datetime.fromisoformat(observed)
+                payload = {"result": {"candles": [record(timestamp)]}}
+                with self.assertRaisesRegex(ValueError, "No sufficiently completed"):
+                    self.parse(payload)
+
+    def test_ordinary_krw_afternoon_bars_keep_normal_safety_delay(self):
+        payload = {"result": {"candles": [
+            record("2026-03-25T15:31:00+09:00"),
+            record("2026-03-25T15:30:00+09:00"),
+            record("2026-03-25T15:29:00+09:00"),
+        ]}}
+        self.observed = datetime(2026, 3, 25, 15, 31, 4, tzinfo=KST)
+        self.assertEqual(1, len(self.parse(payload)["candles"]))
+        self.observed = datetime(2026, 3, 25, 15, 31, 5, tzinfo=KST)
+        expected_opens = [
+            datetime(2026, 3, 25, 6, 28, tzinfo=timezone.utc),
+            datetime(2026, 3, 25, 6, 30, tzinfo=timezone.utc),
+        ]
+        self.assertEqual(
+            [int(value.timestamp() * 1000) for value in expected_opens],
+            [row[0] for row in self.parse(payload)["candles"]],
+        )
+
+    def test_safety_delay_cannot_admit_krw_1530_aggregate(self):
+        payload = {"result": {"candles": [record("2026-03-25T15:30:00+09:00")]}}
+        self.observed = datetime(2026, 3, 25, 16, 5, 0, tzinfo=KST)
+        for safety_seconds in (0, 5, 300):
+            with self.subTest(safety_seconds=safety_seconds):
+                with self.assertRaisesRegex(ValueError, "No sufficiently completed"):
+                    self.parse(payload, safety_seconds=safety_seconds)
+
+    def test_krw_1530_exclusion_uses_korean_time_not_literal_timestamp_hour(self):
+        self.observed = datetime(2026, 3, 25, 15, 30, 5, tzinfo=timezone.utc)
+        result = self.parse({"result": {"candles": [record("2026-03-25T15:30:00Z")]}})
+        expected_open = datetime(2026, 3, 25, 15, 29, tzinfo=timezone.utc)
+        self.assertEqual(int(expected_open.timestamp() * 1000), result["candles"][0][0])
+
+    def test_usd_1530_korean_time_keeps_normal_safety_delay(self):
+        payload = {"result": {"candles": [
+            record("2026-03-25T15:30:00+09:00", currency="USD")
+        ]}}
+        result = parse_toss_minute_candles(
+            payload, symbol="AAPL", quote_currency="USD",
+            observed_at=datetime(2026, 3, 25, 15, 30, 5, tzinfo=KST),
+        )
+        expected_open = datetime(2026, 3, 25, 6, 29, tzinfo=timezone.utc)
+        self.assertEqual(int(expected_open.timestamp() * 1000), result["candles"][0][0])
+
     def test_currency_and_ohlc_invalidity_fails(self):
         bad = {"result": {"candles": [record(
             "2026-03-25T09:30:00+09:00", currency="USD"

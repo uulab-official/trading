@@ -1,9 +1,12 @@
 """Offline-only durable intent journal tests: no broker, socket or API."""
-from decimal import Decimal
+from contextlib import closing
+from decimal import Decimal, localcontext
 from pathlib import Path
+import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "packages/core"))
@@ -24,6 +27,101 @@ class OrderIntentJournalTests(unittest.TestCase):
         repeated = reopened.reserve("client-001", "BTC/KRW", "buy", "0.0010")
         self.assertEqual(original, repeated)
         self.assertEqual(1, len(reopened.unresolved()))
+
+    def test_quantity_keeps_all_digits_under_low_decimal_precision(self):
+        quantity = "0.123456789012345678901234567890123456789"
+        with localcontext() as context:
+            context.prec = 8
+            original = self.store.reserve("precise-001", "BTC/KRW", "buy", quantity)
+        self.assertEqual(quantity, original["quantity"])
+        self.assertEqual(quantity, OrderIntentJournal(self.path).get("precise-001")["quantity"])
+
+    def test_duplicate_and_audit_survive_decimal_context_changes(self):
+        quantity = "12345678901234567890.1234567890123456789"
+        with localcontext() as context:
+            context.prec = 80
+            original = self.store.reserve("precise-001", "BTC/KRW", "buy", quantity)
+        reopened = OrderIntentJournal(self.path)
+        with localcontext() as context:
+            context.prec = 6
+            context.Emax = 2
+            context.Emin = -2
+            context.capitals = 0
+            repeated = reopened.reserve("precise-001", "BTC/KRW", "buy", quantity + "00")
+            self.assertEqual(original, repeated)
+            self.assertEqual(1, reopened.audit_integrity()["unresolved_count"])
+
+    def test_precise_quantity_conflict_is_not_hidden_by_context_rounding(self):
+        with localcontext() as context:
+            context.prec = 8
+            self.store.reserve("precise-001", "BTC/KRW", "buy", "0.12345678901234567891")
+            with self.assertRaisesRegex(ValueError, "different order details"):
+                self.store.reserve("precise-001", "BTC/KRW", "buy", "0.12345678901234567892")
+        self.assertEqual("0.12345678901234567891", self.store.get("precise-001")["quantity"])
+
+    def test_ordinary_quantity_encodings_remain_canonical(self):
+        examples = (
+            ("1.2300", "1.23"),
+            ("1000.00", "1E+3"),
+            ("0.0010", "0.001"),
+            ("0.0000010", "0.000001"),
+            ("0.00000010", "1E-7"),
+        )
+        with localcontext() as context:
+            context.capitals = 0
+            for index, (value, expected) in enumerate(examples):
+                with self.subTest(value=value):
+                    client_id = "ordinary-" + str(index)
+                    row = self.store.reserve(client_id, "BTC/KRW", "buy", value)
+                    self.store.reconcile(client_id, outcome="rejected", evidence_ref="evidence")
+                    self.assertEqual(expected, row["quantity"])
+            self.assertEqual(len(examples), self.store.audit_integrity()["intent_count"])
+
+    def test_readonly_view_refuses_mutations_before_connecting(self):
+        actions = (
+            ("reserve", lambda view: view.reserve("client-001", "BTC/KRW", "buy", "0.001")),
+            ("mark_uncertain", lambda view: view.mark_uncertain("client-001")),
+            (
+                "reconcile",
+                lambda view: view.reconcile(
+                    "client-001", outcome="rejected", evidence_ref="broker-response"
+                ),
+            ),
+        )
+        for name, action in actions:
+            with self.subTest(method=name):
+                path = self.path.with_name(name + ".sqlite")
+                writable = OrderIntentJournal(path)
+                if name != "reserve":
+                    writable.reserve("client-001", "BTC/KRW", "buy", "0.001")
+                view = OrderIntentJournal.open_existing_readonly(path)
+                before = path.read_bytes()
+                with patch.object(view, "_connect", wraps=view._connect) as connect:
+                    with self.assertRaisesRegex(PermissionError, "[Rr]ead.only"):
+                        action(view)
+                    connect.assert_not_called()
+                self.assertEqual(before, path.read_bytes())
+
+    def test_readers_do_not_change_journal_mode_or_database_bytes(self):
+        original = self.store.reserve("client-001", "BTC/KRW", "buy", "0.001")
+        readonly = OrderIntentJournal.open_existing_readonly(self.path)
+        for journal in (self.store, readonly):
+            for name in ("get", "unresolved", "audit_integrity"):
+                with self.subTest(view=journal is readonly, method=name):
+                    with closing(sqlite3.connect(self.path)) as db:
+                        mode = db.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+                        self.assertEqual("delete", mode)
+                    before = self.path.read_bytes()
+                    if name == "get":
+                        self.assertEqual(original, journal.get("client-001"))
+                    elif name == "unresolved":
+                        self.assertEqual([original], journal.unresolved())
+                    else:
+                        self.assertEqual(1, journal.audit_integrity()["unresolved_count"])
+                    self.assertEqual(before, self.path.read_bytes())
+                    with closing(sqlite3.connect(self.path)) as db:
+                        mode = db.execute("PRAGMA journal_mode").fetchone()[0]
+                        self.assertEqual("delete", mode)
 
     def test_unknown_submission_blocks_new_intents_after_restart(self):
         self.store.reserve("client-001", "BTC/KRW", "buy", "0.001")
@@ -116,7 +214,6 @@ class OrderIntentJournalTests(unittest.TestCase):
                              evidence_ref="evidence-001",
                              broker_order_id="upbit-001")
         self.store.reserve("client-002", "BTC/KRW", "sell", "0.001")
-        import sqlite3
         with self.assertRaises(sqlite3.IntegrityError):
             self.store.reconcile("client-002", outcome="filled",
                                  evidence_ref="evidence-002",
@@ -126,7 +223,6 @@ class OrderIntentJournalTests(unittest.TestCase):
 
     def test_manual_invalid_journal_rows_are_detected_by_preflight(self):
         self.store.reserve("client-001", "BTC/KRW", "buy", "0.001")
-        import sqlite3
         with sqlite3.connect(self.path) as db:
             db.execute("UPDATE intents SET outcome='filled' WHERE client_id=?",
                        ("client-001",))

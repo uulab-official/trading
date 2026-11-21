@@ -3,10 +3,14 @@
 Toss's 1m candle timestamp is the *closing* boundary, unlike Upbit's
 opening timestamp. No authentication, API access, account, or order calls.
 Never treat 1d local-midnight timestamps as completed 1m bars.
+KRW 15:30 source bars may aggregate trades until 16:00 Korea time and
+are excluded because this fixed-minute format cannot express that interval.
 """
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 import re
+
+KST = timezone(timedelta(hours=9))
 
 
 def parse_toss_minute_candles(document, *, symbol, quote_currency, observed_at,
@@ -50,6 +54,12 @@ def parse_toss_minute_candles(document, *, symbol, quote_currency, observed_at,
         if stamp in times:
             raise ValueError("Duplicate minute candle")
         times.add(stamp)
+        korean_close = closed_at.astimezone(KST)
+        if quote_currency == "KRW" and (korean_close.hour, korean_close.minute) == (15, 30):
+            # The official FAQ allows non-NXT 15:30 bars to change until 16:00.
+            # Without exchange / availability metadata, a fixed-minute replay
+            # would expose later trades too early. Omit these aggregates entirely.
+            continue
         if closed_at > observed - timedelta(seconds=safety_seconds):
             # A just-ending / future bar cannot influence a paper decision.
             continue

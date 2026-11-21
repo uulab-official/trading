@@ -1,5 +1,6 @@
 """Stock paper WAL backup and restore-verification regression tests."""
 import json
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import sys
@@ -85,6 +86,28 @@ class StockPaperBackupTests(unittest.TestCase):
                          verify_backup(self.destination, deep=False)["status"])
         with self.assertRaises(ValueError):
             verify_backup(self.destination, deep=True)
+
+    def test_backup_verification_rejects_unmanifested_wal_changes(self):
+        import hashlib
+        create_backup(self.source, self.db, self.destination, **self.settings)
+        dbfile = self.destination / "stock.sqlite"
+        manifest_file = self.destination / "manifest.json"
+        # A committed WAL can change SQLite's effective contents without
+        # changing the main database bytes covered by the manifest.
+        with closing(sqlite3.connect(dbfile)) as database:
+            database.execute("PRAGMA journal_mode=WAL")
+            database.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            original_bytes = dbfile.read_bytes()
+            manifest = json.loads(manifest_file.read_text())
+            manifest["database_sha256"] = hashlib.sha256(original_bytes).hexdigest()
+            manifest_file.write_text(json.dumps(manifest))
+            database.execute("UPDATE paper_fills SET result_json='{}' WHERE sequence=1")
+            database.commit()
+            self.assertEqual(original_bytes, dbfile.read_bytes())
+            self.assertGreater((self.destination / "stock.sqlite-wal").stat().st_size, 0)
+            for deep in (False, True):
+                with self.subTest(deep=deep), self.assertRaises(ValueError):
+                    verify_backup(self.destination, deep=deep)
 
     def test_no_automatic_restore_or_live_order_mode(self):
         self.assertFalse(self.destination.exists())

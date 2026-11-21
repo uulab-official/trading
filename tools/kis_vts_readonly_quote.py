@@ -30,7 +30,8 @@ class _DenyRedirect(HTTPRedirectHandler):
 
 
 def _open_vts_quote(request, *, timeout):
-    # Never forward bearer/app-secret headers through an environment proxy.\n    return build_opener(ProxyHandler({}), _DenyRedirect()).open(request, timeout=timeout)
+    # Never forward bearer/app-secret headers through an environment proxy.
+    return build_opener(ProxyHandler({}), _DenyRedirect()).open(request, timeout=timeout)
 
 
 def _text(label, value):
@@ -85,7 +86,11 @@ def fetch_quote(symbol, *, token, appkey, appsecret,
     if not price.is_finite() or price <= 0:
         raise ValueError("KIS spot quote must be finite and positive")
     observed = now() if now is not None else datetime.now(timezone.utc)
-    if (not isinstance(observed, datetime) or observed.tzinfo is None\n            or observed.utcoffset() is None):
+    if (
+        not isinstance(observed, datetime)
+        or observed.tzinfo is None
+        or observed.utcoffset() is None
+    ):
         raise ValueError("Observation time must be timezone aware")
     return {
         "mode": "paper", "live_orders_enabled": False,

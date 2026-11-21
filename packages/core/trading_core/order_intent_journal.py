@@ -22,7 +22,16 @@ def _quantity(value):
         raise ValueError("Quantity must be a finite positive decimal") from error
     if not number.is_finite() or number <= 0:
         raise ValueError("Quantity must be a finite positive decimal")
-    return str(number.normalize())
+    # normalize() applies the ambient decimal precision and exponent limits,
+    # which can round distinct order quantities into the same intent value.
+    # Strip coefficient zeros without arithmetic, then render every digit.
+    sign, digits, exponent = number.as_tuple()
+    end = len(digits)
+    while digits[end - 1] == 0:
+        end -= 1
+    canonical = Decimal((sign, digits[:end], exponent + len(digits) - end))
+    # Explicit G also keeps exponent casing independent of context.capitals.
+    return format(canonical, "G")
 
 
 def _identifier(value, label):
@@ -37,6 +46,7 @@ class OrderIntentJournal:
     """SQLite WAL journal, single-writer transaction, no broker adapter."""
 
     def __init__(self, path):
+        self._read_only = False
         self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists() and not self.path.is_file():
@@ -63,16 +73,20 @@ class OrderIntentJournal:
 
     @classmethod
     def open_existing_readonly(cls, path):
-        """Create an audit-only view; never create a missing journal."""
+        """Open an existing journal for reads without creating a missing file.
+
+        Mutating methods raise PermissionError before opening a connection.
+        """
         resolved = Path(path).expanduser().resolve()
         if not resolved.is_file():
             raise ValueError("Existing SQLite order intent journal required")
         instance = object.__new__(cls)
         instance.path = resolved
+        instance._read_only = True
         return instance
 
     def _connect(self, *, read_only=False):
-        if read_only:
+        if self._read_only or read_only:
             # No implicit schema creation, data mutations, or journal
             # mode writes during a safety preflight.
             con = sqlite3.connect(self.path.as_uri() + "?mode=ro",
@@ -88,6 +102,10 @@ class OrderIntentJournal:
         con.row_factory = sqlite3.Row
         return con
 
+    def _require_writable(self):
+        if self._read_only:
+            raise PermissionError("Read-only order intent journal cannot be modified")
+
     @staticmethod
     def _row(row):
         return dict(row) if row is not None else None
@@ -98,6 +116,7 @@ class OrderIntentJournal:
         Duplicate exact IDs return existing state without submitting an order.
         Distinct new intents are blocked while any unresolved intent exists.
         """
+        self._require_writable()
         client_id = _identifier(client_id, "client_id")
         if not isinstance(symbol, str) or not re.fullmatch(r"[A-Z0-9]{2,20}/(?:KRW|USDT)", symbol):
             raise ValueError("Journal supports explicit KRW/USDT spot symbols only")
@@ -136,6 +155,7 @@ class OrderIntentJournal:
 
     def mark_uncertain(self, client_id):
         """Ambiguous submission/ACK: never automatically retry or erase."""
+        self._require_writable()
         client_id = _identifier(client_id, "client_id")
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -152,6 +172,7 @@ class OrderIntentJournal:
 
     def reconcile(self, client_id, *, outcome, evidence_ref, broker_order_id=None):
         """Record EXTERNAL verified evidence; does not query broker itself."""
+        self._require_writable()
         client_id = _identifier(client_id, "client_id")
         if outcome not in FINAL:
             raise ValueError("Outcome must be filled, canceled or rejected")
@@ -185,13 +206,13 @@ class OrderIntentJournal:
 
     def get(self, client_id):
         client_id = _identifier(client_id, "client_id")
-        with closing(self._connect()) as db:
+        with closing(self._connect(read_only=True)) as db:
             return self._row(db.execute(
                 "SELECT * FROM intents WHERE client_id=?", (client_id,)
             ).fetchone())
 
     def unresolved(self):
-        with closing(self._connect()) as db:
+        with closing(self._connect(read_only=True)) as db:
             return [self._row(row) for row in db.execute(
                 "SELECT * FROM intents WHERE status IN ('reserved','uncertain') ORDER BY client_id"
             ).fetchall()]

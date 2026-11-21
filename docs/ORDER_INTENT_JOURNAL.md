@@ -16,6 +16,8 @@ adding it to the repository does not activate live trading.
   regardless of whether its state is `reserved`, `uncertain` or
   `reconciled`. It never creates a second order.
 - Reusing an ID with different trade terms fails immediately.
+- Quantities retain every input decimal digit regardless of the process's
+  decimal precision, exponent limits, or exponent-letter setting.
 - While **any** intent is `reserved` or `uncertain`, creation of a
   *different* intent is rejected. This limits the journal to one
   unresolved broker action at a time.
@@ -82,6 +84,22 @@ The journal now exposes a read-only preflight that opens an **existing**
 SQLite database in `mode=ro` with `query_only=ON`. It does not create
 an absent database, change trading settings, place orders, or fetch broker
 account information.
+
+An instance returned by `open_existing_readonly()` rejects `reserve()`,
+`mark_uncertain()`, and `reconcile()` with `PermissionError` before opening
+a connection. The ordinary `get()` and `unresolved()` methods also use
+read-only connections and do not change SQLite journal mode.
+
+### Legacy quantity records
+
+The exact canonicalization fix cannot reconstruct digits already rounded
+away by an older version. A valid stored rounded quantity can pass a local
+integrity audit; that is not evidence that it equals the original request.
+An exact retry that differs from the saved value is refused instead of
+changing that evidence. Default-context encodings remain compatible; old
+lowercase scientific encodings such as `1e+3` require explicit review rather
+than automatic rewriting. Keep the original journal and reconcile against
+independent evidence before replacing any disputed record.
 
 ```sh
 python tools/order_intent_preflight.py data/sandbox-intents.sqlite

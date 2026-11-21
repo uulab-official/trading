@@ -99,6 +99,46 @@ class StockPaperLedgerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.ledger.report()
 
+    def test_strategy_prefix_replay_preserves_opaque_client_ids_across_restart(self):
+        buy = {
+            "mode": "paper", "client_id": "request:alpha", "symbol": "005930",
+            "side": "buy", "shares": 1, "price": "10000", "gross": "10000",
+            "fee": "10.0", "quote_currency": "KRW", "status": "simulated_fill",
+        }
+        sell = {
+            "mode": "paper", "client_id": "request:omega", "symbol": "005930",
+            "side": "sell", "shares": 1, "price": "12000", "gross": "12000",
+            "fee": "12.0", "quote_currency": "KRW", "status": "simulated_fill",
+        }
+        first_bar = [0, "10000", "10000", "10000", "10000", "100"]
+        next_bar = [60000, "12000", "12000", "12000", "12000", "100"]
+        committed_fills = {1: [buy], 2: [buy, sell]}
+        identity = {"strategy": "opaque-order-identifiers"}
+        first = self.ledger.apply_strategy_replay(
+            {"mode": "paper", "candles": [first_bar]}, identity=identity,
+            expected_fills=[buy], expected_fills_for_prefix=committed_fills.__getitem__,
+            marks={"005930": "10000"}, expected_equity="99990",
+        )
+        self.assertEqual(1, first["new_simulated_fills"])
+        full_fixture = {"mode": "paper", "candles": [first_bar, next_bar]}
+        appended = self.ledger.apply_strategy_replay(
+            full_fixture, identity=identity, expected_fills=[buy, sell],
+            expected_fills_for_prefix=committed_fills.__getitem__,
+            marks={"005930": "12000"}, expected_equity="101978",
+        )
+        self.assertEqual(1, appended["new_simulated_fills"])
+        reopened = StockPaperLedger(
+            self.path, quote_currency="KRW", initial_cash="100000", fee_pct="0.1"
+        )
+        repeated = reopened.apply_strategy_replay(
+            full_fixture, identity=identity, expected_fills=[buy, sell],
+            expected_fills_for_prefix=committed_fills.__getitem__,
+            marks={"005930": "12000"}, expected_equity="101978",
+        )
+        self.assertEqual(0, repeated["new_simulated_fills"])
+        self.assertEqual(0, repeated["appended_bars"])
+        self.assertEqual(2, repeated["total_simulated_fills"])
+
 
 if __name__ == "__main__":
     unittest.main()

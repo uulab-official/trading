@@ -22,7 +22,9 @@ class StockPaperTests(unittest.TestCase):
         sell = book.execute("sell-001", "005930", "sell", 2, price="11000")
         self.assertEqual(Decimal("101958"), book.cash)
         self.assertEqual({}, book.holdings)
-        self.assertEqual("22", sell["fee"])
+        # Decimal serialization preserves input scale; fees are exact money,
+        # so equivalent representations such as "22.0" remain compatible.
+        self.assertEqual(Decimal("22"), Decimal(sell["fee"]))
 
     def test_usd_marked_positions_do_not_convert_from_krw(self):
         usd = StockPaperBook("USD", "1000", fee_pct="0")

@@ -148,3 +148,13 @@ real spreads, taxes, splits, leveraged positions, broker execution
 constraints and unknown missing session candles. Never interpret
 the resulting number as a proven future risk budget or replace
 server-side risk controls with this report.
+
+
+## Committed history reconciliation (2026-11-21)
+
+Resume recalculates the exact fills belonging to the already committed bar
+cursor while holding the SQLite write transaction. Missing trailing fills,
+missing all historical fills, and extra fills ahead of that cursor cause
+refusal before new fills are inserted. Existing schema version 1 is retained.
+Do not edit or silently rebuild a damaged journal; preserve it and review
+a separate trusted backup. See [executed verification results](VERIFICATION_2026_11_21.md).

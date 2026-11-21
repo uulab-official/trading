@@ -46,6 +46,14 @@ It writes `candles.json`, `stock.sqlite` and `manifest.json`.
 The manifest records the exact strategy parameters, market, currency,
 processed bar count, simulated trade count and SHA-256 digests.
 
+The exported copy is finalized in SQLite `DELETE` journal mode before
+hashing, so it is a complete standalone database. Verification rejects
+`stock.sqlite-wal`, `stock.sqlite-shm`, or `stock.sqlite-journal` sidecars:
+hashing only the main database could otherwise miss committed WAL changes.
+Existing backups containing those files must be preserved for investigation
+and recreated from an audited source; do not delete the sidecars to make
+verification pass, because they may contain committed state.
+
 The backup is a snapshot of a cooperating local strategy database.
 Because independent writers may modify the source after it is audited,
 the tool compares pre- and post-snapshot replay results and rejects

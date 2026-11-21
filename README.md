@@ -1,6 +1,25 @@
 # Trading Bot Monorepo
 
-암호화폐 자동매매 개발 모노레포 · 현재 검증된 개인 체험은 오프라인 합성 데이터 재생
+코인·국내 주식·미국 주식 모의매매 개발 모노레포
+
+## 바로 실행하는 모의 테스트
+
+```sh
+# API 키 없이 합성 55개 분봉으로 실행 → 재시작 → 감사 → 백업 → HTML 검증
+python tools/stock_paper_smoke.py
+
+# 네트워크와 DNS를 차단한 전체 오프라인 검증 (백테스트 의존성 필요)
+python tools/offline_checks.py --include-backtest
+```
+
+주식 전략은 KRW와 USD 원장을 각각 저장하며, 같은 데이터를 다시 실행해도
+가상 체결이 중복되지 않습니다. 토스는 읽기 전용 시세 수집, KIS는 모의투자
+서버의 읽기 전용 현재가 조회까지 구현되어 있습니다. 실제 인증·시세 대조와
+KIS 모의 주문 체결은 아직 검증되지 않았습니다.
+
+- [최신 검증 결과와 재현 명령](docs/VERIFICATION_2026_11_21.md)
+- [주식 모의매매 실행·감사·HTML 가이드](docs/STOCK_PAPER_FORWARD_RUNBOOK.md)
+- [토스 시세 계약과 15:30 집계봉 제외 정책](docs/STOCK_PAPER_TOSS_KIS.md)
 
 ## Verified offline paper workflow
 
@@ -18,7 +37,11 @@ The existing backtest engine now has separate
 `python tools/offline_checks.py --include-backtest` with pandas/numpy available
 to check causal fills, spot balances, fees, marked equity, and repeatable runs.
 
-Audit an existing checkpoint without changing its paper state using\n`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`\n(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).\n\nThe stock strategy now verifies independently calculated paper equity
+Audit an existing checkpoint without changing its paper state using
+`python tools/paper_checkpoint_audit.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json`
+(see [checkpoint audit and production blockers](docs/OFFLINE_CHECKPOINT_AUDIT.md)).
+
+The stock strategy now verifies independently calculated paper equity
 **before committing** fills and its bar cursor, and offers a separate
 read-only maximum-drawdown audit via
 `python tools/stock_paper_risk_audit.py`. This is retrospective paper
@@ -112,15 +135,37 @@ fail-closed consecutive-failure halt:
 Probe freshness with
 `python tools/paper_healthcheck.py data/upbit-btc-1h-health.json --max-age-seconds 7200`.
 See [paper supervisor runbook](docs/PAPER_SUPERVISOR_RUNBOOK.md).
-A local emergency STOP marker at `data/upbit-btc-1h-paper.json.STOP` prevents any future cycles; see the runbook for safe recovery.\nThis supervises **simulated trades only**. The live broker is not enabled.
+A local emergency STOP marker at `data/upbit-btc-1h-paper.json.STOP` prevents any future cycles; see the runbook for safe recovery.
+This supervises **simulated trades only**. The live broker is not enabled.
 
-Run one **public quotation → archived paper replay** cycle with\n`python tools/upbit_paper_cycle.py --market KRW-BTC --unit 60 --archive data/upbit-btc-1h-archive.json --checkpoint data/upbit-btc-1h-paper.json --initial-balance 1000000`\n(see [integrated paper cycle guide](docs/UPBIT_PAPER_CYCLE.md)). This still does not place real trades.\n\nFor interrupted public candle history beyond one 200-bar window, generate a
+Run one **public quotation → archived paper replay** cycle with
+`python tools/upbit_paper_cycle.py --market KRW-BTC --unit 60 --archive data/upbit-btc-1h-archive.json --checkpoint data/upbit-btc-1h-paper.json --initial-balance 1000000`
+(see [integrated paper cycle guide](docs/UPBIT_PAPER_CYCLE.md)). This still does not place real trades.
+
+For interrupted public candle history beyond one 200-bar window, generate a
 **separate, bounded, read-only recovery candidate** with
 `python tools/upbit_paper_backfill.py --archive data/upbit-btc-1h-archive.json --candidate data/upbit-btc-1h-recovery-candidate.json --market KRW-BTC --unit 60 --pages 3`.
 See [manual gap-recovery runbook](docs/UPBIT_PAPER_BACKFILL.md). This
 never auto-promotes history or executes real orders.
 
-Maintain an **append-only, overlap-verified public candle archive** using\n`python tools/upbit_paper_archive.py --market KRW-BTC --unit 60 --archive data/upbit-btc-1h-archive.json`\n(see [cumulative public paper history](docs/UPBIT_PAPER_ARCHIVE.md)).\n\nCapture **public Upbit KRW candle snapshots** without accounts or order APIs via\n`python tools/upbit_public_paper_snapshot.py --market KRW-BTC --unit 60 --count 200 --output data/upbit-btc-1h.json`\n(see [paper-only public snapshot guide](docs/UPBIT_PUBLIC_PAPER.md)). This is a one-shot API read, not a continuous trading service.\n\nImport caller-supplied historical candles with strict validation using\n`python tools/import_ohlcv_csv.py history.csv --symbol BTC/KRW --timeframe 1h --output data/local-history.json`\n(see [offline CSV import contract](docs/OFFLINE_CSV_IMPORT.md)). Source authenticity and bar completeness remain operator responsibilities.\n\nGenerate a **static, local-only paper dashboard** with\n`python tools/paper_report_html.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json --output data/owner-trial/report.html`\n(see [offline dashboard guide](docs/OFFLINE_PAPER_REPORT.md)). The output is an audited\nsnapshot, not live monitoring or an activated trading service.\n\nRun `python tools/offline_trade_report.py` for a network-forbidden report of the
+Maintain an **append-only, overlap-verified public candle archive** using
+`python tools/upbit_paper_archive.py --market KRW-BTC --unit 60 --archive data/upbit-btc-1h-archive.json`
+(see [cumulative public paper history](docs/UPBIT_PAPER_ARCHIVE.md)).
+
+Capture **public Upbit KRW candle snapshots** without accounts or order APIs via
+`python tools/upbit_public_paper_snapshot.py --market KRW-BTC --unit 60 --count 200 --output data/upbit-btc-1h.json`
+(see [paper-only public snapshot guide](docs/UPBIT_PUBLIC_PAPER.md)). This is a one-shot API read, not a continuous trading service.
+
+Import caller-supplied historical candles with strict validation using
+`python tools/import_ohlcv_csv.py history.csv --symbol BTC/KRW --timeframe 1h --output data/local-history.json`
+(see [offline CSV import contract](docs/OFFLINE_CSV_IMPORT.md)). Source authenticity and bar completeness remain operator responsibilities.
+
+Generate a **static, local-only paper dashboard** with
+`python tools/paper_report_html.py config/examples/offline_fixture.json data/owner-trial/checkpoint.json --output data/owner-trial/report.html`
+(see [offline dashboard guide](docs/OFFLINE_PAPER_REPORT.md)). The output is an audited
+snapshot, not live monitoring or an activated trading service.
+
+Run `python tools/offline_trade_report.py` for a network-forbidden report of the
 local synthetic fixture using [fee-inclusive FIFO trade reporting](docs/OFFLINE_REALIZED_REPORTING.md).
 It also includes [elapsed-time CAGR](docs/OFFLINE_ANNUALIZATION.md) with period,
 units, undefined-value handling, and an explicit extrapolation warning.

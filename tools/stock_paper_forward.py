@@ -23,10 +23,16 @@ def replay_forward(fixture, database, *, initial_cash, fee_pct="0.1",
                    fast=5, slow=20, allocation_pct="20"):
     # Entire strategy is recalculated from complete bars. This is slower than
     # a streaming incremental indicator but avoids an unverified state cache.
-    outcome = run_backtest(
-        fixture, initial_cash=initial_cash, fee_pct=fee_pct,
+    strategy_kwargs = dict(
+        initial_cash=initial_cash, fee_pct=fee_pct,
         fast=fast, slow=slow, allocation_pct=allocation_pct,
     )
+    outcome = run_backtest(fixture, **strategy_kwargs)
+
+    def expected_fills_for_prefix(prior_bars):
+        prefix = dict(fixture, candles=fixture["candles"][:prior_bars])
+        return run_backtest(prefix, **strategy_kwargs)["simulated_fills"]
+
     book = StockPaperLedger(
         database, quote_currency=outcome["quote_currency"],
         initial_cash=initial_cash, fee_pct=fee_pct,
@@ -48,6 +54,7 @@ def replay_forward(fixture, database, *, initial_cash, fee_pct="0.1",
     report = book.apply_strategy_replay(
         fixture, identity=identity,
         expected_fills=outcome["simulated_fills"],
+        expected_fills_for_prefix=expected_fills_for_prefix,
         marks={outcome["symbol"]: latest_mark},
         expected_equity=outcome["marked_equity"],
     )

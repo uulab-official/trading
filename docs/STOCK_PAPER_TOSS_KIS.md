@@ -15,10 +15,12 @@ supply prices explicitly. It supports:
 
 The emulator is in-memory and intentionally does not claim crash-safe
 portfolio persistence, authentic order fills, or investment profitability.
-The existing crypto offline runner and this stock book are currently
-**separate accounting paths**, not yet one multi-asset dashboard.
+The crypto and stock engines use separate accounting paths. A static
+[combined audit view](PAPER_PORTFOLIO_DASHBOARD.md) can display them without
+aggregating currencies. The SQLite wrapper described below provides
+transactional stock persistence and backup verification.
 
-## Brokerage options verified on 2026-11-20
+## Brokerage options verified on 2026-11-21
 
 ### Toss Securities
 
@@ -31,11 +33,13 @@ assets, order creation/cancellation and WebSocket order events.
 The documented API targets **live accounts**; a dedicated broker
 sandbox / virtual-money order endpoint has NOT been confirmed.
 
-**Proposed approach:** Keep Toss in public/documented-data inspection
-mode until its authentication, pricing, availability, permission rules,
-and data-license terms are independently verified. Pipe validated
-historical market data through a local **paper** execution engine.
-Never use actual Toss order endpoints for a paper test.
+**Approach:** Use the opt-in read-only collector described below only
+with operator-provisioned credentials and an allowed IP. The canonical
+OAuth and candle contracts are documented; successful account access,
+availability, pricing and data permissions still require operator-side
+verification. Pipe validated historical market data through a local
+**paper** execution engine. Never use actual Toss order endpoints for a
+paper test.
 
 ### Korea Investment & Securities (KIS)
 
@@ -48,15 +52,15 @@ Do not assume a Toss sandbox exists because KIS provides one.
 
 ## Production steps still required
 
-1. Confirm Toss market-data authentication and scope, obtain user-controlled
-   access through official authorization, and fetch read-only candles.
+1. Provision user-controlled Toss credentials and an allowed IP, verify
+   market-data permissions, and validate actual read-only candle responses.
 2. Validate Korean market session/holiday/auction rules, US extended
    hours, symbols, stock splits, trading halts, FX, tax and fees.
 3. Feed **completed** market bars only, preserve provenance and time zone,
    and apply causal next-bar simulated execution rather than current-bar
    close lookahead.
-4. Persist whole-share paper portfolio state with transactionally sound
-   cash/fills/checkpoints, idempotency and crash recovery.
+4. Validate the implemented SQLite persistence and backup/recovery workflow
+   on the actual operating filesystem, and establish recovery targets.
 5. Reconcile actual sandbox fills, partial cancellations and account
    balances in KIS VTS before any broker integration is considered safe.
 6. Implement multi-asset authenticated operator dashboard and alerts.
@@ -106,12 +110,17 @@ partial broker fills, FX, or account balances.
 The database configuration (currency, initial cash, fees) is fixed
 upon initialization; mismatched restarts are rejected. The stored
 execution log provides local crash persistence but not signatures
-against a hostile database administrator. Archive and operational
-backup procedures for this new stock database are still pending.
+against a hostile database administrator. Standalone stock backups and replay verification are implemented; see
+[stock backup guide](STOCK_PAPER_BACKUP_MONITOR.md). Operational recovery
+drills and recovery targets still need validation.
 The crypto paper ledger remains separate.
 
 ## Official Toss reference
 
+- Canonical OpenAPI JSON (v1.2.28 inspected on 2026-11-21):
+  https://openapi.tossinvest.com/openapi-docs/latest/openapi.json
+- Official FAQ, including candle timing and auction exceptions:
+  https://openapi.tossinvest.com/openapi-docs/faq.md
 - Official OpenAPI index:
   https://openapi.tossinvest.com/openapi-docs/latest/api-reference/README.md
 - Official market data:
@@ -121,10 +130,13 @@ The crypto paper ledger remains separate.
 
 Toss market data needs OAuth access, even for read-only price queries,
 and requires registered allowed client IPs per the official guide.
+The token request uses form encoding and client credentials; there is
+one valid access token per client, and a new token invalidates the old
+one. The candle response contains `result.candles`, ordered newest
+first, with up to 200 rows and a `result.nextBefore` pagination cursor.
 Do **not** use the order-creation endpoints when testing paper
-transactions. A production read-only connector must be separately
-written and verified against the canonical OpenAPI schema and
-market-data permissions before connecting these prices to the ledger.
+transactions. The read-only collector below still requires actual
+response and market-data permission verification before production use.
 
 ## Offline Toss 1-minute candle adapter (2026-11-20)
 
@@ -140,6 +152,36 @@ cryptocurrency fixture uses an opening timestamp. This adapter
 converts 1m close timestamps into Unix-ms **opening** timestamps,
 rejects timezone-less or duplicate timestamps, and drops bars too
 close to the caller-supplied observation time.
+
+The ordinary eligibility delay remains **5 seconds** after the source
+close (configurable with `safety_seconds`). The official FAQ documents
+an exception: for domestic stocks not traded on NXT, the **15:30 Korea
+time** row can accumulate closing-auction and after-hours closing-price
+trades until **16:00**. The adapter has neither NXT eligibility metadata
+nor a field for a variable aggregate interval or later availability.
+It therefore conservatively **excludes every KRW source-close 15:30
+row at all observation times**, including after 16:00 and on later days.
+Changing `safety_seconds` cannot admit the row. It recognizes equivalent
+timestamps expressed in UTC or another explicit offset. Other KRW
+minutes and all USD rows retain the ordinary delay and unchanged
+source-close-to-UTC-open conversion.
+
+This missing source-close 15:30 row is intentional. In the normalized
+opening-timestamp output it produces a gap at **15:29 Korea time**.
+Do not fill that gap from the original aggregate or treat that aggregate
+as a normal one-minute row: even after the observation-time value has
+settled, replaying it as available at 15:30 would expose trades from
+later in the afternoon and introduce lookahead.
+
+**Bounded assumption:** This exclusion protects the documented 15:30
+aggregate case; it is not an exchange calendar or proof that every
+accepted row is immutable. It also discards ordinary 15:30 rows for
+NXT-eligible stocks because the supplied schema cannot distinguish
+them. The adapter does not reaggregate the data or validate a supplied
+response's provenance. The FAQ describes KRX+NXT integrated domestic
+data and late-reported US trades that can revise historical minute
+bars, so the ordinary safety delay is not a general guarantee against
+subsequent revisions.
 
 Run after manually saving the read-only market response locally:
 

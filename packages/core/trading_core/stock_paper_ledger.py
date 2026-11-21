@@ -127,11 +127,15 @@ class StockPaperLedger:
                 db.execute("ROLLBACK")
                 raise
 
-    def apply_strategy_replay(self, fixture, *, identity, expected_fills, marks, expected_equity):
+    def apply_strategy_replay(self, fixture, *, identity, expected_fills,
+                              expected_fills_for_prefix, marks, expected_equity):
         """Atomically advance one paper-only strategy and its simulated fills.
 
         Full saved candle-prefix SHA is checked before mutation, and the
         strategy-generated prior fills must equal persisted fill history.
+        The prefix replay callback receives the committed bar count while
+        the write transaction is locked, so a deleted trailing fill cannot
+        be mistaken for an execution from newly appended candles.
         This is an OFFLINE replay, not a timed market-connected service.
         """
         if not isinstance(fixture, dict) or fixture.get("mode") != "paper":
@@ -141,6 +145,8 @@ class StockPaperLedger:
             raise ValueError("Strategy replay requires completed candles")
         if not isinstance(expected_fills, list):
             raise ValueError("Expected fills must be a list")
+        if not callable(expected_fills_for_prefix):
+            raise ValueError("Strategy prefix replay is required")
         if not isinstance(identity, dict) or not identity:
             raise ValueError("Strategy configuration identity is required")
         identity_json = json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -171,13 +177,18 @@ class StockPaperLedger:
                                         separators=(",", ":"), allow_nan=False)
                     if hashlib.sha256(prefix.encode()).hexdigest() != prefix_sha:
                         raise ValueError("Previous completed stock candles were changed")
+                expected_prior_fills = (
+                    [] if saved is None else expected_fills_for_prefix(prior_bars)
+                )
+                if not isinstance(expected_prior_fills, list):
+                    raise ValueError("Expected prior fills must be a list")
+                if expected_prior_fills != expected_fills[:len(expected_prior_fills)]:
+                    raise ValueError("Strategy replay changed historical paper fills")
                 book, previous_fill_count = self._rebuild(
                     db, self.quote_currency, self.initial_cash, self.fee_pct
                 )
-                if previous_fill_count > len(expected_fills):
-                    raise ValueError("Strategy replay removed historical paper fills")
-                if book.fills != expected_fills[:previous_fill_count]:
-                    raise ValueError("Historical strategy fill events differ")
+                if book.fills != expected_prior_fills:
+                    raise ValueError("Historical strategy fills differ from committed cursor")
                 new_fills = expected_fills[previous_fill_count:]
                 for fill in new_fills:
                     if not isinstance(fill, dict) or fill.get("mode") != "paper":
