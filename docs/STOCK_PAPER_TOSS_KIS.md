@@ -211,24 +211,26 @@ credentials/IP allow API access. A future live read-only connector
 must confirm the canonical JSON schema, allowed IP, query budget,
 token handling, and market-data terms before production operation.
 
-## Opt-in Toss read-only OAuth quote collector (2026-11-20)
+## Opt-in Toss read-only quote collector with token reuse (2026-11-21)
 
-A separate `tools/toss_readonly_snapshot.py` collector now implements
-exactly **two** documented Toss Open API calls: OAuth token issuance
-(`POST /oauth2/token`) and one stock 1-minute-candle read
-(`GET /api/v1/candles`). It does **not** include any private-account,
-balance, or order endpoint. Automatic HTTP redirects are refused.
-There is no live trading mode and no automatic periodic service.
+`tools/toss_readonly_snapshot.py` reuses an operator-supplied access token
+for exactly **one** stock 1-minute-candle GET (`GET /api/v1/candles`).
+It requires no client ID or secret when a token is supplied. OAuth token
+issuance (`POST /oauth2/token`) is available only with explicit
+`--issue-token` opt-in and no supplied access token. These are the only
+two reachable API routes; there are no account, balance or order calls.
+Automatic redirects and environment-configured HTTP proxies are refused.
+There is no live trading mode or automatic periodic service.
 
-This is opt-in and requires the operator's own valid Toss developer
-credentials and allowed client IP configuration. Never put credentials
-in command-line options, Git, logged URLs, a public website, or ChatGPT.
-Use secured local environment variables:
+Use an access token provisioned through your own trusted local token
+workflow and an allowed client IP. Never put tokens or credentials in
+command-line options, Git, logged URLs, a public website, or ChatGPT.
+The token environment variable contains the token itself, without a
+`Bearer ` prefix:
 
 ```sh
 # Set locally in your private shell/session; do not paste credentials here.
-export TOSS_CLIENT_ID="your-local-client-id"
-export TOSS_CLIENT_SECRET="your-local-client-secret"
+export TOSS_ACCESS_TOKEN="your-locally-provisioned-access-token"
 
 python tools/toss_readonly_snapshot.py \
   --mode paper --allow-network-readonly \
@@ -237,22 +239,81 @@ python tools/toss_readonly_snapshot.py \
   --output data/toss-005930-authenticated-paper-bars.json
 ```
 
-Only the normalized paper OHLCV records are saved; OAuth secrets,
-bearer token, and raw market/account response are never placed in
-the resulting file. Every invocation issues a new OAuth token, which
-can invalidate previously issued tokens for the same client according
-to Toss's official token contract. **Do not** run this on a frequent
-scheduler until safe token caching/reuse, rate limiting, IP authorization,
-429 behavior, and multi-process coordination are implemented.
-The collector makes no automatic retry. Invalid prices, malformed
-currency, timezone-less timestamps, and no completed bars fail closed.
+The supplied token always takes precedence over client credentials and
+`--issue-token`. This includes credentials left in the environment from
+an earlier workflow: they are not used or validated on the reuse path.
+A supplied empty or malformed token is rejected before any request,
+even when issuance was opted into; it never triggers a fallback.
+
+### Deliberate one-shot issuance and migration
+
+**Existing commands that set only `TOSS_CLIENT_ID` and
+`TOSS_CLIENT_SECRET` now fail before network access.** Prefer adding
+`TOSS_ACCESS_TOKEN` from your existing token workflow. If a new issuance
+is deliberate, unset that variable and add `--issue-token`:
+
+```sh
+# Issuing a new token immediately invalidates the client's previous token.
+unset TOSS_ACCESS_TOKEN
+export TOSS_CLIENT_ID="your-local-client-id"
+export TOSS_CLIENT_SECRET="your-local-client-secret"
+
+python tools/toss_readonly_snapshot.py \
+  --mode paper --allow-network-readonly --issue-token \
+  --symbol 005930 --currency KRW \
+  --count 100 --adjusted true \
+  --output data/toss-005930-new-token-paper-bars.json
+```
+
+The [official Toss FAQ](https://openapi.tossinvest.com/openapi-docs/faq.md)
+states that each client has one active access token and issuing another
+immediately invalidates the previous one. Coordinate deliberate issuance
+with other processes using that client. A newly issued token remains in
+memory for this invocation; it is not printed, returned in the snapshot,
+or saved in a disk cache. This one-shot option does not provision a
+reusable token file for later runs.
+
+Python callers have the same migration: use
+`fetch_readonly_minute(..., access_token=existing_token)`, or explicitly
+set `issue_token=True` with client credentials. The default is
+`issue_token=False`. If both paths are configured, the supplied token
+wins and only the candle GET is sent.
+
+### Failure handling and saved evidence
+
+All credential and request inputs used by the selected path are checked
+before HTTP. Supplied observation timestamps must be timezone aware.
+Bearer tokens follow the
+[RFC 6750 section 2.1 character grammar](https://www.rfc-editor.org/rfc/rfc6750#section-2.1)
+with a local limit of 4,096 characters. Issuance credentials are bounded
+to 4,096 printable ASCII characters each and must not be blank. These
+are collector validation limits, not claims about broker token sizes.
+Control characters, line breaks and header injection are rejected.
+
+The collector never retries, refreshes or reissues a token after a failed
+GET, including HTTP 401, 403, 429 or 5xx responses and malformed payloads.
+For a revoked or expired token, stop and update it through the operator's
+token workflow; the collector does not change other processes' token
+state to recover. Reuse removes per-snapshot rotation, but rate limiting,
+expiry coordination, 429 handling and multi-process scheduling still
+need an operating design before frequent unattended collection.
+
+Only normalized paper OHLCV records are saved. OAuth credentials, bearer
+tokens and raw market/account responses are excluded, and CLI failures
+use generic text that does not echo upstream errors. Snapshot files are
+created exclusively with mode `0600`; existing output paths, including
+dangling final symlinks, are rejected before any HTTP. An existing non-directory
+ancestor also fails before HTTP; this check does not guarantee later write
+permissions or prevent filesystem changes after preflight. There is no token
+cache. Invalid prices, malformed currency, timezone-less source
+timestamps and no completed bars fail closed.
 
 The real API path has **not** been exercised against a connected Toss
 account, so successful data retrieval and production behavior remain
-unverified. Tests inject an offline fake network adapter and ensure only
-the OAuth and read-only candle URLs are invoked. Data acquisition is
-separate from the stock paper ledger, and imported bars do not trigger
-simulated orders automatically.
+unverified. Tests use offline transports and cover GET-only reuse,
+explicit POST+GET issuance, failed-request behavior, and proxy/redirect
+refusal. Data acquisition is separate from the stock paper ledger, and
+imported bars do not trigger simulated orders automatically.
 
 Official source of truth: <https://openapi.tossinvest.com/openapi-docs/latest/api-reference/README.md>
 and <https://openapi.tossinvest.com/openapi-docs/latest/api-reference/Apis/MarketDataApi.md>.

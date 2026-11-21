@@ -1,0 +1,42 @@
+{
+  "mode": "paper",
+  "provider": "kis_vts",
+  "submitted": false,
+  "live_orders_enabled": false,
+  "client_order_id": "synthetic-ma-45-sell",
+  "client_order_id_scope": "local_correlation_only",
+  "order": {
+    "symbol": "005930",
+    "side": "sell",
+    "quantity": 2,
+    "limit_price": "81602",
+    "max_notional": "1000000",
+    "notional": "163204",
+    "market": "KRX",
+    "currency": "KRW"
+  },
+  "request_template": {
+    "method": "POST",
+    "base_url": "https://openapivts.koreainvestment.com:29443",
+    "path": "/uapi/domestic-stock/v1/trading/order-cash",
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "authorization": "Bearer ${KIS_VTS_ACCESS_TOKEN}",
+      "appkey": "${KIS_VTS_APPKEY}",
+      "appsecret": "${KIS_VTS_APPSECRET}",
+      "tr_id": "VTTC0011U",
+      "custtype": "P"
+    },
+    "body": {
+      "CANO": "${KIS_VTS_CANO}",
+      "ACNT_PRDT_CD": "${KIS_VTS_ACNT_PRDT_CD}",
+      "PDNO": "005930",
+      "ORD_DVSN": "00",
+      "ORD_QTY": "2",
+      "ORD_UNPR": "81602",
+      "SLL_TYPE": "01",
+      "EXCG_ID_DVSN_CD": "KRX",
+      "CNDT_PRIC": ""
+    }
+  }
+}

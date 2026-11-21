@@ -13,13 +13,36 @@ python tools/offline_checks.py --include-backtest
 ```
 
 주식 전략은 KRW와 USD 원장을 각각 저장하며, 같은 데이터를 다시 실행해도
-가상 체결이 중복되지 않습니다. 토스는 읽기 전용 시세 수집, KIS는 모의투자
-서버의 읽기 전용 현재가 조회까지 구현되어 있습니다. 실제 인증·시세 대조와
-KIS 모의 주문 체결은 아직 검증되지 않았습니다.
+가상 체결이 중복되지 않습니다. 토스는 기존 토큰을 재사용하는 읽기 전용
+시세 수집, KIS는 모의투자 서버의 읽기 전용 현재가 조회와 오프라인 지정가
+주문 준비 기능을 제공합니다. 실제 인증·시세 대조와 KIS 모의 주문 체결은
+아직 검증되지 않았습니다.
 
-- [최신 검증 결과와 재현 명령](docs/VERIFICATION_2026_11_21.md)
+- [토큰 재사용·KIS 주문 준비의 최신 검증 결과](docs/BROKER_PREPARATION_VERIFICATION_2026_11_21.md)
+- [모의 원장·재시작·백업 검증 결과](docs/VERIFICATION_2026_11_21.md)
 - [주식 모의매매 실행·감사·HTML 가이드](docs/STOCK_PAPER_FORWARD_RUNBOOK.md)
 - [토스 시세 계약과 15:30 집계봉 제외 정책](docs/STOCK_PAPER_TOSS_KIS.md)
+- [KIS 모의 지정가 주문 준비·응답 분류](docs/KIS_VTS_ORDER_PLAN.md)
+
+### API 키 없이 KIS 모의주문 준비
+
+```sh
+# 예시 가격으로 요청 양식만 생성합니다. 주문을 전송하지 않습니다.
+mkdir -p data
+python tools/kis_vts_order_plan.py --mode paper \
+  --client-order-id demo-005930-buy-001 --symbol 005930 --side buy \
+  --quantity 1 --limit-price 70000 --max-notional 100000 \
+  --output data/kis-vts-buy-plan.json
+```
+
+계좌번호와 인증 정보는 환경변수 이름으로 표시됩니다. 생성된 파일은 검토용
+요청 양식이며, 같은 client ID를 지정해도 증권사 중복 방지가 보장되는 것은
+아닙니다. 주문 접수·거절·결과 불명 분류기는 체결이나 잔고를 변경하지 않습니다.
+
+토스 반복 수집은 로컬 실행 환경의 `TOSS_ACCESS_TOKEN`을 재사용합니다.
+기존 client ID/secret만 넣던 실행은 이제 새 토큰 발급에 `--issue-token`을
+명시해야 합니다. 토큰 갱신이 다른 프로세스의 인증에 영향을 주므로 오류 후
+자동 재발급은 하지 않습니다.
 
 ## Verified offline paper workflow
 
