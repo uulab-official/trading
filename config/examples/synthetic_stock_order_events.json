@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "mode": "paper",
+  "provenance": "synthetic_stock_order_events",
+  "account_ref": "demo-stock-orders",
+  "warning": "Synthetic event and price examples; no actual broker requests or execution evidence",
+  "events": [
+    {"event_id": "buy.reserve", "kind": "reserve", "client_order_id": "stock-buy-001", "data": {"order_date": "2026-11-20", "symbol": "005930", "side": "buy", "quantity": 10, "limit_price": "10000", "max_notional": "100000"}},
+    {"event_id": "buy.uncertain", "kind": "submission_uncertain", "client_order_id": "stock-buy-001", "data": {}},
+    {"event_id": "buy.ack", "kind": "acknowledge", "client_order_id": "stock-buy-001", "data": {"broker_order_id": "0000000001", "broker_org_no": "06010"}},
+    {"event_id": "buy.fill.1", "kind": "fill", "client_order_id": "stock-buy-001", "data": {"execution_id": "fill-buy-1", "quantity": 3, "price": "9900", "fee_krw": "30", "tax_krw": "0"}},
+    {"event_id": "buy.fill.redelivered", "kind": "fill", "client_order_id": "stock-buy-001", "data": {"execution_id": "fill-buy-1", "quantity": 3, "price": "9900", "fee_krw": "30", "tax_krw": "0"}},
+    {"event_id": "buy.cancel.request", "kind": "cancel_requested", "client_order_id": "stock-buy-001", "data": {}},
+    {"event_id": "buy.fill.2", "kind": "fill", "client_order_id": "stock-buy-001", "data": {"execution_id": "fill-buy-2", "quantity": 2, "price": "10000", "fee_krw": "20", "tax_krw": "0"}},
+    {"event_id": "buy.cancel.confirm", "kind": "canceled", "client_order_id": "stock-buy-001", "data": {"evidence_id": "sim-cancel-buy"}},
+    {"event_id": "buy.fill.after.cancel", "kind": "fill", "client_order_id": "stock-buy-001", "data": {"execution_id": "fill-buy-1", "quantity": 3, "price": "9900", "fee_krw": "30", "tax_krw": "0"}},
+    {"event_id": "sell.reserve", "kind": "reserve", "client_order_id": "stock-sell-001", "data": {"order_date": "2026-11-20", "symbol": "005930", "side": "sell", "quantity": 5, "limit_price": "11000", "max_notional": "55000"}},
+    {"event_id": "sell.ack", "kind": "acknowledge", "client_order_id": "stock-sell-001", "data": {"broker_order_id": "0000000002", "broker_org_no": "06010"}},
+    {"event_id": "sell.fill.1", "kind": "fill", "client_order_id": "stock-sell-001", "data": {"execution_id": "fill-sell-1", "quantity": 2, "price": "11100", "fee_krw": "22", "tax_krw": "44"}},
+    {"event_id": "sell.cancel.request", "kind": "cancel_requested", "client_order_id": "stock-sell-001", "data": {}},
+    {"event_id": "sell.fill.2", "kind": "fill", "client_order_id": "stock-sell-001", "data": {"execution_id": "fill-sell-2", "quantity": 3, "price": "11000", "fee_krw": "33", "tax_krw": "66"}}
+  ]
+}

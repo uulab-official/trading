@@ -8,16 +8,23 @@
 # API 키 없이 합성 55개 분봉으로 실행 → 재시작 → 감사 → 백업 → HTML 검증
 python tools/stock_paper_smoke.py
 
+# 주문 결과 불명 → 부분 체결 → 취소 경합 → 재시작·중복 통지 검증
+python tools/stock_order_lifecycle_smoke.py
+
 # 네트워크와 DNS를 차단한 전체 오프라인 검증 (백테스트 의존성 필요)
 python tools/offline_checks.py --include-backtest
 ```
 
 주식 전략은 KRW와 USD 원장을 각각 저장하며, 같은 데이터를 다시 실행해도
 가상 체결이 중복되지 않습니다. 토스는 기존 토큰을 재사용하는 읽기 전용
-시세 수집, KIS는 모의투자 서버의 읽기 전용 현재가 조회와 오프라인 지정가
-주문 준비 기능을 제공합니다. 실제 인증·시세 대조와 KIS 모의 주문 체결은
-아직 검증되지 않았습니다.
+시세 수집, KIS는 모의투자 서버의 읽기 전용 현재가·일별 주문 내역 조회와
+오프라인 지정가 주문 준비 기능을 제공합니다. 별도 주식 주문 이벤트 저널은
+부분 체결·취소·결과 불명 상태를 SQLite에 저장하고 재시작 때 재검증합니다.
+실제 인증·시세 대조와 KIS 모의 주문 체결은 아직 검증되지 않았습니다.
 
+- [주식 주문 생명주기·KIS 주문 조회 검증 결과](docs/STOCK_ORDER_LIFECYCLE_VERIFICATION_2026_11_21.md)
+- [주식 주문 이벤트 저널·합성 시나리오 실행](docs/STOCK_ORDER_LIFECYCLE.md)
+- [KIS 모의 계좌의 읽기 전용 일별 주문 조회](docs/KIS_VTS_ORDER_SNAPSHOT.md)
 - [토큰 재사용·KIS 주문 준비의 최신 검증 결과](docs/BROKER_PREPARATION_VERIFICATION_2026_11_21.md)
 - [모의 원장·재시작·백업 검증 결과](docs/VERIFICATION_2026_11_21.md)
 - [주식 모의매매 실행·감사·HTML 가이드](docs/STOCK_PAPER_FORWARD_RUNBOOK.md)
@@ -43,6 +50,31 @@ python tools/kis_vts_order_plan.py --mode paper \
 기존 client ID/secret만 넣던 실행은 이제 새 토큰 발급에 `--issue-token`을
 명시해야 합니다. 토큰 갱신이 다른 프로세스의 인증에 영향을 주므로 오류 후
 자동 재발급은 하지 않습니다.
+
+### API 키 없이 부분 체결·취소·재시작 테스트
+
+```sh
+# 결과만 출력하고 임시 DB는 정리합니다.
+python -B -S tools/stock_order_lifecycle_smoke.py
+
+# 새 디렉터리에 합성 DB와 상세 JSON 보고서를 남깁니다.
+mkdir -p data
+python -B -S tools/stock_order_lifecycle_smoke.py --output-dir data/order-lifecycle-demo
+python -B -S tools/stock_order_journal.py --mode paper status \
+  --database data/order-lifecycle-demo/journal.sqlite --account-ref demo-stock-orders
+```
+
+고정 합성 시나리오는 이벤트 14개, 중복을 제외한 체결 4건을 만듭니다.
+매수 10주 중 5주 체결 후 잔여 5주를 취소하고, 이후 5주 매도가 취소 대기 중
+모두 체결되는 경합을 검증합니다. 최종 현금 변화는 비용 차감 후 5,285원,
+주식 수량 변화는 0주입니다. 이 수치는 합성 입력의 계산 결과이며 실제 잔고나
+투자 성과가 아닙니다. [상세 실행 결과](docs/examples/stock_order_lifecycle_report.json)를
+확인할 수 있습니다.
+
+KIS 일별 주문 조회는 기존 VTS 인증 정보로 별도 실행합니다. 모든 페이지를
+검증한 관측값만 저장하며, 누적 주문 내역을 개별 체결로 바꾸거나 위 저널에
+자동 반영하지 않습니다. [조회 가이드](docs/KIS_VTS_ORDER_SNAPSHOT.md)에
+환경변수·명령·제한 사항을 정리했습니다.
 
 ## Verified offline paper workflow
 

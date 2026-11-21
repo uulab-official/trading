@@ -62,6 +62,7 @@ may automatically enable live order placement.
 - [x] Saved Toss 1m JSON parser with closing-time to opening-time conversion
 - [x] KRW 15:30 aggregates excluded from fixed-minute replay to avoid later-trade leakage
 - [x] Opt-in Toss OAuth + read-only candle collector (code only; genuine authenticated endpoint not yet exercised)
+- [x] Existing Toss access-token reuse, explicit opt-in for new issuance, and no automatic refresh/retry (mock verified)
 - [x] Completed-bar MA-cross paper stock backtest with next-available-open fills
 - [x] Transactional completed-bar stock strategy cursor and simulated fills in SQLite
 - [x] Exact committed-cursor fill reconciliation rejects deleted or extra historical fills
@@ -84,6 +85,8 @@ may automatically enable live order placement.
 - [ ] Unified market risk controls across simulated stock and crypto ledgers
 - [ ] Connect authenticated read-only Toss stock data to validated paper candles
 - [x] KIS VTS-host-only current-price read-only probe with mock tests (actual API not yet exercised)
+- [x] Pure KIS VTS limit-order preparation and unverified response classification without order transport
+- [x] KIS VTS read-only daily-order observation with bounded complete pagination and private-field filtering (mock verified; actual account unvalidated)
 - [ ] Validate KIS official virtual-trading API end-to-end
 - [ ] Exchange-specific symbol and step/min-notional filters
 - [ ] Clock and nonce, API authentication, and least-privilege credentials
@@ -96,6 +99,9 @@ may automatically enable live order placement.
 - [ ] Integrate journal BEFORE network submission in a verified broker sandbox adapter (not connected yet)
 - [ ] Broker idempotency: client IDs, unknown-result lookup, deduplication
 - [x] Offline synthetic broker emulator and regression tests for partial fills, cancellation, lost ACK and overfill refusal
+- [x] Separate durable offline stock-order event journal with exact KRW deltas, partial fills, cancellation races and duplicate delivery protection
+- [x] Stock-order journal replay/hash/tail audits, concurrent writers, rollback and real process-exit recovery tests
+- [x] Stock-order init/record/read-only status CLI and a 14-event synthetic lifecycle demonstration with four unique executions
 - [ ] Actual broker partial fills, cancel/replace, timeout, reconnect, and retry semantics (not connected)
 - [ ] Fail-closed start: no new orders until all prior intents reconcile
 - [ ] Explicit operator kill switch, exits and exposure reduction drill

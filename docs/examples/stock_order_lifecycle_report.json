@@ -1,0 +1,265 @@
+{
+  "snapshot": {
+    "account_ref": "demo-stock-orders",
+    "blocked": false,
+    "cash_delta_krw": "5285",
+    "currency": "KRW",
+    "event_count": 14,
+    "execution_count": 4,
+    "live_orders_enabled": false,
+    "market": "KRX",
+    "mode": "paper",
+    "orders": [
+      {
+        "broker_order_id": "0000000001",
+        "broker_org_no": "06010",
+        "cash_delta_krw": "-49750",
+        "client_order_id": "stock-buy-001",
+        "executions": [
+          {
+            "cash_delta_krw": "-29730",
+            "execution_id": "fill-buy-1",
+            "fee_krw": "30",
+            "gross_krw": "29700",
+            "price": "9900",
+            "quantity": 3,
+            "tax_krw": "0"
+          },
+          {
+            "cash_delta_krw": "-20020",
+            "execution_id": "fill-buy-2",
+            "fee_krw": "20",
+            "gross_krw": "20000",
+            "price": "10000",
+            "quantity": 2,
+            "tax_krw": "0"
+          }
+        ],
+        "fee_krw": "50",
+        "filled_quantity": 5,
+        "gross_krw": "49700",
+        "limit_price": "10000",
+        "max_notional": "100000",
+        "order_date": "2026-11-20",
+        "quantity": 10,
+        "side": "buy",
+        "status": "canceled",
+        "symbol": "005930",
+        "tax_krw": "0",
+        "unfilled_quantity": 5,
+        "working_quantity": 0
+      },
+      {
+        "broker_order_id": "0000000002",
+        "broker_org_no": "06010",
+        "cash_delta_krw": "55035",
+        "client_order_id": "stock-sell-001",
+        "executions": [
+          {
+            "cash_delta_krw": "22134",
+            "execution_id": "fill-sell-1",
+            "fee_krw": "22",
+            "gross_krw": "22200",
+            "price": "11100",
+            "quantity": 2,
+            "tax_krw": "44"
+          },
+          {
+            "cash_delta_krw": "32901",
+            "execution_id": "fill-sell-2",
+            "fee_krw": "33",
+            "gross_krw": "33000",
+            "price": "11000",
+            "quantity": 3,
+            "tax_krw": "66"
+          }
+        ],
+        "fee_krw": "55",
+        "filled_quantity": 5,
+        "gross_krw": "55200",
+        "limit_price": "11000",
+        "max_notional": "55000",
+        "order_date": "2026-11-20",
+        "quantity": 5,
+        "side": "sell",
+        "status": "filled",
+        "symbol": "005930",
+        "tax_krw": "110",
+        "unfilled_quantity": 0,
+        "working_quantity": 0
+      }
+    ],
+    "pending_client_order_ids": [],
+    "position_deltas": {},
+    "provenance": "synthetic_or_caller_supplied_unverified"
+  },
+  "summary": {
+    "actual_broker_requests": 0,
+    "artifacts_retained": true,
+    "cash_delta_krw": "5285",
+    "checks": {
+      "accepted_order_blocks_new_intent": true,
+      "cancel_after_full_fill_refused": true,
+      "duplicate_replay_idempotent": true,
+      "late_fill_after_cancel_refused": true,
+      "overfill_refused": true,
+      "read_only_write_refused": true,
+      "reopen_after_each_event": true,
+      "uncertain_submission_blocked": true
+    },
+    "executions": 4,
+    "live_orders_enabled": false,
+    "mode": "paper",
+    "order_states": {
+      "stock-buy-001": "canceled",
+      "stock-sell-001": "filled"
+    },
+    "position_deltas": {},
+    "provenance": "synthetic_stock_order_events",
+    "recorded_events": 14,
+    "status": "synthetic_stock_order_lifecycle_verified",
+    "warning": "Synthetic events; deltas are not account balances or investment performance"
+  },
+  "trace": [
+    {
+      "cash_delta_krw": "0",
+      "client_order_id": "stock-buy-001",
+      "event_id": "buy.reserve",
+      "execution_count": 0,
+      "filled_quantity": 0,
+      "kind": "reserve",
+      "status": "reserved",
+      "working_quantity": 10
+    },
+    {
+      "cash_delta_krw": "0",
+      "client_order_id": "stock-buy-001",
+      "event_id": "buy.uncertain",
+      "execution_count": 0,
+      "filled_quantity": 0,
+      "kind": "submission_uncertain",
+      "status": "uncertain",
+      "working_quantity": 10
+    },
+    {
+      "cash_delta_krw": "0",
+      "client_order_id": "stock-buy-001",
+      "event_id": "buy.ack",
+      "execution_count": 0,
+      "filled_quantity": 0,
+      "kind": "acknowledge",
+      "status": "accepted",
+      "working_quantity": 10
+    },
+    {
+      "cash_delta_krw": "-29730",
+      "client_order_id": "stock-buy-001",
+      "event_id": "buy.fill.1",
+      "execution_count": 1,
+      "filled_quantity": 3,
+      "kind": "fill",
+      "status": "partially_filled",
+      "working_quantity": 7
+    },
+    {
+      "cash_delta_krw": "-29730",
+      "client_order_id": "stock-buy-001",
+      "event_id": "buy.fill.redelivered",
+      "execution_count": 1,
+      "filled_quantity": 3,
+      "kind": "fill",
+      "status": "partially_filled",
+      "working_quantity": 7
+    },
+    {
+      "cash_delta_krw": "-29730",
+      "client_order_id": "stock-buy-001",
+      "event_id": "buy.cancel.request",
+      "execution_count": 1,
+      "filled_quantity": 3,
+      "kind": "cancel_requested",
+      "status": "cancel_pending",
+      "working_quantity": 7
+    },
+    {
+      "cash_delta_krw": "-49750",
+      "client_order_id": "stock-buy-001",
+      "event_id": "buy.fill.2",
+      "execution_count": 2,
+      "filled_quantity": 5,
+      "kind": "fill",
+      "status": "cancel_pending",
+      "working_quantity": 5
+    },
+    {
+      "cash_delta_krw": "-49750",
+      "client_order_id": "stock-buy-001",
+      "event_id": "buy.cancel.confirm",
+      "execution_count": 2,
+      "filled_quantity": 5,
+      "kind": "canceled",
+      "status": "canceled",
+      "working_quantity": 0
+    },
+    {
+      "cash_delta_krw": "-49750",
+      "client_order_id": "stock-buy-001",
+      "event_id": "buy.fill.after.cancel",
+      "execution_count": 2,
+      "filled_quantity": 5,
+      "kind": "fill",
+      "status": "canceled",
+      "working_quantity": 0
+    },
+    {
+      "cash_delta_krw": "-49750",
+      "client_order_id": "stock-sell-001",
+      "event_id": "sell.reserve",
+      "execution_count": 2,
+      "filled_quantity": 0,
+      "kind": "reserve",
+      "status": "reserved",
+      "working_quantity": 5
+    },
+    {
+      "cash_delta_krw": "-49750",
+      "client_order_id": "stock-sell-001",
+      "event_id": "sell.ack",
+      "execution_count": 2,
+      "filled_quantity": 0,
+      "kind": "acknowledge",
+      "status": "accepted",
+      "working_quantity": 5
+    },
+    {
+      "cash_delta_krw": "-27616",
+      "client_order_id": "stock-sell-001",
+      "event_id": "sell.fill.1",
+      "execution_count": 3,
+      "filled_quantity": 2,
+      "kind": "fill",
+      "status": "partially_filled",
+      "working_quantity": 3
+    },
+    {
+      "cash_delta_krw": "-27616",
+      "client_order_id": "stock-sell-001",
+      "event_id": "sell.cancel.request",
+      "execution_count": 3,
+      "filled_quantity": 2,
+      "kind": "cancel_requested",
+      "status": "cancel_pending",
+      "working_quantity": 3
+    },
+    {
+      "cash_delta_krw": "5285",
+      "client_order_id": "stock-sell-001",
+      "event_id": "sell.fill.2",
+      "execution_count": 4,
+      "filled_quantity": 5,
+      "kind": "fill",
+      "status": "filled",
+      "working_quantity": 0
+    }
+  ]
+}
