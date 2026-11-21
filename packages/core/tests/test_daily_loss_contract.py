@@ -1,8 +1,8 @@
 """Offline realized-loss limits through the legacy Portfolio/RiskManager API."""
 
-from datetime import datetime, timedelta
-from decimal import Decimal
 import unittest
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from unittest.mock import patch
 
 from trading_core.portfolio import Portfolio
@@ -12,15 +12,22 @@ from trading_core.risk_manager import RiskConfig, RiskManager
 class DailyLossContractTests(unittest.TestCase):
     def setUp(self):
         for target in ("socket.socket.connect", "socket.create_connection", "socket.getaddrinfo"):
-            guard = patch(target, side_effect=AssertionError("Risk contract checks forbid network/DNS"))
+            guard = patch(
+                target, side_effect=AssertionError("Risk contract checks forbid network/DNS")
+            )
             guard.start()
             self.addCleanup(guard.stop)
 
     def realize(self, pnl, *, daily_limit="3", circuit_limit="100"):
         portfolio = Portfolio(initial_balance=Decimal("1000"))
-        manager = RiskManager(RiskConfig(max_daily_loss_pct=Decimal(daily_limit),
-                                        circuit_breaker_loss_pct=Decimal(circuit_limit),
-                                        cooldown_minutes_after_loss=0), portfolio)
+        manager = RiskManager(
+            RiskConfig(
+                max_daily_loss_pct=Decimal(daily_limit),
+                circuit_breaker_loss_pct=Decimal(circuit_limit),
+                cooldown_minutes_after_loss=0,
+            ),
+            portfolio,
+        )
         portfolio.open_position("BTC/USDT", "long", Decimal("1"), Decimal("100"))
         trade = portfolio.close_position("BTC/USDT", Decimal("100") + Decimal(pnl))
         manager.on_position_closed(trade.pnl)
@@ -41,7 +48,9 @@ class DailyLossContractTests(unittest.TestCase):
         for pnl, expected in (("-29.9", True), ("-30", False), ("-30.1", False)):
             with self.subTest(pnl=pnl):
                 _, manager = self.realize(pnl)
-                allowed, reason = manager.check_trade_allowed("ETH/USDT", "buy", Decimal("0.1"), Decimal("100"))
+                allowed, reason = manager.check_trade_allowed(
+                    "ETH/USDT", "buy", Decimal("0.1"), Decimal("100")
+                )
                 self.assertEqual(allowed, expected, reason)
                 self.assertEqual(reason == "OK", expected)
                 if not expected:
@@ -55,7 +64,10 @@ class DailyLossContractTests(unittest.TestCase):
 
     def test_profit_never_trips_daily_loss_limit(self):
         _, manager = self.realize("50", circuit_limit="5")
-        self.assertEqual(manager.check_trade_allowed("ETH/USDT", "buy", Decimal("0.1"), Decimal("100")), (True, "OK"))
+        self.assertEqual(
+            manager.check_trade_allowed("ETH/USDT", "buy", Decimal("0.1"), Decimal("100")),
+            (True, "OK"),
+        )
 
     def test_unrealized_marks_do_not_change_realized_daily_loss_contract(self):
         portfolio = Portfolio(initial_balance=Decimal("1000"))
@@ -68,11 +80,18 @@ class DailyLossContractTests(unittest.TestCase):
 
     def test_explicit_daily_reset_rebases_realized_loss_without_changing_cash(self):
         now = datetime(2026, 10, 4, 12)
+
         class Clock(datetime):
             @classmethod
-            def utcnow(cls):
-                return now
-        with patch("trading_core.risk_manager.datetime", Clock), patch("trading_core.portfolio.datetime", Clock):
+            def now(cls, tz=None):
+                if tz is not None:
+                    return now.replace(tzinfo=timezone.utc).astimezone(tz)
+                return now + timedelta(hours=9)
+
+        with (
+            patch("trading_core.risk_manager.datetime", Clock),
+            patch("trading_core.portfolio.datetime", Clock),
+        ):
             portfolio, manager = self.realize("-50", circuit_limit="5")
             manager.reset_daily_stats()
             self.assertEqual(portfolio.get_daily_loss_pct(), Decimal("5"))

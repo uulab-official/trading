@@ -3,11 +3,12 @@
 Never fetches market data or places broker orders. Signals use bars through
 i-1 and simulated fills execute at the next available bar i open.
 """
+
 import argparse
-from decimal import Decimal, ROUND_DOWN, localcontext, Context
 import json
-from pathlib import Path
 import sys
+from decimal import ROUND_DOWN, Context, Decimal, localcontext
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages/core"))
@@ -16,20 +17,26 @@ from trading_core.stock_paper import StockPaperBook, _amount
 from trading_data import Candle
 
 
-def run_backtest(fixture, *, initial_cash, fee_pct="0.1",
-                 fast=5, slow=20, allocation_pct="20"):
+def run_backtest(fixture, *, initial_cash, fee_pct="0.1", fast=5, slow=20, allocation_pct="20"):
     with localcontext(Context(prec=28)):
         return _run_backtest(
-            fixture, initial_cash=initial_cash, fee_pct=fee_pct,
-            fast=fast, slow=slow, allocation_pct=allocation_pct
+            fixture,
+            initial_cash=initial_cash,
+            fee_pct=fee_pct,
+            fast=fast,
+            slow=slow,
+            allocation_pct=allocation_pct,
         )
 
 
 def _run_backtest(fixture, *, initial_cash, fee_pct, fast, slow, allocation_pct):
     if not isinstance(fixture, dict) or fixture.get("mode") != "paper":
         raise ValueError("Only paper stock fixtures supported")
-    if (fixture.get("interval") != "1m" or fixture.get("no_live_orders") is not True
-            or fixture.get("timestamp_semantics") != "source_close_to_utc_open"):
+    if (
+        fixture.get("interval") != "1m"
+        or fixture.get("no_live_orders") is not True
+        or fixture.get("timestamp_semantics") != "source_close_to_utc_open"
+    ):
         raise ValueError("Fixture must originate from verified 1m Toss paper normalization")
     symbol = fixture.get("symbol")
     currency = fixture.get("quote_currency")
@@ -58,10 +65,10 @@ def _run_backtest(fixture, *, initial_cash, fee_pct, fast, slow, allocation_pct)
     for index in range(slow + 1, len(history)):
         # Previous MA uses bars up to i-2, current MA uses up to i-1.
         # No current-bar high, low, close or volume influences a fill.
-        previous_fast = sum(closing[index - fast - 1:index - 1]) / fast
-        previous_slow = sum(closing[index - slow - 1:index - 1]) / slow
-        current_fast = sum(closing[index - fast:index]) / fast
-        current_slow = sum(closing[index - slow:index]) / slow
+        previous_fast = sum(closing[index - fast - 1 : index - 1]) / fast
+        previous_slow = sum(closing[index - slow - 1 : index - 1]) / slow
+        current_fast = sum(closing[index - fast : index]) / fast
+        current_slow = sum(closing[index - slow : index]) / slow
         if previous_fast <= previous_slow and current_fast > current_slow:
             price = history[index].open
             budget = book.cash * allocation / 100
@@ -72,21 +79,24 @@ def _run_backtest(fixture, *, initial_cash, fee_pct, fast, slow, allocation_pct)
         elif previous_fast >= previous_slow and current_fast < current_slow:
             shares = book.holdings.get(symbol, 0)
             if shares:
-                book.execute(f"ma-{index}-sell", symbol, "sell", shares,
-                             price=history[index].open)
+                book.execute(f"ma-{index}-sell", symbol, "sell", shares, price=history[index].open)
     equity = book.marked_equity({symbol: history[-1].close})
     original = _amount(initial_cash)
     return {
         "mode": "paper",
         "live_orders_enabled": False,
         "strategy": f"MA cross {fast}/{slow}",
-        "symbol": symbol, "quote_currency": currency,
-        "bars": len(history), "cash": str(book.cash),
-        "holdings": dict(book.holdings), "marked_equity": str(equity),
+        "symbol": symbol,
+        "quote_currency": currency,
+        "bars": len(history),
+        "cash": str(book.cash),
+        "holdings": dict(book.holdings),
+        "marked_equity": str(equity),
         "total_return_pct": str((equity - original) / original * 100),
         "simulated_fills": book.fills,
         "assumptions": {
-            "fee_pct": str(book.fee_pct), "allocation_pct": str(allocation),
+            "fee_pct": str(book.fee_pct),
+            "allocation_pct": str(allocation),
             "signal": "previous completed close",
             "execution": "next available bar open",
             "market_impact": "not modeled",
@@ -109,9 +119,14 @@ def main(argv=None):
         raw = args.fixture.read_bytes()
         if len(raw) > 10_000_000:
             raise ValueError("Fixture exceeds offline input limit")
-        result = run_backtest(json.loads(raw), initial_cash=args.initial_cash,
-                              fee_pct=args.fee_pct, fast=args.fast, slow=args.slow,
-                              allocation_pct=args.allocation_pct)
+        result = run_backtest(
+            json.loads(raw),
+            initial_cash=args.initial_cash,
+            fee_pct=args.fee_pct,
+            fast=args.fast,
+            slow=args.slow,
+            allocation_pct=args.allocation_pct,
+        )
     except (ValueError, OSError, KeyError, TypeError, ArithmeticError):
         print("Paper stock backtest rejected unsafe or invalid input.", file=sys.stderr)
         return 2

@@ -1,13 +1,9 @@
 """The all-paper entrypoint composes real ledgers, audits and retained reports."""
 
-from copy import deepcopy
-from datetime import datetime, timezone
-from html.parser import HTMLParser
 import importlib
 import io
 import json
 import os
-from pathlib import Path
 import socket
 import stat
 import subprocess
@@ -15,8 +11,11 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from copy import deepcopy
+from datetime import datetime, timezone
+from html.parser import HTMLParser
+from pathlib import Path
 from unittest.mock import patch
-
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
@@ -45,8 +44,10 @@ class PaperLabTests(unittest.TestCase):
 
     def test_retained_lab_has_three_audited_books_and_recovery_evidence(self):
         output = self.root / "run"
-        with patch.dict(os.environ, {"TOSS_ACCESS_TOKEN": "DO-NOT-PRINT-SECRET",
-                                     "KIS_VTS_CANO": "DO-NOT-PRINT-ACCOUNT"}):
+        with patch.dict(
+            os.environ,
+            {"TOSS_ACCESS_TOKEN": "DO-NOT-PRINT-SECRET", "KIS_VTS_CANO": "DO-NOT-PRINT-ACCOUNT"},
+        ):
             result = self.lab().run_lab(output, now=CLOCK)
         self.assertEqual("synthetic_paper_lab_verified", result["status"])
         self.assertEqual("paper", result["mode"])
@@ -99,12 +100,17 @@ class PaperLabTests(unittest.TestCase):
             self.assertNotIn(":", link)
             self.assertFalse(link.startswith(("/", "..")))
             self.assertTrue((output / link).is_file(), link)
-        self.assertFalse(any(tag in ("script", "iframe", "img", "form", "link")
-                             for tag, _ in parsed.tags))
-        self.assertTrue(any(tag == "html" and attrs.get("lang") == "ko"
-                            for tag, attrs in parsed.tags))
-        csp = next(attrs["content"] for tag, attrs in parsed.tags if tag == "meta"
-                   and attrs.get("http-equiv") == "Content-Security-Policy")
+        self.assertFalse(
+            any(tag in ("script", "iframe", "img", "form", "link") for tag, _ in parsed.tags)
+        )
+        self.assertTrue(
+            any(tag == "html" and attrs.get("lang") == "ko" for tag, attrs in parsed.tags)
+        )
+        csp = next(
+            attrs["content"]
+            for tag, attrs in parsed.tags
+            if tag == "meta" and attrs.get("http-equiv") == "Content-Security-Policy"
+        )
         self.assertIn("default-src 'none'", csp)
         self.assertIn("form-action 'none'", csp)
         self.assertIn("합성", page)
@@ -112,8 +118,10 @@ class PaperLabTests(unittest.TestCase):
         self.assertIn("인증", page)
         for report_page in output.rglob("*.html"):
             contents = report_page.read_text()
-            self.assertTrue("합성" in contents or "synthetic" in contents.lower(),
-                            "Standalone synthetic context missing from " + report_page.name)
+            self.assertTrue(
+                "합성" in contents or "synthetic" in contents.lower(),
+                "Standalone synthetic context missing from " + report_page.name,
+            )
 
     def test_default_is_temporary_and_restores_runtime_network_functions(self):
         lab = self.lab()
@@ -121,8 +129,12 @@ class PaperLabTests(unittest.TestCase):
         before = set(self.root.iterdir())
         result = lab.run_lab(now=CLOCK)
         self.assertIs(result["artifacts_retained"], False)
-        self.assertTrue(all(component.get("artifacts_retained", False) is False
-                            for component in result["components"].values()))
+        self.assertTrue(
+            all(
+                component.get("artifacts_retained", False) is False
+                for component in result["components"].values()
+            )
+        )
         self.assertEqual(before, set(self.root.iterdir()))
         self.assertIs(socket.socket.connect, connect)
         self.assertIs(socket.getaddrinfo, resolve)
@@ -155,8 +167,11 @@ class PaperLabTests(unittest.TestCase):
         output = self.root / "failed"
         connect, resolve = socket.socket.connect, socket.getaddrinfo
         stdout, stderr = io.StringIO(), io.StringIO()
-        with patch.object(lab, "run_stock_smoke", side_effect=ValueError("PRIVATE-ERROR-VALUE")), \
-                redirect_stdout(stdout), redirect_stderr(stderr):
+        with (
+            patch.object(lab, "run_stock_smoke", side_effect=ValueError("PRIVATE-ERROR-VALUE")),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
             code = lab.main(["--output-dir", str(output)])
         self.assertEqual(2, code)
         self.assertEqual("", stdout.getvalue())
@@ -255,18 +270,24 @@ class PaperLabTests(unittest.TestCase):
                         failed_identity[0] = (output / failed_name).stat()
                     failure_identity = failed_identity[0]
                     fail = (identity.st_dev, identity.st_ino) == (
-                        failure_identity.st_dev, failure_identity.st_ino)
+                        failure_identity.st_dev,
+                        failure_identity.st_ino,
+                    )
                     self.assertNotIn(descriptor, closed, "A failed close was retried")
                     closed.append(descriptor)
                     real_close(descriptor)
                     if fail:
                         raise OSError("Injected close error with PRIVATE-DIAGNOSTIC")
 
-                with patch("tools.stock_order_review.os.close", side_effect=close_then_report_failure):
+                with patch(
+                    "tools.stock_order_review.os.close", side_effect=close_then_report_failure
+                ):
                     return real_write(outputs)
 
-            with self.subTest(failed_name=failed_name), \
-                    patch.object(lab, "write_reports", side_effect=final_write):
+            with (
+                self.subTest(failed_name=failed_name),
+                patch.object(lab, "write_reports", side_effect=final_write),
+            ):
                 with self.assertRaises(OSError):
                     lab.run_lab(output, now=CLOCK)
                 self.assertEqual(5, len(closed), "Unclosed report descriptors remain")
@@ -281,8 +302,12 @@ class PaperLabTests(unittest.TestCase):
         page = lab.render_index(changed)
         self.assertNotIn("<script>", page)
         self.assertIn("&lt;script&gt;", page)
-        for key, value in (("live_orders_enabled", True), ("safe_to_submit", True),
-                           ("status", "failed"), ("cross_portfolio_total", "123")):
+        for key, value in (
+            ("live_orders_enabled", True),
+            ("safe_to_submit", True),
+            ("status", "failed"),
+            ("cross_portfolio_total", "123"),
+        ):
             changed = deepcopy(report)
             changed[key] = value
             with self.subTest(field=key), self.assertRaises(ValueError):
@@ -290,12 +315,22 @@ class PaperLabTests(unittest.TestCase):
 
     def test_actual_cli_from_another_directory_and_sanitized_bad_option(self):
         self.lab()
-        result = subprocess.run([sys.executable, "-B", str(CLI)], cwd=self.root,
-                                capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            [sys.executable, "-B", str(CLI)],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("synthetic_paper_lab_verified", json.loads(result.stdout)["status"])
-        failed = subprocess.run([sys.executable, "-B", str(CLI), "--PRIVATE-ARG"],
-                                cwd=self.root, capture_output=True, text=True, timeout=30)
+        failed = subprocess.run(
+            [sys.executable, "-B", str(CLI), "--PRIVATE-ARG"],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         self.assertEqual(2, failed.returncode)
         self.assertNotIn("PRIVATE-ARG", failed.stdout + failed.stderr)
         self.assertEqual([], list(self.root.iterdir()))

@@ -1,8 +1,8 @@
 """Reject new legacy entries at nonpositive equity without blocking local exits."""
 
+import unittest
 from copy import deepcopy
 from decimal import Decimal
-import unittest
 from unittest.mock import patch
 
 from trading_core.portfolio import Portfolio
@@ -56,14 +56,28 @@ class EntryEquityGuardTests(unittest.TestCase):
                 before = deepcopy(portfolio.to_dict())
                 self.assertIsInstance(manager.get_risk_report(), dict)
                 self.assertTrue(manager.is_trading_allowed())
-                self.assertEqual(manager.check_trade_allowed("BTC/USDT", "sell", Decimal("1"), Decimal("100")),
-                                 (True, "OK"))
+                self.assertEqual(
+                    manager.check_trade_allowed("BTC/USDT", "sell", Decimal("1"), Decimal("100")),
+                    (True, "OK"),
+                )
                 self.assertEqual(portfolio.to_dict(), before)
 
     def test_local_position_close_remains_possible_at_negative_equity(self):
-        portfolio = Portfolio.from_dict({"initial_balance": "1000", "cash_balance": "-10", "positions": {
-            "BTC/USDT": {"symbol": "BTC/USDT", "side": "long", "size": "1",
-                         "entry_price": "5", "opened_at": "2026-10-04T00:00:00"}}})
+        portfolio = Portfolio.from_dict(
+            {
+                "initial_balance": "1000",
+                "cash_balance": "-10",
+                "positions": {
+                    "BTC/USDT": {
+                        "symbol": "BTC/USDT",
+                        "side": "long",
+                        "size": "1",
+                        "entry_price": "5",
+                        "opened_at": "2026-10-04T00:00:00",
+                    }
+                },
+            }
+        )
         self.assertEqual(portfolio.get_total_value(), Decimal("-5"))
         self.assert_entry_rejected(portfolio)
         trade = portfolio.close_position("BTC/USDT", Decimal("5"))
@@ -74,9 +88,13 @@ class EntryEquityGuardTests(unittest.TestCase):
     def test_positive_equity_preserves_valid_entries_and_existing_guards(self):
         portfolio = Portfolio(Decimal("1000"))
         manager = RiskManager(RiskConfig(), portfolio)
-        self.assertEqual(manager.check_trade_allowed("ETH/USDT", "buy", Decimal("0.1"), Decimal("100")),
-                         (True, "OK"))
-        allowed, reason = manager.check_trade_allowed("ETH/USDT", "buy", Decimal("2"), Decimal("100"))
+        self.assertEqual(
+            manager.check_trade_allowed("ETH/USDT", "buy", Decimal("0.1"), Decimal("100")),
+            (True, "OK"),
+        )
+        allowed, reason = manager.check_trade_allowed(
+            "ETH/USDT", "buy", Decimal("2"), Decimal("100")
+        )
         self.assertFalse(allowed)
         self.assertIn("Position size", reason)
         with self.assertRaisesRegex(ValueError, "Insufficient balance"):

@@ -2,16 +2,17 @@
 
 No HTTP server, external scripts, credentials, network calls, or live execution.
 """
+
 import argparse
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 import hashlib
 import html
 import json
 import os
-from pathlib import Path
-import tempfile
 import sys
+import tempfile
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -62,7 +63,7 @@ def generate(fixture_path: Path, checkpoint_path: Path):
     if hashlib.sha256(raw_fixture).hexdigest() != verified["fixture_sha256"]:
         raise ValueError("Fixture changed after audit; retry only when idle")
     fixture = json.loads(raw_fixture)
-    bars = fixture["candles"][:verified["processed_bars"]]
+    bars = fixture["candles"][: verified["processed_bars"]]
     if not bars:
         raise ValueError("No verified candles")
     config = state["config"]
@@ -76,7 +77,10 @@ def generate(fixture_path: Path, checkpoint_path: Path):
     equity = cash + holding * last_close
     starting = Decimal(_money(config["initial_balance"]))
     # The current offline fixture runner supports exactly one spot symbol.
-    if any(asset not in (base, quote) and Decimal(_money(amount)) != 0 for asset, amount in balances.items()):
+    if any(
+        asset not in (base, quote) and Decimal(_money(amount)) != 0
+        for asset, amount in balances.items()
+    ):
         raise ValueError("Unexpected holding in single-symbol paper checkpoint")
     return_pct = (equity - starting) / starting * 100
     trades = book["trades"]
@@ -84,12 +88,23 @@ def generate(fixture_path: Path, checkpoint_path: Path):
         raise ValueError("Malformed trade list")
     trade_rows = []
     for trade in trades:
-        when = datetime.fromtimestamp(trade["timestamp"] / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        when = datetime.fromtimestamp(trade["timestamp"] / 1000, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M UTC"
+        )
         trade_rows.append(
-            "<tr>" + "".join(f"<td>{_text(v)}</td>" for v in (
-                when, trade["side"], _money(trade["amount"]), _money(trade["average"]),
-                _money(trade["fee"]["cost"]), trade["clientOrderId"]
-            )) + "</tr>"
+            "<tr>"
+            + "".join(
+                f"<td>{_text(v)}</td>"
+                for v in (
+                    when,
+                    trade["side"],
+                    _money(trade["amount"]),
+                    _money(trade["average"]),
+                    _money(trade["fee"]["cost"]),
+                    trade["clientOrderId"],
+                )
+            )
+            + "</tr>"
         )
     metrics = [
         ("Mode", "PAPER ONLY"),
@@ -102,7 +117,10 @@ def generate(fixture_path: Path, checkpoint_path: Path):
         (f"Paid fees ({quote})", _money(book["total_fees"])),
         ("Daily loss entry block", str(state["daily_loss_halted"])),
         ("Drawdown entry block", str(state["drawdown_halted"])),
-        ("Pending signal", state["pending_signal"]["action"] if state["pending_signal"] else "none"),
+        (
+            "Pending signal",
+            state["pending_signal"]["action"] if state["pending_signal"] else "none",
+        ),
         ("Checkpoint SHA256", verified["checkpoint_sha256"]),
     ]
     metric_cards = "".join(
@@ -157,7 +175,14 @@ def main(argv=None):
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
-            with tempfile.NamedTemporaryFile("w", dir=destination.parent, prefix=".paper-report-", suffix=".tmp", encoding="utf-8", delete=False) as stream:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                dir=destination.parent,
+                prefix=".paper-report-",
+                suffix=".tmp",
+                encoding="utf-8",
+                delete=False,
+            ) as stream:
                 temporary = Path(stream.name)
                 os.chmod(temporary, 0o600)
                 stream.write(document)

@@ -1,13 +1,13 @@
 """Offline request preparation and conservative, unauthenticated ACK parsing."""
 
-from copy import deepcopy
-from decimal import localcontext
 import importlib
 import json
 import os
-from pathlib import Path
 import sys
 import unittest
+from copy import deepcopy
+from decimal import localcontext
+from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -40,30 +40,46 @@ class KisVtsOrderPlanTests(unittest.TestCase):
         self.assertEqual(result["provider"], "kis_vts")
         self.assertIs(result["submitted"], False)
         self.assertIs(result["live_orders_enabled"], False)
-        self.assertEqual(result["order"], {
-            "symbol": "005930", "side": "buy", "quantity": 2,
-            "limit_price": "70100", "max_notional": "140200", "notional": "140200",
-            "market": "KRX", "currency": "KRW",
-        })
-        self.assertEqual(result["request_template"], {
-            "method": "POST",
-            "base_url": "https://openapivts.koreainvestment.com:29443",
-            "path": "/uapi/domestic-stock/v1/trading/order-cash",
-            "headers": {
-                "content-type": "application/json; charset=utf-8",
-                "authorization": "Bearer ${KIS_VTS_ACCESS_TOKEN}",
-                "appkey": "${KIS_VTS_APPKEY}",
-                "appsecret": "${KIS_VTS_APPSECRET}",
-                "tr_id": "VTTC0012U", "custtype": "P",
+        self.assertEqual(
+            result["order"],
+            {
+                "symbol": "005930",
+                "side": "buy",
+                "quantity": 2,
+                "limit_price": "70100",
+                "max_notional": "140200",
+                "notional": "140200",
+                "market": "KRX",
+                "currency": "KRW",
             },
-            "body": {
-                "CANO": "${KIS_VTS_CANO}",
-                "ACNT_PRDT_CD": "${KIS_VTS_ACNT_PRDT_CD}",
-                "PDNO": "005930", "ORD_DVSN": "00", "ORD_QTY": "2",
-                "ORD_UNPR": "70100", "SLL_TYPE": "",
-                "EXCG_ID_DVSN_CD": "KRX", "CNDT_PRIC": "",
+        )
+        self.assertEqual(
+            result["request_template"],
+            {
+                "method": "POST",
+                "base_url": "https://openapivts.koreainvestment.com:29443",
+                "path": "/uapi/domestic-stock/v1/trading/order-cash",
+                "headers": {
+                    "content-type": "application/json; charset=utf-8",
+                    "authorization": "Bearer ${KIS_VTS_ACCESS_TOKEN}",
+                    "appkey": "${KIS_VTS_APPKEY}",
+                    "appsecret": "${KIS_VTS_APPSECRET}",
+                    "tr_id": "VTTC0012U",
+                    "custtype": "P",
+                },
+                "body": {
+                    "CANO": "${KIS_VTS_CANO}",
+                    "ACNT_PRDT_CD": "${KIS_VTS_ACNT_PRDT_CD}",
+                    "PDNO": "005930",
+                    "ORD_DVSN": "00",
+                    "ORD_QTY": "2",
+                    "ORD_UNPR": "70100",
+                    "SLL_TYPE": "",
+                    "EXCG_ID_DVSN_CD": "KRX",
+                    "CNDT_PRIC": "",
+                },
             },
-        })
+        )
 
     def test_sell_uses_virtual_sell_transaction_and_general_sell_type(self):
         result = self.build(side="sell")
@@ -81,57 +97,100 @@ class KisVtsOrderPlanTests(unittest.TestCase):
         self.assertNotIn("idempotency", request_json.lower())
 
     def test_builder_does_not_read_environment_or_use_network(self):
-        with patch.dict(os.environ, {"KIS_VTS_ACCESS_TOKEN": "SECRET_TOKEN_VALUE"}), \
-                patch.object(os._Environ, "__getitem__", side_effect=AssertionError("No env reads")), \
-                patch("socket.socket.connect", side_effect=AssertionError("No socket")), \
-                patch("socket.create_connection", side_effect=AssertionError("No connection")), \
-                patch("socket.getaddrinfo", side_effect=AssertionError("No DNS")):
+        with (
+            patch.dict(os.environ, {"KIS_VTS_ACCESS_TOKEN": "SECRET_TOKEN_VALUE"}),
+            patch.object(os._Environ, "__getitem__", side_effect=AssertionError("No env reads")),
+            patch("socket.socket.connect", side_effect=AssertionError("No socket")),
+            patch("socket.create_connection", side_effect=AssertionError("No connection")),
+            patch("socket.getaddrinfo", side_effect=AssertionError("No DNS")),
+        ):
             result = self.build()
         self.assertNotIn("SECRET_TOKEN_VALUE", json.dumps(result))
 
     def test_quantity_requires_positive_bounded_integer_shares(self):
-        for value in (True, False, None, 0, -1, "2", 2.0, 2.5, 10_000_000_000, 10 ** 5000):
+        for value in (True, False, None, 0, -1, "2", 2.0, 2.5, 10_000_000_000, 10**5000):
             with self.subTest(value_type=type(value).__name__), self.assertRaises(ValueError):
                 self.build(quantity=value)
 
     def test_prices_and_budget_are_canonical_positive_krw_integer_strings(self):
         for field in ("limit_price", "max_notional"):
-            for value in (None, True, 1, 1.0, "", "0", "-1", "+1", "01", " 1", "1 ",
-                          "1\n", "1\r", "1.0", "1e3", "NaN", "Infinity", "１", "١"):
+            for value in (
+                None,
+                True,
+                1,
+                1.0,
+                "",
+                "0",
+                "-1",
+                "+1",
+                "01",
+                " 1",
+                "1 ",
+                "1\n",
+                "1\r",
+                "1.0",
+                "1e3",
+                "NaN",
+                "Infinity",
+                "１",
+                "١",
+            ):
                 with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                     self.build(**{field: value})
 
     def test_excessive_numeric_text_is_rejected_before_integer_conversion(self):
-        for field, value in (("limit_price", "9" * 20), ("max_notional", "9" * 30),
-                             ("limit_price", "9" * 100000),
-                             ("max_notional", "9" * 100000)):
+        for field, value in (
+            ("limit_price", "9" * 20),
+            ("max_notional", "9" * 30),
+            ("limit_price", "9" * 100000),
+            ("max_notional", "9" * 100000),
+        ):
             with self.subTest(field=field, digits=len(value)), self.assertRaises(ValueError):
                 self.build(**{field: value})
 
     def test_notional_is_exact_even_beyond_float_and_decimal_context_precision(self):
         with localcontext() as context:
             context.prec = 3
-            result = self.build(quantity=9_999_999_999, limit_price="9999999999999999999",
-                                max_notional="99999999989999999990000000001")
+            result = self.build(
+                quantity=9_999_999_999,
+                limit_price="9999999999999999999",
+                max_notional="99999999989999999990000000001",
+            )
         self.assertEqual(result["order"]["notional"], "99999999989999999990000000001")
         self.assertEqual(result["request_template"]["body"]["ORD_QTY"], "9999999999")
 
     def test_one_krw_over_budget_is_rejected_without_float_rounding(self):
         with self.assertRaises(ValueError):
-            self.build(quantity=9_999_999_999, limit_price="9999999999999999999",
-                       max_notional="99999999989999999990000000000")
+            self.build(
+                quantity=9_999_999_999,
+                limit_price="9999999999999999999",
+                max_notional="99999999989999999990000000000",
+            )
         with self.assertRaises(ValueError):
             self.build(max_notional="140199")
 
     def test_minimum_valid_order_and_client_id_bounds(self):
-        result = self.build(client_order_id="A" * 64, symbol="000001", quantity=1,
-                            limit_price="1", max_notional="1")
+        result = self.build(
+            client_order_id="A" * 64, symbol="000001", quantity=1, limit_price="1", max_notional="1"
+        )
         self.assertEqual(result["order"]["notional"], "1")
         self.assertEqual(self.build(client_order_id="A")["client_order_id"], "A")
 
     def test_client_ids_reject_control_unicode_delimiters_and_excessive_length(self):
-        for value in (None, 12, "", "A" * 65, "한글", "\norder", "order\r\n", "order/id",
-                      "order id", "${KIS_VTS_ACCESS_TOKEN}", "-first", "id:42"):
+        for value in (
+            None,
+            12,
+            "",
+            "A" * 65,
+            "한글",
+            "\norder",
+            "order\r\n",
+            "order/id",
+            "order id",
+            "${KIS_VTS_ACCESS_TOKEN}",
+            "-first",
+            "id:42",
+        ):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 self.build(client_order_id=value)
 
@@ -165,7 +224,9 @@ class KisVtsResponseClassificationTests(unittest.TestCase):
                 raise
             self.fail("The offline KIS VTS response classifier is not implemented")
         self.accepted = {
-            "rt_cd": "0", "msg_cd": "APBK0013", "msg1": "Caller-supplied message",
+            "rt_cd": "0",
+            "msg_cd": "APBK0013",
+            "msg1": "Caller-supplied message",
             "output": {"KRX_FWDG_ORD_ORGNO": "06010", "ODNO": "0001569157", "ORD_TMD": "155211"},
         }
 
@@ -180,9 +241,14 @@ class KisVtsResponseClassificationTests(unittest.TestCase):
     def test_accepted_acknowledgment_preserves_ids_without_claiming_a_fill(self):
         result = self.classify(self.accepted)
         self.assertEqual(result["status"], "accepted_acknowledgment")
-        self.assertEqual(result["acknowledgment"], {
-            "order_id": "0001569157", "forwarding_org_no": "06010", "order_time": "155211",
-        })
+        self.assertEqual(
+            result["acknowledgment"],
+            {
+                "order_id": "0001569157",
+                "forwarding_org_no": "06010",
+                "order_time": "155211",
+            },
+        )
         self.assertNotIn("filled_quantity", result)
         self.assertNotIn("msg1", result)
 
@@ -211,18 +277,34 @@ class KisVtsResponseClassificationTests(unittest.TestCase):
                 self.assertEqual(self.classify(payload)["status"], "unknown")
         for output in (None, [], [self.accepted["output"]], "secret body", {}, {"ODNO": "123"}):
             with self.subTest(output_type=type(output).__name__):
-                self.assertEqual(self.classify({"rt_cd": "0", "output": output})["status"], "unknown")
+                self.assertEqual(
+                    self.classify({"rt_cd": "0", "output": output})["status"], "unknown"
+                )
 
     def test_acknowledgment_requires_canonical_uppercase_keys_without_alias_conflicts(self):
         lower = {key.lower(): value for key, value in self.accepted["output"].items()}
-        for output in (lower, {**self.accepted["output"], "odno": "999"},
-                       {**self.accepted["output"], "ord_tmd": "000000"},
-                       {**self.accepted["output"], "krx_fwdg_ord_orgno": "00001"}):
+        for output in (
+            lower,
+            {**self.accepted["output"], "odno": "999"},
+            {**self.accepted["output"], "ord_tmd": "000000"},
+            {**self.accepted["output"], "krx_fwdg_ord_orgno": "00001"},
+        ):
             self.assertEqual(self.classify({"rt_cd": "0", "output": output})["status"], "unknown")
 
     def test_invalid_acknowledgment_identifiers_are_not_accepted(self):
         cases = {
-            "ODNO": (None, 1569157, True, "", "0", "0000000000", "12345678901", "abc123", "１２", "1\n"),
+            "ODNO": (
+                None,
+                1569157,
+                True,
+                "",
+                "0",
+                "0000000000",
+                "12345678901",
+                "abc123",
+                "１２",
+                "1\n",
+            ),
             "KRX_FWDG_ORD_ORGNO": (None, 6010, True, "", "123456", "abc", "１２", "1\n"),
         }
         for field, values in cases.items():
@@ -233,8 +315,22 @@ class KisVtsResponseClassificationTests(unittest.TestCase):
                     self.assertEqual(self.classify(payload)["status"], "unknown")
 
     def test_order_time_has_six_ascii_digits_and_valid_clock_ranges(self):
-        for value in (None, 155211, True, "", "1", "15521", "1552110", "240000", "236000",
-                      "235960", "999999", "１２３４５６", "12:34:56", "15521\n"):
+        for value in (
+            None,
+            155211,
+            True,
+            "",
+            "1",
+            "15521",
+            "1552110",
+            "240000",
+            "236000",
+            "235960",
+            "999999",
+            "１２３４５６",
+            "12:34:56",
+            "15521\n",
+        ):
             payload = deepcopy(self.accepted)
             payload["output"]["ORD_TMD"] = value
             with self.subTest(value=value):
@@ -251,9 +347,24 @@ class KisVtsResponseClassificationTests(unittest.TestCase):
         self.assertEqual(self.classify({"rt_cd": "1"})["status"], "business_rejected")
 
     def test_unsafe_message_codes_and_raw_fields_never_echo_in_classification(self):
-        for code in (None, 123, True, "SECRET_TOKEN_VALUE", "code\r\ninjection", "한글", "a/b", "a" * 100000):
-            result = self.classify({"rt_cd": "1", "msg_cd": code,
-                                    "msg1": "SECRET_TOKEN_VALUE", "authorization": "Bearer SECRET_TOKEN_VALUE"})
+        for code in (
+            None,
+            123,
+            True,
+            "SECRET_TOKEN_VALUE",
+            "code\r\ninjection",
+            "한글",
+            "a/b",
+            "a" * 100000,
+        ):
+            result = self.classify(
+                {
+                    "rt_cd": "1",
+                    "msg_cd": code,
+                    "msg1": "SECRET_TOKEN_VALUE",
+                    "authorization": "Bearer SECRET_TOKEN_VALUE",
+                }
+            )
             self.assertEqual(result["status"], "business_rejected")
             self.assertNotIn("msg_cd", result)
             self.assertNotIn("SECRET_TOKEN_VALUE", json.dumps(result))
@@ -270,8 +381,11 @@ class KisVtsResponseClassificationTests(unittest.TestCase):
         self.assertNotIn("filled", result["acknowledgment"])
 
     def test_hostile_unknown_response_does_not_echo_payload(self):
-        payload = {"rt_cd": "0", "msg1": "SECRET_TOKEN_VALUE",
-                   "output": {"ODNO": "SECRET_TOKEN_VALUE"}}
+        payload = {
+            "rt_cd": "0",
+            "msg1": "SECRET_TOKEN_VALUE",
+            "output": {"ODNO": "SECRET_TOKEN_VALUE"},
+        }
         result = self.classify(payload)
         self.assertEqual(result["status"], "unknown")
         self.assertNotIn("SECRET_TOKEN_VALUE", json.dumps(result))

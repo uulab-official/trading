@@ -6,15 +6,15 @@ Never treat 1d local-midnight timestamps as completed 1m bars.
 KRW 15:30 source bars may aggregate trades until 16:00 Korea time and
 are excluded because this fixed-minute format cannot express that interval.
 """
-from datetime import datetime, timezone, timedelta
-from decimal import Decimal, InvalidOperation
+
 import re
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 
 KST = timezone(timedelta(hours=9))
 
 
-def parse_toss_minute_candles(document, *, symbol, quote_currency, observed_at,
-                              safety_seconds=5):
+def parse_toss_minute_candles(document, *, symbol, quote_currency, observed_at, safety_seconds=5):
     if not isinstance(symbol, str) or not re.fullmatch(r"[A-Za-z0-9.-]{1,20}", symbol):
         raise ValueError("Explicit Toss stock symbol required")
     if quote_currency not in ("KRW", "USD"):
@@ -27,8 +27,11 @@ def parse_toss_minute_candles(document, *, symbol, quote_currency, observed_at,
     records = result.get("candles")
     if not isinstance(records, list) or not (1 <= len(records) <= 200):
         raise ValueError("Expected 1..200 one-minute candle rows")
-    if (not isinstance(observed_at, datetime) or observed_at.tzinfo is None
-            or observed_at.utcoffset() is None):
+    if (
+        not isinstance(observed_at, datetime)
+        or observed_at.tzinfo is None
+        or observed_at.utcoffset() is None
+    ):
         raise ValueError("Explicit timezone-aware observation timestamp required")
     if type(safety_seconds) is not int or not 0 <= safety_seconds <= 300:
         raise ValueError("Invalid safety delay")

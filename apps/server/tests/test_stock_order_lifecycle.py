@@ -1,12 +1,13 @@
 """Actual offline CLI and synthetic stock-order lifecycle integration."""
+
 import json
 import os
-from pathlib import Path
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -36,17 +37,23 @@ class StockOrderLifecycleTests(unittest.TestCase):
     def run_cli(self, script, arguments=()):
         self.assertTrue(script.is_file(), "Expected implemented offline entrypoint")
         environment = dict(os.environ)
-        environment.update({
-            "KIS_VTS_ACCESS_TOKEN": "EXAMPLE-SECRET-TOKEN-NEVER-PRINT",
-            "KIS_VTS_APPKEY": "EXAMPLE-SECRET-APPKEY-NEVER-PRINT",
-            "KIS_VTS_APPSECRET": "EXAMPLE-SECRET-APPSECRET-NEVER-PRINT",
-            "KIS_VTS_CANO": "12345678", "KIS_VTS_ACNT_PRDT_CD": "01",
-            "HTTPS_PROXY": "https://EXAMPLE-SECRET-PROXY.invalid",
-            "PYTHONDONTWRITEBYTECODE": "1",
-        })
+        environment.update(
+            {
+                "KIS_VTS_ACCESS_TOKEN": "EXAMPLE-SECRET-TOKEN-NEVER-PRINT",
+                "KIS_VTS_APPKEY": "EXAMPLE-SECRET-APPKEY-NEVER-PRINT",
+                "KIS_VTS_APPSECRET": "EXAMPLE-SECRET-APPSECRET-NEVER-PRINT",
+                "KIS_VTS_CANO": "12345678",
+                "KIS_VTS_ACNT_PRDT_CD": "01",
+                "HTTPS_PROXY": "https://EXAMPLE-SECRET-PROXY.invalid",
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+        )
         result = subprocess.run(
             [sys.executable, "-B", "-S", "-c", GUARD, str(script), *arguments],
-            cwd=self.directory, env=environment, capture_output=True, text=True,
+            cwd=self.directory,
+            env=environment,
+            capture_output=True,
+            text=True,
             timeout=30,
         )
         self.assertNotIn("EXAMPLE-SECRET", result.stdout + result.stderr)
@@ -54,10 +61,19 @@ class StockOrderLifecycleTests(unittest.TestCase):
         return result
 
     def journal_cli(self, command, *extra, account="demo-stock-orders", database=None):
-        return self.run_cli(JOURNAL, [
-            "--mode", "paper", command, "--database", str(database or self.database),
-            "--account-ref", account, *extra,
-        ])
+        return self.run_cli(
+            JOURNAL,
+            [
+                "--mode",
+                "paper",
+                command,
+                "--database",
+                str(database or self.database),
+                "--account-ref",
+                account,
+                *extra,
+            ],
+        )
 
     def event_file(self, index):
         events = json.loads(FIXTURE.read_text())["events"]
@@ -76,7 +92,9 @@ class StockOrderLifecycleTests(unittest.TestCase):
         self.assertEqual(4, value["executions"])
         self.assertEqual("5285", value["cash_delta_krw"])
         self.assertEqual({}, value["position_deltas"])
-        self.assertEqual({"stock-buy-001": "canceled", "stock-sell-001": "filled"}, value["order_states"])
+        self.assertEqual(
+            {"stock-buy-001": "canceled", "stock-sell-001": "filled"}, value["order_states"]
+        )
         self.assertTrue(all(value["checks"].values()))
         self.assertEqual(0, value["actual_broker_requests"])
         self.assertFalse(value["artifacts_retained"])
@@ -154,9 +172,12 @@ class StockOrderLifecycleTests(unittest.TestCase):
     def test_strict_json_rejects_duplicate_keys_nonfinite_and_oversized_input(self):
         self.assertEqual(0, self.journal_cli("init").returncode)
         invalid = self.directory / "invalid.json"
-        for text in ('{"event_id":"a","event_id":"b"}',
-                     '{"quantity":NaN}', '{"quantity":Infinity}',
-                     '"' + 'x' * 65536 + '"'):
+        for text in (
+            '{"event_id":"a","event_id":"b"}',
+            '{"quantity":NaN}',
+            '{"quantity":Infinity}',
+            '"' + "x" * 65536 + '"',
+        ):
             with self.subTest(length=len(text)):
                 invalid.write_text(text)
                 result = self.journal_cli("record", "--event", str(invalid))
@@ -165,10 +186,18 @@ class StockOrderLifecycleTests(unittest.TestCase):
         self.assertEqual(0, json.loads(self.journal_cli("status").stdout)["event_count"])
 
     def test_invalid_cli_values_are_not_echoed_or_persisted(self):
-        result = self.run_cli(JOURNAL, [
-            "--mode", "EXAMPLE-SECRET-INVALID-MODE", "init",
-            "--database", str(self.database), "--account-ref", "demo-stock-orders",
-        ])
+        result = self.run_cli(
+            JOURNAL,
+            [
+                "--mode",
+                "EXAMPLE-SECRET-INVALID-MODE",
+                "init",
+                "--database",
+                str(self.database),
+                "--account-ref",
+                "demo-stock-orders",
+            ],
+        )
         self.assertEqual(2, result.returncode)
         self.assertEqual("", result.stdout)
         self.assertFalse(self.database.exists())
@@ -182,6 +211,7 @@ class StockOrderLifecycleTests(unittest.TestCase):
     def test_report_write_failure_removes_only_new_partial_file(self):
         self.assertTrue(JOURNAL.is_file(), "Expected implemented JSON output helper")
         from tools.stock_order_journal import write_new_json
+
         target = self.directory / "report.json"
         with patch("os.fsync", side_effect=OSError("EXAMPLE-SECRET-IO-ERROR")):
             with self.assertRaises(OSError):
@@ -194,6 +224,7 @@ class StockOrderLifecycleTests(unittest.TestCase):
 
     def test_report_replacement_during_fsync_is_preserved_and_refused(self):
         from tools.stock_order_journal import write_new_json
+
         target = self.directory / "report.json"
 
         def replace_output(_descriptor):

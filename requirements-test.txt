@@ -1,0 +1,4 @@
+# Direct test tools, shared by local development and the Python 3.10–3.12 CI matrix.
+pytest==9.2.0
+pytest-asyncio==1.5.0
+pytest-cov==7.1.0

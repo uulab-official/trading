@@ -3,12 +3,13 @@
 Input is a freshly generated offline audit JSON, not a live broker session.
 No network requests, credentials, scripts, external resources, or order actions.
 """
+
 import argparse
 import html
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 
 def _escaped(value):
@@ -16,10 +17,13 @@ def _escaped(value):
 
 
 def render(report):
-    if (not isinstance(report, dict) or report.get("mode") != "paper"
-            or report.get("live_orders_enabled") is not False
-            or report.get("status") != "audited_offline_only"
-            or report.get("cross_portfolio_total") is not None):
+    if (
+        not isinstance(report, dict)
+        or report.get("mode") != "paper"
+        or report.get("live_orders_enabled") is not False
+        or report.get("status") != "audited_offline_only"
+        or report.get("cross_portfolio_total") is not None
+    ):
         raise ValueError("Only independently audited offline paper status accepted")
     portfolios = report.get("portfolios")
     if not isinstance(portfolios, list) or not portfolios or len(portfolios) > 20:
@@ -34,7 +38,8 @@ def render(report):
             if item["status"] != "verified_offline_paper":
                 raise ValueError("Crypto audit type/status contradiction")
             labels = (
-                ("자산", item["symbol"]), ("시간봉", item["timeframe"]),
+                ("자산", item["symbol"]),
+                ("시간봉", item["timeframe"]),
                 ("완료 캔들", item["processed_bars"]),
                 ("가상 거래", item["trade_count"]),
                 ("일일 손실 제한", item["daily_loss_halted"]),
@@ -44,7 +49,8 @@ def render(report):
             if item["status"] != "audited_stock_paper":
                 raise ValueError("Stock audit type/status contradiction")
             labels = (
-                ("종목", item["symbol"]), ("통화", item["quote_currency"]),
+                ("종목", item["symbol"]),
+                ("통화", item["quote_currency"]),
                 ("완료 캔들", item["processed_bars"]),
                 ("가상 거래", item["trade_count"]),
                 ("가상 현금", item["cash"]),
@@ -52,8 +58,11 @@ def render(report):
                 ("모의 수익률 (%)", item["total_return_pct"]),
             )
         fields = "".join(
-            "<div class='field'><span>" + _escaped(label) +
-            "</span><strong>" + _escaped(value) + "</strong></div>"
+            "<div class='field'><span>"
+            + _escaped(label)
+            + "</span><strong>"
+            + _escaped(value)
+            + "</strong></div>"
             for label, value in labels
         )
         title = "암호화폐 Paper" if item["type"] == "crypto" else "주식 Paper"
@@ -64,10 +73,12 @@ def render(report):
     checked = _escaped(report.get("generated_at_utc", "unknown"))
     synthetic_notice = (
         '<div class="alert"><strong>합성 데이터 예제</strong> — 표시한 가격·거래·수익률은 '
-        '저장소의 합성 입력으로 계산했습니다. 실제 시장 가격이나 투자 성과가 아닙니다.</div>'
-        if report.get("provenance") == "bundled_synthetic_examples" else ""
+        "저장소의 합성 입력으로 계산했습니다. 실제 시장 가격이나 투자 성과가 아닙니다.</div>"
+        if report.get("provenance") == "bundled_synthetic_examples"
+        else ""
     )
-    return ("""<!doctype html><html lang="ko"><head>
+    return (
+        """<!doctype html><html lang="ko"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
 <title>유유랩 오프라인 모의매매 통합 조회</title>
@@ -89,13 +100,19 @@ padding:12px 0;font-size:14px}
 </style></head><body><main>
 <h1>모의매매 통합 감사 대시보드</h1>
 <p>오프라인에서 개별 검증된 코인·주식 원장 스냅샷 · 생성 시각: """
-            + checked + """</p>
+        + checked
+        + """</p>
 <div class="alert"><strong>실거래 아님</strong> — 실제 주문, 계좌,
 실시간 시세 또는 현재 운영 상태를 표시하지 않습니다. KRW·USD·USDT는
 환율·환산 규칙이 검증되지 않아 합산하지 않습니다.</div>
-""" + synthetic_notice + """<section class="grid">""" + "".join(cards) + """</section>
+"""
+        + synthetic_notice
+        + """<section class="grid">"""
+        + "".join(cards)
+        + """</section>
 <p><small>외부 API 호출 없음 · JavaScript 없음 · 거래 실행 기능 없음</small></p>
-</main></body></html>""")
+</main></body></html>"""
+    )
 
 
 def main(argv=None):
@@ -115,15 +132,18 @@ def main(argv=None):
         if target.exists():
             raise FileExistsError("Do not replace an existing report")
         target.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                     getattr(os, "O_NOFOLLOW", 0), 0o600)
+        fd = os.open(
+            target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+        )
         with os.fdopen(fd, "w", encoding="utf-8") as output:
             output.write(page)
             output.flush()
             os.fsync(output.fileno())
     except (ValueError, TypeError, OSError, KeyError):
-        print("Offline paper dashboard refused invalid or conflicting audit evidence.",
-              file=sys.stderr)
+        print(
+            "Offline paper dashboard refused invalid or conflicting audit evidence.",
+            file=sys.stderr,
+        )
         return 2
     print(str(target))
     return 0

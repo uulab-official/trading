@@ -8,15 +8,15 @@ The hash chain and committed tail detect accidental/partial history edits. They
 are not signatures and cannot defeat a coordinated, valid rewrite of the file.
 """
 
-from contextlib import contextmanager
-from datetime import date
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import sqlite3
 import stat
+from contextlib import contextmanager
+from datetime import date
+from pathlib import Path
 
 if __package__:
     from .kis_vts_order import MAX_QUANTITY, build_order_plan
@@ -36,19 +36,21 @@ _FIELDS = {
 }
 _SCHEMA = {
     "journal_config": "CREATE TABLE journal_config ("
-                      "singleton INTEGER PRIMARY KEY CHECK(singleton=1), "
-                      "config_json TEXT NOT NULL)",
+    "singleton INTEGER PRIMARY KEY CHECK(singleton=1), "
+    "config_json TEXT NOT NULL)",
     "journal_tail": "CREATE TABLE journal_tail ("
-                    "singleton INTEGER PRIMARY KEY CHECK(singleton=1), "
-                    "sequence INTEGER NOT NULL CHECK(sequence>=0), event_hash TEXT NOT NULL)",
+    "singleton INTEGER PRIMARY KEY CHECK(singleton=1), "
+    "sequence INTEGER NOT NULL CHECK(sequence>=0), event_hash TEXT NOT NULL)",
     "events": "CREATE TABLE events ("
-              "sequence INTEGER PRIMARY KEY CHECK(sequence>0), event_id TEXT NOT NULL UNIQUE, "
-              "event_json TEXT NOT NULL, prev_hash TEXT NOT NULL, event_hash TEXT NOT NULL)",
+    "sequence INTEGER PRIMARY KEY CHECK(sequence>0), event_id TEXT NOT NULL UNIQUE, "
+    "event_json TEXT NOT NULL, prev_hash TEXT NOT NULL, event_hash TEXT NOT NULL)",
 }
 
 
 def _canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    )
 
 
 def _label(value, *, account=False):
@@ -60,7 +62,11 @@ def _label(value, *, account=False):
 
 def _krw(value, *, maximum, zero=False):
     pattern = r"0|[1-9][0-9]*" if zero else r"[1-9][0-9]*"
-    if type(value) is not str or not 1 <= len(value) <= maximum or re.fullmatch(pattern, value) is None:
+    if (
+        type(value) is not str
+        or not 1 <= len(value) <= maximum
+        or re.fullmatch(pattern, value) is None
+    ):
         raise ValueError("A bounded canonical integer KRW string is required")
     return int(value)
 
@@ -71,7 +77,11 @@ def _shares(value):
 
 
 def _digits(value, maximum):
-    if type(value) is not str or not 1 <= len(value) <= maximum or re.fullmatch(r"[0-9]+", value) is None:
+    if (
+        type(value) is not str
+        or not 1 <= len(value) <= maximum
+        or re.fullmatch(r"[0-9]+", value) is None
+    ):
         raise ValueError("A bounded ASCII broker identifier is required")
 
 
@@ -87,14 +97,19 @@ def _validate_event(event):
         raise ValueError("Invalid stock-order event data fields")
     if kind == "reserve":
         order_date = data["order_date"]
-        if type(order_date) is not str or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", order_date) is None:
+        if (
+            type(order_date) is not str
+            or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", order_date) is None
+        ):
             raise ValueError("An ISO order date is required")
         try:
             date.fromisoformat(order_date)
         except ValueError:
             raise ValueError("An ISO order date is required") from None
-        build_order_plan(client_order_id=event["client_order_id"],
-                         **{key: value for key, value in data.items() if key != "order_date"})
+        build_order_plan(
+            client_order_id=event["client_order_id"],
+            **{key: value for key, value in data.items() if key != "order_date"},
+        )
     elif kind == "acknowledge":
         _digits(data["broker_order_id"], 10)
         _digits(data["broker_org_no"], 5)
@@ -133,7 +148,9 @@ def _strict_json(body):
 
 
 def _event_hash(sequence, previous, body):
-    return hashlib.sha256((str(sequence) + "\n" + previous + "\n" + body).encode("ascii")).hexdigest()
+    return hashlib.sha256(
+        (str(sequence) + "\n" + previous + "\n" + body).encode("ascii")
+    ).hexdigest()
 
 
 class _Replay:
@@ -167,10 +184,17 @@ class _Replay:
             if any(order["status"] not in _FINAL for order in self.orders.values()):
                 raise ValueError("An unresolved order blocks new client intents")
             self.orders[client] = {
-                "client_order_id": client, **data, "status": "reserved",
-                "broker_order_id": None, "broker_org_no": None,
-                "filled_quantity": 0, "gross_krw": 0, "fee_krw": 0,
-                "tax_krw": 0, "cash_delta_krw": 0, "executions": [],
+                "client_order_id": client,
+                **data,
+                "status": "reserved",
+                "broker_order_id": None,
+                "broker_org_no": None,
+                "filled_quantity": 0,
+                "gross_krw": 0,
+                "fee_krw": 0,
+                "tax_krw": 0,
+                "cash_delta_krw": 0,
+                "executions": [],
             }
             return
         order = self.orders.get(client)
@@ -184,7 +208,11 @@ class _Replay:
                 raise ValueError("Acknowledgment is invalid in this order state")
             # Preserve original zero padding, but do not allow padding aliases to
             # bind the same numerical broker identity to another local order.
-            identity = (order["order_date"], int(data["broker_org_no"]), int(data["broker_order_id"]))
+            identity = (
+                order["order_date"],
+                int(data["broker_org_no"]),
+                int(data["broker_order_id"]),
+            )
             if identity in self.broker_orders:
                 raise ValueError("Broker order identity already belongs to another client order")
             self.broker_orders[identity] = client
@@ -210,26 +238,41 @@ class _Replay:
 
     def _fill(self, order, data):
         identity = (order["order_date"], data["execution_id"])
-        economics = (order["client_order_id"], data["quantity"], data["price"],
-                     data["fee_krw"], data["tax_krw"])
+        economics = (
+            order["client_order_id"],
+            data["quantity"],
+            data["price"],
+            data["fee_krw"],
+            data["tax_krw"],
+        )
         if identity in self.executions:
             if self.executions[identity] != economics:
                 raise ValueError("Execution identity reused with different order or economic terms")
             return
         if order["broker_order_id"] is None or order["status"] not in (
-                "accepted", "partially_filled", "cancel_pending"):
+            "accepted",
+            "partially_filled",
+            "cancel_pending",
+        ):
             raise ValueError("New fills require an unresolved acknowledged order")
         quantity, price = data["quantity"], int(data["price"])
         if order["filled_quantity"] + quantity > order["quantity"]:
             raise ValueError("Execution quantity exceeds the remaining order quantity")
         limit = int(order["limit_price"])
-        if (order["side"] == "buy" and price > limit) or (order["side"] == "sell" and price < limit):
+        if (order["side"] == "buy" and price > limit) or (
+            order["side"] == "sell" and price < limit
+        ):
             raise ValueError("Execution price violates the recorded limit price")
         gross, fee, tax = quantity * price, int(data["fee_krw"]), int(data["tax_krw"])
         cash = -gross - fee - tax if order["side"] == "buy" else gross - fee - tax
         self.executions[identity] = economics
         order["filled_quantity"] += quantity
-        for key, value in (("gross_krw", gross), ("fee_krw", fee), ("tax_krw", tax), ("cash_delta_krw", cash)):
+        for key, value in (
+            ("gross_krw", gross),
+            ("fee_krw", fee),
+            ("tax_krw", tax),
+            ("cash_delta_krw", cash),
+        ):
             order[key] += value
         order["executions"].append({**data, "gross_krw": str(gross), "cash_delta_krw": str(cash)})
         if order["filled_quantity"] == order["quantity"]:
@@ -245,9 +288,12 @@ class _Replay:
             terminal = order["status"] in _FINAL
             if not terminal:
                 pending.append(order["client_order_id"])
-            result = {**order, "unfilled_quantity": remaining,
-                      "working_quantity": 0 if terminal else remaining,
-                      "executions": [dict(execution) for execution in order["executions"]]}
+            result = {
+                **order,
+                "unfilled_quantity": remaining,
+                "working_quantity": 0 if terminal else remaining,
+                "executions": [dict(execution) for execution in order["executions"]],
+            }
             for key in ("gross_krw", "fee_krw", "tax_krw", "cash_delta_krw"):
                 result[key] = str(order[key])
             orders.append(result)
@@ -256,12 +302,20 @@ class _Replay:
                 change = order["filled_quantity"] * (1 if order["side"] == "buy" else -1)
                 positions[order["symbol"]] = positions.get(order["symbol"], 0) + change
         return {
-            "mode": "paper", "live_orders_enabled": False,
-            "provenance": "synthetic_or_caller_supplied_unverified", "account_ref": self.account_ref,
-            "currency": "KRW", "market": "KRX", "event_count": len(self.events),
-            "execution_count": len(self.executions), "pending_client_order_ids": pending,
-            "blocked": bool(pending), "cash_delta_krw": str(cash),
-            "position_deltas": {symbol: quantity for symbol, quantity in sorted(positions.items()) if quantity},
+            "mode": "paper",
+            "live_orders_enabled": False,
+            "provenance": "synthetic_or_caller_supplied_unverified",
+            "account_ref": self.account_ref,
+            "currency": "KRW",
+            "market": "KRX",
+            "event_count": len(self.events),
+            "execution_count": len(self.executions),
+            "pending_client_order_ids": pending,
+            "blocked": bool(pending),
+            "cash_delta_krw": str(cash),
+            "position_deltas": {
+                symbol: quantity for symbol, quantity in sorted(positions.items()) if quantity
+            },
             "orders": orders,
         }
 
@@ -334,18 +388,28 @@ class StockOrderJournal:
         return instance
 
     def _config(self):
-        return _canonical({"schema_version": 1, "mode": "paper", "account_ref": self.account_ref,
-                           "currency": "KRW", "market": "KRX"})
+        return _canonical(
+            {
+                "schema_version": 1,
+                "mode": "paper",
+                "account_ref": self.account_ref,
+                "currency": "KRW",
+                "market": "KRX",
+            }
+        )
 
     def _genesis(self):
-        return hashlib.sha256(("stock-order-journal-v1\n" + self._config()).encode("ascii")).hexdigest()
+        return hashlib.sha256(
+            ("stock-order-journal-v1\n" + self._config()).encode("ascii")
+        ).hexdigest()
 
     def _connect(self, *, read_only):
         if not stat.S_ISREG(self.path.lstat().st_mode):
             raise ValueError("Journal must be an existing regular file without a final symlink")
         mode = "ro" if read_only or self._read_only else "rw"
-        db = sqlite3.connect(self.path.as_uri() + "?mode=" + mode,
-                             uri=True, timeout=5.0, isolation_level=None)
+        db = sqlite3.connect(
+            self.path.as_uri() + "?mode=" + mode, uri=True, timeout=5.0, isolation_level=None
+        )
         try:
             # These connection-local settings do not mutate database contents.
             db.execute("PRAGMA busy_timeout=5000")
@@ -389,11 +453,17 @@ class StockOrderJournal:
         expected.add(("index", "sqlite_autoindex_events_1", "events", None))
         if schema != expected:
             raise ValueError("Journal schema does not match the supported version")
-        if db.execute("SELECT singleton, config_json FROM journal_config").fetchall() != [(1, self._config())]:
+        if db.execute("SELECT singleton, config_json FROM journal_config").fetchall() != [
+            (1, self._config())
+        ]:
             raise ValueError("Journal configuration or account alias does not match")
         replay, previous = _Replay(self.account_ref), self._genesis()
-        for number, row in enumerate(db.execute(
-                "SELECT sequence, event_id, event_json, prev_hash, event_hash FROM events ORDER BY sequence"), 1):
+        for number, row in enumerate(
+            db.execute(
+                "SELECT sequence, event_id, event_json, prev_hash, event_hash FROM events ORDER BY sequence"
+            ),
+            1,
+        ):
             sequence, identity, body, old_hash, stored_hash = row
             if type(sequence) is not int or sequence != number or old_hash != previous:
                 raise ValueError("Journal event sequence or hash chain is inconsistent")
@@ -420,10 +490,14 @@ class StockOrderJournal:
                 sequence = len(replay.events)
                 body = _canonical(event)
                 digest = _event_hash(sequence, previous, body)
-                db.execute("INSERT INTO events VALUES (?, ?, ?, ?, ?)",
-                           (sequence, event["event_id"], body, previous, digest))
-                db.execute("UPDATE journal_tail SET sequence=?, event_hash=? WHERE singleton=1",
-                           (sequence, digest))
+                db.execute(
+                    "INSERT INTO events VALUES (?, ?, ?, ?, ?)",
+                    (sequence, event["event_id"], body, previous, digest),
+                )
+                db.execute(
+                    "UPDATE journal_tail SET sequence=?, event_hash=? WHERE singleton=1",
+                    (sequence, digest),
+                )
             result = replay.snapshot()
         return result
 

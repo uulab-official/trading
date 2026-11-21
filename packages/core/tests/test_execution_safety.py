@@ -1,50 +1,81 @@
 """Credential-free, network-forbidden tests for execution routing."""
 
 import importlib
-from decimal import Decimal
-from pathlib import Path
-from types import SimpleNamespace
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch, AsyncMock
+from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from trading_core.execution import create_execution_exchange, validate_execution_mode
-from trading_core.paper_exchange import PaperExchange
 from trading_core.config_manager import ConfigManager
-from trading_core.order_manager import OrderManager, OrderSide, OrderType, OrderStatus
+from trading_core.execution import create_execution_exchange, validate_execution_mode
+from trading_core.order_manager import OrderManager, OrderSide, OrderStatus, OrderType
+from trading_core.paper_exchange import PaperExchange
 
 
 def config(mode="paper", sandbox=False, testnet=False, keys=True):
-    return SimpleNamespace(mode=mode, exchange=SimpleNamespace(
-        id="binance", sandbox=sandbox, testnet=testnet,
-        api_key="fake-test-key" if keys else "", api_secret="fake-test-secret" if keys else "",
-    ))
+    return SimpleNamespace(
+        mode=mode,
+        exchange=SimpleNamespace(
+            id="binance",
+            sandbox=sandbox,
+            testnet=testnet,
+            api_key="fake-test-key" if keys else "",
+            api_secret="fake-test-secret" if keys else "",
+        ),
+    )
 
 
 class RoutingTests(unittest.TestCase):
     def test_default_paper_ignores_credentials_and_never_constructs_ccxt(self):
-        with patch("trading_core.exchange.CCXTExchange", side_effect=AssertionError("CCXT forbidden")):
+        with patch(
+            "trading_core.exchange.CCXTExchange", side_effect=AssertionError("CCXT forbidden")
+        ):
             exchange = create_execution_exchange(config())
         self.assertIsInstance(exchange, PaperExchange)
         self.assertFalse(hasattr(exchange, "api_key"))
         self.assertFalse(hasattr(exchange, "api_secret"))
 
     def test_activation_flag_does_not_change_paper_mode(self):
-        with patch("trading_core.exchange.CCXTExchange", side_effect=AssertionError("CCXT forbidden")):
-            self.assertIsInstance(create_execution_exchange(config(), enable_live_trading=True), PaperExchange)
+        with patch(
+            "trading_core.exchange.CCXTExchange", side_effect=AssertionError("CCXT forbidden")
+        ):
+            self.assertIsInstance(
+                create_execution_exchange(config(), enable_live_trading=True), PaperExchange
+            )
 
     def test_live_fails_closed_without_explicit_boolean_flag(self):
         for flag in [False, None, "true", 1]:
-            with self.subTest(flag=flag), patch("trading_core.exchange.CCXTExchange", side_effect=AssertionError("CCXT forbidden")):
+            with (
+                self.subTest(flag=flag),
+                patch(
+                    "trading_core.exchange.CCXTExchange",
+                    side_effect=AssertionError("CCXT forbidden"),
+                ),
+            ):
                 with self.assertRaises(ValueError):
                     create_execution_exchange(config("live"), enable_live_trading=flag)
 
     def test_invalid_mode_and_live_configuration_fail_before_construction(self):
-        cases = [config("LIVE"), config("papre"), config(None), config("live", keys=False), config("live", sandbox=True), config("live", testnet=True)]
+        cases = [
+            config("LIVE"),
+            config("papre"),
+            config(None),
+            config("live", keys=False),
+            config("live", sandbox=True),
+            config("live", testnet=True),
+        ]
         for case in cases:
-            with self.subTest(case=case.mode), patch("trading_core.exchange.CCXTExchange", side_effect=AssertionError("CCXT forbidden")):
+            with (
+                self.subTest(case=case.mode),
+                patch(
+                    "trading_core.exchange.CCXTExchange",
+                    side_effect=AssertionError("CCXT forbidden"),
+                ),
+            ):
                 with self.assertRaises(ValueError):
                     create_execution_exchange(case, enable_live_trading=True)
 
@@ -60,13 +91,17 @@ class RoutingTests(unittest.TestCase):
             root = Path(directory)
             (root / "active").mkdir()
             (root / "secrets").mkdir()
-            (root / "active/bot_config.yml").write_text("bot:\n  mode: paper\nexchange:\n  api_key: inline-fake\n  api_secret: inline-fake\ntelegram:\n  enabled: true\n")
+            (root / "active/bot_config.yml").write_text(
+                "bot:\n  mode: paper\nexchange:\n  api_key: inline-fake\n  api_secret: inline-fake\ntelegram:\n  enabled: true\n"
+            )
             (root / "secrets/secrets.yml").write_text("this file must never be opened")
             real_open = open
+
             def guarded_open(path, *args, **kwargs):
                 if Path(path) == root / "secrets/secrets.yml":
                     raise AssertionError("paper read secret file")
                 return real_open(path, *args, **kwargs)
+
             with patch("builtins.open", side_effect=guarded_open):
                 loaded = ConfigManager(directory).load_config()
             self.assertEqual(loaded.exchange.api_key, "")
@@ -87,7 +122,9 @@ class PaperExchangeTests(unittest.IsolatedAsyncioTestCase):
         self.guard.stop()
 
     async def test_market_buy_and_sell_use_local_ledger_only(self):
-        buy = await self.exchange.create_order("BTC/USDT", "market", "buy", Decimal("2"), params={"clientOrderId": "local-buy"})
+        buy = await self.exchange.create_order(
+            "BTC/USDT", "market", "buy", Decimal("2"), params={"clientOrderId": "local-buy"}
+        )
         self.assertTrue(buy["id"].startswith("paper-"))
         self.assertEqual(buy["status"], "closed")
         self.assertEqual(buy["filled"], Decimal("2"))
@@ -100,15 +137,28 @@ class PaperExchangeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_order_manager_routes_to_paper_and_records_immediate_fill(self):
         manager = OrderManager(self.exchange)
-        with patch("trading_core.exchange.CCXTExchange.create_order", side_effect=AssertionError("real order forbidden")):
-            order = await manager.place_order("BTC/USDT", OrderSide.BUY, OrderType.MARKET, Decimal("1"), client_order_id="manager-local")
+        with patch(
+            "trading_core.exchange.CCXTExchange.create_order",
+            side_effect=AssertionError("real order forbidden"),
+        ):
+            order = await manager.place_order(
+                "BTC/USDT",
+                OrderSide.BUY,
+                OrderType.MARKET,
+                Decimal("1"),
+                client_order_id="manager-local",
+            )
         self.assertTrue(order.exchange_order_id.startswith("paper-"))
         self.assertEqual(order.status, OrderStatus.FILLED)
         self.assertEqual(order.filled, Decimal("1"))
         self.assertEqual(order.remaining, Decimal("0"))
 
     async def test_order_manager_accepts_nullable_mocked_live_response(self):
-        adapter = SimpleNamespace(create_order=AsyncMock(return_value={"id": "mock-accepted", "status": None, "filled": None}))
+        adapter = SimpleNamespace(
+            create_order=AsyncMock(
+                return_value={"id": "mock-accepted", "status": None, "filled": None}
+            )
+        )
         manager = OrderManager(adapter)
         order = await manager.place_order("BTC/USDT", OrderSide.BUY, OrderType.MARKET, Decimal("1"))
         self.assertEqual(order.status, OrderStatus.OPEN)
@@ -116,15 +166,23 @@ class PaperExchangeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order.remaining, Decimal("1"))
 
     async def test_duplicate_local_order_is_not_charged_twice(self):
-        first = await self.exchange.create_order("BTC/USDT", "market", "buy", Decimal("1"), params={"clientOrderId": "repeat"})
-        second = await self.exchange.create_order("BTC/USDT", "market", "buy", Decimal("1"), params={"clientOrderId": "repeat"})
+        first = await self.exchange.create_order(
+            "BTC/USDT", "market", "buy", Decimal("1"), params={"clientOrderId": "repeat"}
+        )
+        second = await self.exchange.create_order(
+            "BTC/USDT", "market", "buy", Decimal("1"), params={"clientOrderId": "repeat"}
+        )
         self.assertEqual(first, second)
         self.assertEqual((await self.exchange.fetch_balance())["USDT"].free, Decimal("900"))
         with self.assertRaises(ValueError):
-            await self.exchange.create_order("BTC/USDT", "market", "buy", Decimal("2"), params={"clientOrderId": "repeat"})
+            await self.exchange.create_order(
+                "BTC/USDT", "market", "buy", Decimal("2"), params={"clientOrderId": "repeat"}
+            )
 
     async def test_generated_order_ids_do_not_collide_with_explicit_ids(self):
-        first = await self.exchange.create_order("BTC/USDT", "market", "buy", Decimal("1"), params={"clientOrderId": "paper-local-2"})
+        first = await self.exchange.create_order(
+            "BTC/USDT", "market", "buy", Decimal("1"), params={"clientOrderId": "paper-local-2"}
+        )
         second = await self.exchange.create_order("BTC/USDT", "market", "buy", Decimal("1"))
         self.assertNotEqual(first["id"], second["id"])
         self.assertEqual((await self.exchange.fetch_balance())["USDT"].free, Decimal("800"))
@@ -140,7 +198,14 @@ class PaperExchangeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.exchange.fetch_balance())["USDT"].free, Decimal("1000"))
 
     async def test_invalid_or_unfunded_orders_leave_ledger_unchanged(self):
-        cases = [("buy", Decimal("0")), ("buy", Decimal("-1")), ("buy", Decimal("NaN")), ("buy", Decimal("Infinity")), ("buy", Decimal("11")), ("sell", Decimal("1"))]
+        cases = [
+            ("buy", Decimal("0")),
+            ("buy", Decimal("-1")),
+            ("buy", Decimal("NaN")),
+            ("buy", Decimal("Infinity")),
+            ("buy", Decimal("11")),
+            ("sell", Decimal("1")),
+        ]
         for side, amount in cases:
             with self.subTest(side=side, amount=amount), self.assertRaises(ValueError):
                 await self.exchange.create_order("BTC/USDT", "market", side, amount)

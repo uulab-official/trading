@@ -1,8 +1,9 @@
 """No-network stock paper broker regressions for KRW and USD markets."""
-from decimal import Decimal
-from pathlib import Path
+
 import sys
 import unittest
+from decimal import Decimal
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "packages/core"))

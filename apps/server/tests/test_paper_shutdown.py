@@ -6,20 +6,19 @@ a different time.time value. The ledger, checkpoint writer and installed CLI are
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = ROOT / "config/examples/offline_fixture.json"
 
 # sitecustomize also reaches pip's build subprocess. Never fetch dependencies or
 # allow network/DNS in the installation or any paper-engine child process.
-CHILD_GUARD = r'''
+CHILD_GUARD = r"""
 import json
 import os
 from pathlib import Path
@@ -68,7 +67,7 @@ if phase == "fixture":
             interrupt()
         return contents
     Path.read_text = read_fixture_and_interrupt
-'''
+"""
 
 
 @unittest.skipUnless(os.name == "posix", "Checkpoint locking and SIGINT require POSIX")
@@ -85,33 +84,82 @@ class InstalledPaperShutdownTests(unittest.TestCase):
         source.mkdir()
         for name in ("pyproject.toml", "README.md"):
             shutil.copyfile(ROOT / "apps/server" / name, source / name)
-        shutil.copytree(ROOT / "apps/server/trading_bot", source / "trading_bot",
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        shutil.copytree(
+            ROOT / "apps/server/trading_bot",
+            source / "trading_bot",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
         installed = root / "installed"
-        build_env = {"PATH": os.defpath, "PYTHONPATH": str(guard),
-                     "PIP_NO_INDEX": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
+        build_env = {
+            "PATH": os.defpath,
+            "PYTHONPATH": str(guard),
+            "PIP_NO_INDEX": "1",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        }
         build = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--no-index", "--no-deps", "--no-cache-dir",
-             "--no-build-isolation", "--no-compile", "--target", str(installed), str(source)],
-            cwd=root, env=build_env, text=True, capture_output=True, timeout=60,
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--no-index",
+                "--no-deps",
+                "--no-cache-dir",
+                "--no-build-isolation",
+                "--no-compile",
+                "--target",
+                str(installed),
+                str(source),
+            ],
+            cwd=root,
+            env=build_env,
+            text=True,
+            capture_output=True,
+            timeout=60,
         )
         if build.returncode:
-            raise AssertionError(f"Local offline CLI installation failed:\n{build.stdout}\n{build.stderr}")
+            raise AssertionError(
+                f"Local offline CLI installation failed:\n{build.stdout}\n{build.stderr}"
+            )
         cls.launcher = installed / "bin/trading-paper"
         if not cls.launcher.is_file():
-            raise AssertionError("Installation must generate the actual trading-paper console script")
-        cls.env = {"PATH": os.defpath, "PYTHONPATH": os.pathsep.join(map(str, (
-            guard, installed, ROOT / "packages/core", ROOT / "packages/data",
-            ROOT / "packages/strategy"))), "PAPER_TEST_CLOCK": "946684800"}
+            raise AssertionError(
+                "Installation must generate the actual trading-paper console script"
+            )
+        cls.env = {
+            "PATH": os.defpath,
+            "PYTHONPATH": os.pathsep.join(
+                map(
+                    str,
+                    (
+                        guard,
+                        installed,
+                        ROOT / "packages/core",
+                        ROOT / "packages/data",
+                        ROOT / "packages/strategy",
+                    ),
+                )
+            ),
+            "PAPER_TEST_CLOCK": "946684800",
+        }
 
-    def launch(self, checkpoint, *, interrupt_at=0, phase="after", clock="946684800",
-               signal_count=1):
-        env = {**self.env, "PAPER_TEST_INTERRUPT_AT": str(interrupt_at),
-               "PAPER_TEST_INTERRUPT_PHASE": phase, "PAPER_TEST_CLOCK": clock,
-               "PAPER_TEST_SIGNAL_COUNT": str(signal_count)}
+    def launch(
+        self, checkpoint, *, interrupt_at=0, phase="after", clock="946684800", signal_count=1
+    ):
+        env = {
+            **self.env,
+            "PAPER_TEST_INTERRUPT_AT": str(interrupt_at),
+            "PAPER_TEST_INTERRUPT_PHASE": phase,
+            "PAPER_TEST_CLOCK": clock,
+            "PAPER_TEST_SIGNAL_COUNT": str(signal_count),
+        }
         return subprocess.run(
             [str(self.launcher), str(FIXTURE), "--checkpoint", str(checkpoint)],
-            cwd=self.directory.name, env=env, text=True, capture_output=True, timeout=10,
+            cwd=self.directory.name,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=10,
         )
 
     def assert_success(self, result):
@@ -138,8 +186,9 @@ class InstalledPaperShutdownTests(unittest.TestCase):
                     self.assertIn("Paper replay interrupted", interrupted.stderr)
                     self.assertNotIn("Traceback", interrupted.stderr)
                     saved = json.loads(checkpoint.read_text())
-                    self.assertEqual(saved["next_index"], index,
-                                     "The first SIGINT must not process another bar")
+                    self.assertEqual(
+                        saved["next_index"], index, "The first SIGINT must not process another bar"
+                    )
                     self.assertFalse(list(root.glob(".paper-*.tmp")))
                     resumed = self.assert_success(self.launch(checkpoint, clock="4102444800"))
                     self.assertEqual(resumed, expected)
@@ -166,7 +215,6 @@ class InstalledPaperShutdownTests(unittest.TestCase):
             self.assertEqual(self.assert_success(self.launch(checkpoint)), expected)
             self.assertEqual(checkpoint.read_bytes(), full.read_bytes())
 
-
     def test_sigint_before_replay_saves_nothing_and_retry_starts_cleanly(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -177,8 +225,10 @@ class InstalledPaperShutdownTests(unittest.TestCase):
             self.assertIn("Paper replay interrupted", interrupted.stderr)
             self.assertNotIn("Traceback", interrupted.stderr)
             self.assertFalse(checkpoint.exists())
-            self.assertEqual(self.assert_success(self.launch(checkpoint)),
-                             self.assert_success(self.launch(root / "full.json")))
+            self.assertEqual(
+                self.assert_success(self.launch(checkpoint)),
+                self.assert_success(self.launch(root / "full.json")),
+            )
 
     def test_second_sigint_before_replace_preserves_previous_bar_and_releases_lock(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -192,8 +242,9 @@ class InstalledPaperShutdownTests(unittest.TestCase):
             self.assertEqual(json.loads(checkpoint.read_text())["next_index"], 57)
             self.assertFalse(list(root.glob(".paper-*.tmp")))
             full = root / "full.json"
-            self.assertEqual(self.assert_success(self.launch(checkpoint)),
-                             self.assert_success(self.launch(full)))
+            self.assertEqual(
+                self.assert_success(self.launch(checkpoint)), self.assert_success(self.launch(full))
+            )
             self.assertEqual(checkpoint.read_bytes(), full.read_bytes())
 
 

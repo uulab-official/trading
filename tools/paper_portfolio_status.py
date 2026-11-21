@@ -3,21 +3,26 @@
 Combines independently audited crypto and stock *simulated* portfolios.
 Never sums assets across brokers/currencies and never calls order endpoints.
 """
+
 import argparse
-from datetime import datetime, timezone
-from decimal import Decimal
 import json
-from pathlib import Path
 import sqlite3
 import sys
+from datetime import datetime, timezone
+from decimal import Decimal
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-for location in (ROOT, ROOT / "packages/core", ROOT / "packages/data",
-                 ROOT / "packages/strategy", ROOT / "apps/server"):
+for location in (
+    ROOT,
+    ROOT / "packages/core",
+    ROOT / "packages/data",
+    ROOT / "packages/strategy",
+    ROOT / "apps/server",
+):
     sys.path.insert(0, str(location))
 from tools.paper_checkpoint_audit import audit as audit_crypto
 from tools.stock_paper_forward import audit_forward as audit_stock
-
 
 MAX_SOURCE_BYTES = 10_000_000
 
@@ -30,10 +35,18 @@ def _fixture(path):
     return json.loads(raw)
 
 
-def inspect_portfolios(*, crypto_fixture=None, crypto_checkpoint=None,
-                       stock_fixture=None, stock_database=None,
-                       stock_cash=None, stock_fee_pct="0.1",
-                       fast=5, slow=20, allocation_pct="20"):
+def inspect_portfolios(
+    *,
+    crypto_fixture=None,
+    crypto_checkpoint=None,
+    stock_fixture=None,
+    stock_database=None,
+    stock_cash=None,
+    stock_fee_pct="0.1",
+    fast=5,
+    slow=20,
+    allocation_pct="20",
+):
     if bool(crypto_fixture) != bool(crypto_checkpoint):
         raise ValueError("Crypto fixture and checkpoint must be paired")
     if bool(stock_fixture) != bool(stock_database) or (
@@ -55,35 +68,46 @@ def inspect_portfolios(*, crypto_fixture=None, crypto_checkpoint=None,
         outcome = audit_crypto(Path(crypto_fixture), Path(crypto_checkpoint))
         if outcome["mode"] != "paper":
             raise ValueError("Cryptocurrency audit returned non-paper state")
-        payload["portfolios"].append({
-            "type": "crypto", "status": outcome["status"],
-            "symbol": outcome["symbol"],
-            "timeframe": outcome["timeframe"],
-            "processed_bars": outcome["processed_bars"],
-            "trade_count": outcome["trade_count"],
-            "daily_loss_halted": outcome["daily_loss_halted"],
-            "drawdown_halted": outcome["drawdown_halted"],
-            "checkpoint_sha256": outcome["checkpoint_sha256"],
-        })
+        payload["portfolios"].append(
+            {
+                "type": "crypto",
+                "status": outcome["status"],
+                "symbol": outcome["symbol"],
+                "timeframe": outcome["timeframe"],
+                "processed_bars": outcome["processed_bars"],
+                "trade_count": outcome["trade_count"],
+                "daily_loss_halted": outcome["daily_loss_halted"],
+                "drawdown_halted": outcome["drawdown_halted"],
+                "checkpoint_sha256": outcome["checkpoint_sha256"],
+            }
+        )
     if stock_fixture:
         outcome = audit_stock(
-            _fixture(stock_fixture), Path(stock_database),
-            initial_cash=stock_cash, fee_pct=stock_fee_pct,
-            fast=fast, slow=slow, allocation_pct=allocation_pct
+            _fixture(stock_fixture),
+            Path(stock_database),
+            initial_cash=stock_cash,
+            fee_pct=stock_fee_pct,
+            fast=fast,
+            slow=slow,
+            allocation_pct=allocation_pct,
         )
         if outcome["mode"] != "paper" or outcome["live_orders_enabled"] is not False:
             raise ValueError("Stock audit returned non-paper state")
-        payload["portfolios"].append({
-            "type": "stock", "status": outcome["status"],
-            "symbol": outcome["symbol"], "quote_currency": outcome["quote_currency"],
-            "processed_bars": outcome["bars"],
-            "trade_count": outcome["simulated_fills"],
-            "cash": outcome["cash"],
-            "holdings": outcome["holdings"],
-            "marked_equity": outcome["marked_equity"],
-            "total_return_pct": outcome["total_return_pct"],
-            "history_sha256": outcome["history_sha256"],
-        })
+        payload["portfolios"].append(
+            {
+                "type": "stock",
+                "status": outcome["status"],
+                "symbol": outcome["symbol"],
+                "quote_currency": outcome["quote_currency"],
+                "processed_bars": outcome["bars"],
+                "trade_count": outcome["simulated_fills"],
+                "cash": outcome["cash"],
+                "holdings": outcome["holdings"],
+                "marked_equity": outcome["marked_equity"],
+                "total_return_pct": outcome["total_return_pct"],
+                "history_sha256": outcome["history_sha256"],
+            }
+        )
     return payload
 
 
@@ -107,13 +131,20 @@ def main(argv=None):
             stock_database=args.stock_database,
             stock_cash=args.stock_initial_cash,
             stock_fee_pct=args.stock_fee_pct,
-            fast=args.fast, slow=args.slow,
+            fast=args.fast,
+            slow=args.slow,
             allocation_pct=args.allocation_pct,
         )
-    except (ValueError, TypeError, OSError, KeyError, ArithmeticError,
-            sqlite3.Error, json.JSONDecodeError):
-        print("Offline portfolio inspection refused invalid simulated state.",
-              file=sys.stderr)
+    except (
+        ValueError,
+        TypeError,
+        OSError,
+        KeyError,
+        ArithmeticError,
+        sqlite3.Error,
+        json.JSONDecodeError,
+    ):
+        print("Offline portfolio inspection refused invalid simulated state.", file=sys.stderr)
         return 2
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, allow_nan=False))
     return 0

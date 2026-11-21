@@ -1,22 +1,21 @@
 """Durable paper-only stock events, exact accounting and SQLite recovery."""
 
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
-from copy import deepcopy
-from decimal import Decimal, localcontext
 import hashlib
 import importlib
 import json
-from pathlib import Path
 import sqlite3
 import stat
 import subprocess
 import sys
 import tempfile
-from threading import Barrier, Event
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
+from copy import deepcopy
+from decimal import Decimal, localcontext
+from pathlib import Path
+from threading import Barrier, Event
 from unittest.mock import patch
-
 
 ROOT = Path(__file__).resolve().parents[3]
 MODULE_DIR = ROOT / "packages/core/trading_core"
@@ -28,23 +27,49 @@ def event(identity, kind, client="buy-1", **data):
 
 
 def reservation(identity="reserve-1", client="buy-1", **changes):
-    return event(identity, "reserve", client, **{
-        "order_date": "2026-11-21", "symbol": "005930", "side": "buy",
-        "quantity": 5, "limit_price": "70000", "max_notional": "350000", **changes,
-    })
+    return event(
+        identity,
+        "reserve",
+        client,
+        **{
+            "order_date": "2026-11-21",
+            "symbol": "005930",
+            "side": "buy",
+            "quantity": 5,
+            "limit_price": "70000",
+            "max_notional": "350000",
+            **changes,
+        },
+    )
 
 
 def acknowledgment(identity="ack-1", client="buy-1", **changes):
-    return event(identity, "acknowledge", client, **{
-        "broker_order_id": "0000000001", "broker_org_no": "06010", **changes,
-    })
+    return event(
+        identity,
+        "acknowledge",
+        client,
+        **{
+            "broker_order_id": "0000000001",
+            "broker_org_no": "06010",
+            **changes,
+        },
+    )
 
 
 def fill(identity="fill-1", client="buy-1", **changes):
-    return event(identity, "fill", client, **{
-        "execution_id": "exec-1", "quantity": 2, "price": "69900",
-        "fee_krw": "13", "tax_krw": "0", **changes,
-    })
+    return event(
+        identity,
+        "fill",
+        client,
+        **{
+            "execution_id": "exec-1",
+            "quantity": 2,
+            "price": "69900",
+            "fee_krw": "13",
+            "tax_krw": "0",
+            **changes,
+        },
+    )
 
 
 class StockOrderJournalTests(unittest.TestCase):
@@ -76,14 +101,24 @@ class StockOrderJournalTests(unittest.TestCase):
         self.assertEqual(before, self.journal.snapshot())
 
     def test_empty_snapshot_exposes_only_paper_deltas_and_account_alias(self):
-        self.assertEqual(self.journal.snapshot(), {
-            "mode": "paper", "live_orders_enabled": False,
-            "provenance": "synthetic_or_caller_supplied_unverified",
-            "account_ref": "paper-desk", "currency": "KRW", "market": "KRX",
-            "event_count": 0, "execution_count": 0,
-            "pending_client_order_ids": [], "blocked": False,
-            "cash_delta_krw": "0", "position_deltas": {}, "orders": [],
-        })
+        self.assertEqual(
+            self.journal.snapshot(),
+            {
+                "mode": "paper",
+                "live_orders_enabled": False,
+                "provenance": "synthetic_or_caller_supplied_unverified",
+                "account_ref": "paper-desk",
+                "currency": "KRW",
+                "market": "KRX",
+                "event_count": 0,
+                "execution_count": 0,
+                "pending_client_order_ids": [],
+                "blocked": False,
+                "cash_delta_krw": "0",
+                "position_deltas": {},
+                "orders": [],
+            },
+        )
 
     def test_partial_cancellation_preserves_exact_executed_cost_and_unfilled_shares(self):
         self.accepted()
@@ -93,18 +128,41 @@ class StockOrderJournalTests(unittest.TestCase):
         self.assertEqual(result["position_deltas"], {"005930": 2})
         self.assertFalse(result["blocked"])
         self.assertEqual(result["pending_client_order_ids"], [])
-        self.assertEqual(result["orders"], [{
-            "client_order_id": "buy-1", "order_date": "2026-11-21", "symbol": "005930",
-            "side": "buy", "quantity": 5, "limit_price": "70000", "max_notional": "350000",
-            "status": "canceled", "broker_order_id": "0000000001", "broker_org_no": "06010",
-            "filled_quantity": 2, "unfilled_quantity": 3, "working_quantity": 0,
-            "gross_krw": "139800", "fee_krw": "13", "tax_krw": "0",
-            "cash_delta_krw": "-139813", "executions": [{
-                "execution_id": "exec-1", "quantity": 2, "price": "69900",
-                "fee_krw": "13", "tax_krw": "0", "gross_krw": "139800",
-                "cash_delta_krw": "-139813",
-            }],
-        }])
+        self.assertEqual(
+            result["orders"],
+            [
+                {
+                    "client_order_id": "buy-1",
+                    "order_date": "2026-11-21",
+                    "symbol": "005930",
+                    "side": "buy",
+                    "quantity": 5,
+                    "limit_price": "70000",
+                    "max_notional": "350000",
+                    "status": "canceled",
+                    "broker_order_id": "0000000001",
+                    "broker_org_no": "06010",
+                    "filled_quantity": 2,
+                    "unfilled_quantity": 3,
+                    "working_quantity": 0,
+                    "gross_krw": "139800",
+                    "fee_krw": "13",
+                    "tax_krw": "0",
+                    "cash_delta_krw": "-139813",
+                    "executions": [
+                        {
+                            "execution_id": "exec-1",
+                            "quantity": 2,
+                            "price": "69900",
+                            "fee_krw": "13",
+                            "tax_krw": "0",
+                            "gross_krw": "139800",
+                            "cash_delta_krw": "-139813",
+                        }
+                    ],
+                }
+            ],
+        )
         reopened = self.Journal.open_existing(self.path, account_ref="paper-desk", read_only=True)
         self.assertEqual(result, reopened.snapshot())
 
@@ -121,8 +179,13 @@ class StockOrderJournalTests(unittest.TestCase):
         self.assertEqual(self.journal.record(acknowledgment())["orders"][0]["status"], "accepted")
 
     def test_every_unresolved_state_blocks_a_different_new_intent(self):
-        steps = [reservation(), event("uncertain-1", "submission_uncertain"), acknowledgment(),
-                 fill(), event("cancel-1", "cancel_requested")]
+        steps = [
+            reservation(),
+            event("uncertain-1", "submission_uncertain"),
+            acknowledgment(),
+            fill(),
+            event("cancel-1", "cancel_requested"),
+        ]
         for step in steps:
             self.journal.record(step)
             with self.subTest(state=self.journal.snapshot()["orders"][0]["status"]):
@@ -131,8 +194,11 @@ class StockOrderJournalTests(unittest.TestCase):
     def test_identical_event_id_is_idempotent_and_changed_payload_is_refused(self):
         first = self.journal.record(reservation())
         self.assertEqual(first, self.journal.record(deepcopy(reservation())))
-        for candidate in (reservation(quantity=4), acknowledgment(identity="reserve-1"),
-                          reservation(client="changed")):
+        for candidate in (
+            reservation(quantity=4),
+            acknowledgment(identity="reserve-1"),
+            reservation(client="changed"),
+        ):
             with self.subTest(kind=candidate["kind"]):
                 self.assert_unchanged_failure(candidate)
         self.assertEqual(self.journal.snapshot()["event_count"], 1)
@@ -155,9 +221,12 @@ class StockOrderJournalTests(unittest.TestCase):
         self.journal.record(event("uncertain-1", "submission_uncertain"))
         self.journal.record(acknowledgment())
         self.journal.record(fill(quantity=5))
-        for candidate in (reservation("duplicate-reserve"), acknowledgment("duplicate-ack"),
-                          event("duplicate-uncertain", "submission_uncertain"),
-                          fill("duplicate-exec", quantity=5)):
+        for candidate in (
+            reservation("duplicate-reserve"),
+            acknowledgment("duplicate-ack"),
+            event("duplicate-uncertain", "submission_uncertain"),
+            fill("duplicate-exec", quantity=5),
+        ):
             result = self.journal.record(candidate)
             self.assertEqual(result["orders"][0]["status"], "filled")
             self.assertEqual(result["execution_count"], 1)
@@ -193,7 +262,9 @@ class StockOrderJournalTests(unittest.TestCase):
         self.cancel()
         self.assert_unchanged_failure(fill())
         self.journal.record(reservation("reserve-2", "buy-2"))
-        rejected = self.journal.record(event("reject-2", "rejected", "buy-2", evidence_id="sim-reject"))
+        rejected = self.journal.record(
+            event("reject-2", "rejected", "buy-2", evidence_id="sim-reject")
+        )
         self.assertEqual(rejected["orders"][1]["unfilled_quantity"], 5)
         self.assertEqual(rejected["orders"][1]["working_quantity"], 0)
         self.assert_unchanged_failure(fill("fill-2", "buy-2"))
@@ -209,13 +280,18 @@ class StockOrderJournalTests(unittest.TestCase):
         rejected = self.journal.record(terminal)
         duplicate = self.journal.record({**terminal, "event_id": "duplicate-reject"})
         self.assertEqual(duplicate["orders"], rejected["orders"])
-        self.assert_unchanged_failure(event("reject-change", "rejected", "buy-2", evidence_id="changed"))
+        self.assert_unchanged_failure(
+            event("reject-change", "rejected", "buy-2", evidence_id="changed")
+        )
 
     def test_ack_is_required_and_invalid_out_of_order_lifecycle_does_not_write(self):
         self.assert_unchanged_failure(acknowledgment())
         self.journal.record(reservation())
-        for candidate in (fill(), event("cancel-1", "cancel_requested"),
-                          event("canceled-1", "canceled", evidence_id="sim-cancel")):
+        for candidate in (
+            fill(),
+            event("cancel-1", "cancel_requested"),
+            event("canceled-1", "canceled", evidence_id="sim-cancel"),
+        ):
             self.assert_unchanged_failure(candidate)
         self.journal.record(acknowledgment())
         self.assert_unchanged_failure(event("uncertain-1", "submission_uncertain"))
@@ -230,21 +306,41 @@ class StockOrderJournalTests(unittest.TestCase):
         self.cancel()
         self.journal.record(reservation("reserve-sell", "sell-1", side="sell"))
         self.journal.record(acknowledgment("ack-sell", "sell-1", broker_order_id="2"))
-        self.assert_unchanged_failure(fill("sell-fill", "sell-1", execution_id="exec-sell", price="69999"))
-        sold = self.journal.record(fill("sell-fill", "sell-1", execution_id="exec-sell", quantity=1,
-                                        price="70100", fee_krw="10", tax_krw="140"))
+        self.assert_unchanged_failure(
+            fill("sell-fill", "sell-1", execution_id="exec-sell", price="69999")
+        )
+        sold = self.journal.record(
+            fill(
+                "sell-fill",
+                "sell-1",
+                execution_id="exec-sell",
+                quantity=1,
+                price="70100",
+                fee_krw="10",
+                tax_krw="140",
+            )
+        )
         self.assertEqual(sold["orders"][1]["cash_delta_krw"], "69950")
         self.assertEqual(sold["cash_delta_krw"], "-209663")
         self.assertEqual(sold["position_deltas"], {"005930": 3})
 
     def test_exact_large_integer_costs_ignore_decimal_context(self):
-        self.accepted(quantity=9_999_999_999, limit_price="9999999999999999999",
-                      max_notional="99999999989999999990000000001")
+        self.accepted(
+            quantity=9_999_999_999,
+            limit_price="9999999999999999999",
+            max_notional="99999999989999999990000000001",
+        )
         with localcontext() as context:
             context.prec = 2
             context.Emax = 2
-            result = self.journal.record(fill(quantity=9_999_999_999, price="9999999999999999999",
-                                              fee_krw="99999999999999999999999999999", tax_krw="1"))
+            result = self.journal.record(
+                fill(
+                    quantity=9_999_999_999,
+                    price="9999999999999999999",
+                    fee_krw="99999999999999999999999999999",
+                    tax_krw="1",
+                )
+            )
         order = result["orders"][0]
         self.assertEqual(order["gross_krw"], "99999999989999999990000000001")
         self.assertEqual(order["cash_delta_krw"], "-199999999989999999990000000001")
@@ -256,8 +352,9 @@ class StockOrderJournalTests(unittest.TestCase):
         self.cancel()
         self.journal.record(reservation("reserve-2", "buy-2"))
         self.assert_unchanged_failure(acknowledgment("ack-2", "buy-2"))
-        self.assert_unchanged_failure(acknowledgment("ack-unpadded", "buy-2",
-                                                    broker_order_id="1", broker_org_no="6010"))
+        self.assert_unchanged_failure(
+            acknowledgment("ack-unpadded", "buy-2", broker_order_id="1", broker_org_no="6010")
+        )
         self.journal.record(acknowledgment("ack-2", "buy-2", broker_org_no="06011"))
         self.journal.record(event("reject-2", "rejected", "buy-2", evidence_id="sim-reject"))
         self.journal.record(reservation("reserve-3", "buy-3", order_date="2026-11-22"))
@@ -269,8 +366,17 @@ class StockOrderJournalTests(unittest.TestCase):
         self.journal.record(fill(quantity=5))
         self.journal.record(reservation("reserve-sell", "sell-1", side="sell"))
         self.journal.record(acknowledgment("ack-sell", "sell-1", broker_order_id="2"))
-        result = self.journal.record(fill("sell-fill", "sell-1", execution_id="exec-sell", quantity=5,
-                                          price="70100", fee_krw="10", tax_krw="140"))
+        result = self.journal.record(
+            fill(
+                "sell-fill",
+                "sell-1",
+                execution_id="exec-sell",
+                quantity=5,
+                price="70100",
+                fee_krw="10",
+                tax_krw="140",
+            )
+        )
         self.assertEqual(result["orders"][1]["gross_krw"], "350500")
         self.assertEqual(result["orders"][1]["max_notional"], "350000")
         self.assertEqual(result["position_deltas"], {})
@@ -301,10 +407,17 @@ class StockOrderJournalTests(unittest.TestCase):
         self.assertEqual(fresh["pending_client_order_ids"], ["buy-1"])
 
     def test_event_shapes_and_correlation_labels_are_strict(self):
-        for value in (None, [], "secret", {}, {**reservation(), "secret": "private"},
-                      {key: value for key, value in reservation().items() if key != "data"},
-                      {**reservation(), "data": []}, {**reservation(), "kind": []},
-                      {**reservation(), "kind": "RESERVE"}):
+        for value in (
+            None,
+            [],
+            "secret",
+            {},
+            {**reservation(), "secret": "private"},
+            {key: value for key, value in reservation().items() if key != "data"},
+            {**reservation(), "data": []},
+            {**reservation(), "kind": []},
+            {**reservation(), "kind": "RESERVE"},
+        ):
             self.assert_unchanged_failure(value)
         for field in ("event_id", "client_order_id"):
             for value in (None, True, 7, "", "-first", "A" * 65, "한글", "１", "id\n", "id/id"):
@@ -314,7 +427,14 @@ class StockOrderJournalTests(unittest.TestCase):
 
     def test_reservation_reuses_canonical_krx_krw_plan_validation(self):
         cases = {
-            "order_date": (None, "20261121", "2026-2-01", "2026-02-30", "２０２６-11-21", "2026-11-21\n"),
+            "order_date": (
+                None,
+                "20261121",
+                "2026-2-01",
+                "2026-02-30",
+                "２０２６-11-21",
+                "2026-11-21\n",
+            ),
             "symbol": (True, "5930", "００５９３０", "005930\n"),
             "side": (None, "BUY", "short"),
             "quantity": (True, 0, -1, 5.0, Decimal("5"), "5", 10_000_000_000),
@@ -395,8 +515,10 @@ class StockOrderJournalTests(unittest.TestCase):
                         self.Journal.create(path, account_ref="paper-desk")
                     self.assertFalse(path.exists())
                     preserved = sibling.lstat()
-                    self.assertEqual((preserved.st_dev, preserved.st_ino, preserved.st_mode),
-                                     (original.st_dev, original.st_ino, original.st_mode))
+                    self.assertEqual(
+                        (preserved.st_dev, preserved.st_ino, preserved.st_mode),
+                        (original.st_dev, original.st_ino, original.st_mode),
+                    )
                     if entry_kind == "regular":
                         self.assertEqual(sibling.read_bytes(), b"prior-evidence\n")
                     elif entry_kind == "directory":
@@ -448,7 +570,9 @@ class StockOrderJournalTests(unittest.TestCase):
     def test_read_only_record_fails_before_opening_any_connection(self):
         view = self.Journal.open_existing(self.path, account_ref="paper-desk", read_only=True)
         before = self.path.read_bytes()
-        with patch.object(view, "_connect", side_effect=AssertionError("A write connection was opened")):
+        with patch.object(
+            view, "_connect", side_effect=AssertionError("A write connection was opened")
+        ):
             with self.assertRaises(PermissionError):
                 view.record(reservation())
         self.assertEqual(before, self.path.read_bytes())
@@ -516,8 +640,10 @@ class StockOrderJournalTests(unittest.TestCase):
             db.set_trace_callback(trace)
             return db
 
-        with patch.object(view, "_connect", side_effect=reader_connect), \
-                ThreadPoolExecutor(max_workers=1) as pool:
+        with (
+            patch.object(view, "_connect", side_effect=reader_connect),
+            ThreadPoolExecutor(max_workers=1) as pool,
+        ):
             future = pool.submit(view.snapshot)
             self.assertTrue(reading_events.wait(timeout=5))
             try:
@@ -548,7 +674,9 @@ class StockOrderJournalTests(unittest.TestCase):
         with patch.object(self.module.sqlite3, "connect", side_effect=connect):
             with self.assertRaises(ValueError):
                 self.journal.record(fill())
-        self.assertEqual(self.Journal.open_existing(self.path, account_ref="paper-desk").snapshot(), before)
+        self.assertEqual(
+            self.Journal.open_existing(self.path, account_ref="paper-desk").snapshot(), before
+        )
         self.assertEqual(self.journal.record(fill())["execution_count"], 1)
 
     def test_child_process_exit_before_commit_recovers_without_partial_fill(self):
@@ -572,8 +700,20 @@ journal = StockOrderJournal.open_existing(sys.argv[2], account_ref='paper-desk')
 journal.record(json.loads(sys.argv[3]))
 os._exit(74)
 """
-        result = subprocess.run([sys.executable, "-S", "-c", script, str(MODULE_DIR), str(self.path),
-                                 json.dumps(fill())], capture_output=True, text=True, timeout=15)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-S",
+                "-c",
+                script,
+                str(MODULE_DIR),
+                str(self.path),
+                json.dumps(fill()),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
         self.assertEqual(result.returncode, 73, result.stderr)
         self.journal = self.Journal.open_existing(self.path, account_ref="paper-desk")
         self.assertEqual(self.journal.snapshot(), before)
@@ -595,7 +735,10 @@ os._exit(74)
         for index, statement in enumerate(statements):
             with self.subTest(statement=statement):
                 corrupt = Path(self.temp.name) / ("corrupt-" + str(index) + ".sqlite")
-                with closing(sqlite3.connect(self.path)) as source, closing(sqlite3.connect(corrupt)) as target:
+                with (
+                    closing(sqlite3.connect(self.path)) as source,
+                    closing(sqlite3.connect(corrupt)) as target,
+                ):
                     source.backup(target)
                     target.execute(statement)
                     target.commit()
@@ -614,7 +757,10 @@ os._exit(74)
         for index, statement in enumerate(statements):
             with self.subTest(statement=statement):
                 corrupt = Path(self.temp.name) / ("schema-" + str(index) + ".sqlite")
-                with closing(sqlite3.connect(self.path)) as source, closing(sqlite3.connect(corrupt)) as target:
+                with (
+                    closing(sqlite3.connect(self.path)) as source,
+                    closing(sqlite3.connect(corrupt)) as target,
+                ):
                     source.backup(target)
                     target.execute(statement)
                     target.commit()
@@ -625,8 +771,11 @@ os._exit(74)
         self.accepted()
         with sqlite3.connect(self.path) as db:
             db.execute("UPDATE events SET event_json='{}' WHERE sequence=1")
-        for action in (self.journal.snapshot, lambda: self.journal.record(fill()),
-                       lambda: self.journal.record(reservation())):
+        for action in (
+            self.journal.snapshot,
+            lambda: self.journal.record(fill()),
+            lambda: self.journal.record(reservation()),
+        ):
             with self.assertRaises(ValueError):
                 action()
 
@@ -634,16 +783,22 @@ os._exit(74)
         self.accepted()
         self.journal.record(fill())
         with sqlite3.connect(self.path) as db:
-            rows = db.execute("SELECT sequence, event_json, prev_hash FROM events ORDER BY sequence").fetchall()
+            rows = db.execute(
+                "SELECT sequence, event_json, prev_hash FROM events ORDER BY sequence"
+            ).fetchall()
             previous = rows[0][2]
             for sequence, body, _ in rows:
                 if sequence == 2:
                     changed = json.loads(body)
                     changed.update(kind="submission_uncertain", data={})
                     body = json.dumps(changed, sort_keys=True, separators=(",", ":"))
-                digest = hashlib.sha256((str(sequence) + "\n" + previous + "\n" + body).encode()).hexdigest()
-                db.execute("UPDATE events SET event_json=?, prev_hash=?, event_hash=? WHERE sequence=?",
-                           (body, previous, digest, sequence))
+                digest = hashlib.sha256(
+                    (str(sequence) + "\n" + previous + "\n" + body).encode()
+                ).hexdigest()
+                db.execute(
+                    "UPDATE events SET event_json=?, prev_hash=?, event_hash=? WHERE sequence=?",
+                    (body, previous, digest, sequence),
+                )
                 previous = digest
             db.execute("UPDATE journal_tail SET event_hash=?", (previous,))
         with self.assertRaises(ValueError):
@@ -660,8 +815,12 @@ from stock_order_journal import StockOrderJournal
 journal = StockOrderJournal.open_existing(sys.argv[2], account_ref='paper-desk', read_only=True)
 print(json.dumps(journal.snapshot()))
 """
-        result = subprocess.run([sys.executable, "-S", "-c", script, str(MODULE_DIR), str(self.path)],
-                                capture_output=True, text=True, timeout=15)
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", script, str(MODULE_DIR), str(self.path)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), self.journal.snapshot())
 

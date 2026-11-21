@@ -3,29 +3,35 @@
 These tests do not construct a bot, exchange, service, or external client.
 """
 
+import asyncio
+import json
+import sqlite3
+import tempfile
+import unittest
+import warnings
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-import json
-import unittest
-from unittest.mock import patch
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
+from trading_core.order_manager import OrderManager, OrderSide, OrderStatus, OrderType
 from trading_core.portfolio import Portfolio
 from trading_core.risk_manager import RiskConfig, RiskManager
+from trading_core.state_store import BotState, SQLiteStateStore
 
 
 class UtcDailyBoundaryTests(unittest.TestCase):
     def setUp(self):
         for target in ("socket.socket.connect", "socket.create_connection", "socket.getaddrinfo"):
-            guard = patch(target, side_effect=AssertionError("UTC boundary checks forbid network/DNS"))
+            guard = patch(
+                target, side_effect=AssertionError("UTC boundary checks forbid network/DNS")
+            )
             guard.start()
             self.addCleanup(guard.stop)
 
         class Clock(datetime):
             current = datetime(2026, 10, 4, 23, 59, 50)
-
-            @classmethod
-            def utcnow(cls):
-                return cls.current
 
             @classmethod
             def now(cls, tz=None):
@@ -79,7 +85,9 @@ class UtcDailyBoundaryTests(unittest.TestCase):
     def test_first_close_then_check_then_report_keeps_new_loss(self):
         portfolio, manager = self.carry_position_into_next_utc_day()
         self.close_trade(portfolio, manager, "40")
-        allowed, reason = manager.check_trade_allowed("ETH/USDT", "buy", Decimal("0.01"), Decimal("100"))
+        allowed, reason = manager.check_trade_allowed(
+            "ETH/USDT", "buy", Decimal("0.01"), Decimal("100")
+        )
         self.assertFalse(allowed)
         self.assertIn("Circuit breaker", reason)
         self.assert_current_day_loss(portfolio, manager)
@@ -89,7 +97,9 @@ class UtcDailyBoundaryTests(unittest.TestCase):
         self.close_trade(portfolio, manager, "40")
         for _ in range(3):
             manager.reset_daily_stats()
-            self.assertFalse(manager.check_trade_allowed("ETH/USDT", "buy", Decimal("0.01"), Decimal("100"))[0])
+            self.assertFalse(
+                manager.check_trade_allowed("ETH/USDT", "buy", Decimal("0.01"), Decimal("100"))[0]
+            )
             self.assert_current_day_loss(portfolio, manager)
 
     def test_first_action_is_risk_reset_and_repeated_calls_do_not_rebase(self):
@@ -108,7 +118,7 @@ class UtcDailyBoundaryTests(unittest.TestCase):
         portfolio.open_position("BTC/USDT", "long", Decimal("1"), Decimal("100"))
         self.close_trade(portfolio, manager, "90")
         self.clock.current += timedelta(seconds=5)
-        self.assertEqual(self.clock.utcnow().date().isoformat(), "2026-10-04")
+        self.assertEqual(self.clock.current.date().isoformat(), "2026-10-04")
         self.assertEqual(self.clock.now().date().isoformat(), "2026-10-05")
         for _ in range(3):
             manager.reset_daily_stats()
@@ -197,7 +207,7 @@ class UtcDailyBoundaryTests(unittest.TestCase):
         supplied_time = datetime(2000, 1, 1)
         trade = portfolio.close_position("BTC/USDT", Decimal("40"), exit_time=supplied_time)
         self.assertEqual(trade.closed_at, supplied_time)
-        self.assertEqual(trade.accounting_date, self.clock.utcnow().date())
+        self.assertEqual(trade.accounting_date, self.clock.current.date())
         manager.on_position_closed(trade.pnl, accounting_date=trade.accounting_date)
         self.assert_current_day_loss(portfolio, manager)
 
@@ -208,9 +218,12 @@ class UtcDailyBoundaryTests(unittest.TestCase):
         expected_state = portfolio.to_dict()
         expected_report = manager.get_risk_report()
         period = portfolio.daily_date
-        invalid_inputs = [("2026-10-04", TypeError), (1, TypeError),
-                          (self.clock.utcnow(), TypeError),
-                          (period + timedelta(days=1), ValueError)]
+        invalid_inputs = [
+            ("2026-10-04", TypeError),
+            (1, TypeError),
+            (self.clock.current, TypeError),
+            (period + timedelta(days=1), ValueError),
+        ]
         for value, error in invalid_inputs:
             with self.subTest(value=value), self.assertRaises(error):
                 manager.on_position_closed(Decimal("500"), accounting_date=value)
@@ -224,12 +237,34 @@ class UtcDailyBoundaryTests(unittest.TestCase):
         trade = self.close_trade(portfolio, manager, "90")
         self.assertEqual(trade.accounting_date, portfolio.daily_date)
         saved = json.loads(json.dumps(portfolio.to_dict()))
-        self.assertEqual(set(saved), {"initial_balance", "cash_balance", "positions", "trades",
-                                    "daily_start_value", "total_pnl", "win_count", "loss_count"})
+        self.assertEqual(
+            set(saved),
+            {
+                "initial_balance",
+                "cash_balance",
+                "positions",
+                "trades",
+                "daily_start_value",
+                "total_pnl",
+                "win_count",
+                "loss_count",
+            },
+        )
         self.assertEqual(set(saved["trades"][0]), {"symbol", "pnl", "pnl_pct", "closed_at"})
         self.assertNotIn("accounting_date", json.dumps(saved))
-        self.assertEqual(set(manager.get_risk_report()), {"daily_pnl", "daily_pnl_pct", "daily_trades",
-                         "daily_losses", "open_positions", "circuit_breaker", "cooldown_active", "cooldown_remaining"})
+        self.assertEqual(
+            set(manager.get_risk_report()),
+            {
+                "daily_pnl",
+                "daily_pnl_pct",
+                "daily_trades",
+                "daily_losses",
+                "open_positions",
+                "circuit_breaker",
+                "cooldown_active",
+                "cooldown_remaining",
+            },
+        )
         restored = Portfolio.from_dict(saved)
         self.assertEqual(restored.to_dict()["cash_balance"], saved["cash_balance"])
         # This remains the legacy persistence limitation, not restart recovery.
@@ -242,7 +277,7 @@ class UtcDailyBoundaryTests(unittest.TestCase):
         self.close_trade(portfolio, manager, "40")
         same_instant = datetime(2026, 10, 5, 8, tzinfo=timezone(timedelta(hours=9)))
         portfolio.ensure_daily_period(same_instant)
-        self.assertEqual(portfolio.daily_date, self.clock.utcnow().date())
+        self.assertEqual(portfolio.daily_date, self.clock.current.date())
         self.assertEqual(portfolio.get_daily_loss_pct(), Decimal("6"))
         self.assertTrue(manager.get_risk_report()["circuit_breaker"])
         # This is October 5 in UTC even though the supplied local date is Oct 4.
@@ -267,7 +302,129 @@ class UtcDailyBoundaryTests(unittest.TestCase):
                 self.assertEqual(report["daily_trades"], 1)
                 self.assertTrue(report["circuit_breaker"])
                 self.assertEqual(portfolio.get_daily_loss_pct(), Decimal("6"))
-                self.assertFalse(manager.check_trade_allowed("ETH/USDT", "buy", Decimal("0.01"), Decimal("100"))[0])
+                self.assertFalse(
+                    manager.check_trade_allowed("ETH/USDT", "buy", Decimal("0.01"), Decimal("100"))[
+                        0
+                    ]
+                )
+
+    def test_position_clock_and_saved_timestamps_remain_naive_utc(self):
+        opened = self.clock.current
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            portfolio, _ = self.account()
+            position = portfolio.open_position("BTC/USDT", "long", Decimal("1"), Decimal("100"))
+            self.assertEqual(position.opened_at, opened)
+            self.assertIsNone(position.opened_at.tzinfo)
+            saved = portfolio.to_dict()
+            self.assertEqual(saved["positions"]["BTC/USDT"]["opened_at"], opened.isoformat())
+            restored = Portfolio.from_dict(saved)
+            self.assertEqual(restored.get_position("BTC/USDT").opened_at, opened)
+            self.assertIsNone(restored.get_position("BTC/USDT").opened_at.tzinfo)
+            self.clock.current += timedelta(hours=2)
+            self.assertEqual(restored.get_position_report()[0]["duration_hours"], 2)
+            trade = restored.close_position("BTC/USDT", Decimal("110"))
+            self.assertEqual(trade.closed_at, self.clock.current)
+            self.assertIsNone(trade.closed_at.tzinfo)
+            self.assertEqual(
+                restored.to_dict()["trades"][0]["closed_at"], self.clock.current.isoformat()
+            )
+
+    def test_order_creation_update_cancel_and_sync_keep_naive_utc(self):
+        async def exercise():
+            async def create(**kwargs):
+                self.clock.current += timedelta(seconds=1)
+                return {"id": "fixture-order", "status": "open", "filled": "0"}
+
+            exchange = SimpleNamespace(
+                create_order=AsyncMock(side_effect=create),
+                cancel_order=AsyncMock(),
+                fetch_order=AsyncMock(return_value={"status": "closed", "filled": "1"}),
+            )
+            manager = OrderManager(exchange)
+            created = self.clock.current
+            first = await manager.place_order(
+                "BTC/USDT", OrderSide.BUY, OrderType.MARKET, Decimal("1")
+            )
+            self.assertEqual(first.created_at, created)
+            self.assertEqual(first.updated_at, created + timedelta(seconds=1))
+            for stamp in (first.created_at, first.updated_at):
+                self.assertIsNone(stamp.tzinfo)
+            self.assertEqual(first.to_dict()["created_at"], created.isoformat())
+            self.assertEqual(first.to_dict()["updated_at"], self.clock.current.isoformat())
+
+            self.clock.current += timedelta(minutes=1)
+            canceled = await manager.cancel_order(first.client_order_id)
+            self.assertIs(canceled.status, OrderStatus.CANCELED)
+            self.assertEqual(canceled.updated_at, self.clock.current)
+            self.assertIsNone(canceled.updated_at.tzinfo)
+
+            second = await manager.place_order(
+                "ETH/USDT", OrderSide.BUY, OrderType.MARKET, Decimal("1")
+            )
+            self.clock.current += timedelta(minutes=1)
+            await manager._sync_orders()
+            self.assertIs(second.status, OrderStatus.FILLED)
+            self.assertEqual(second.updated_at, self.clock.current)
+            self.assertIsNone(second.updated_at.tzinfo)
+
+            exchange.create_order.side_effect = OSError("inert rejection")
+            self.clock.current += timedelta(minutes=1)
+            with self.assertRaisesRegex(OSError, "inert rejection"):
+                await manager.place_order(
+                    "LTC/USDT",
+                    OrderSide.BUY,
+                    OrderType.MARKET,
+                    Decimal("1"),
+                    client_order_id="rejected",
+                )
+            rejected = await manager.get_order("rejected")
+            self.assertIs(rejected.status, OrderStatus.REJECTED)
+            self.assertEqual(rejected.updated_at, self.clock.current)
+            self.assertIsNone(rejected.updated_at.tzinfo)
+
+        with patch("trading_core.order_manager.datetime", self.clock), warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            asyncio.run(exercise())
+
+    def test_sqlite_and_legacy_bot_state_keep_naive_utc_serialization(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("trading_core.state_store.datetime", self.clock),
+        ):
+            store = SQLiteStateStore(str(Path(directory) / "state.sqlite"))
+            state = BotState(store, "fixture")
+            state.save_checkpoint({"balance": "1000"})
+            expected = self.clock.current.isoformat()
+            self.assertEqual(state.load_checkpoint(), {"balance": "1000", "timestamp": expected})
+            self.assertEqual(store.get_last_updated("bot:fixture:checkpoint"), self.clock.current)
+            self.assertIsNone(store.get_last_updated("bot:fixture:checkpoint").tzinfo)
+            with sqlite3.connect(store.db_path) as connection:
+                updated = connection.execute("SELECT updated_at FROM state").fetchone()[0]
+            self.assertEqual(updated, expected)
+
+    def test_cooldown_keeps_naive_utc_across_local_calendar_boundary(self):
+        self.clock.current = datetime(2026, 10, 4, 14, 59, 50)
+        portfolio = Portfolio(Decimal("1000"))
+        manager = RiskManager(RiskConfig(cooldown_minutes_after_loss=5), portfolio)
+        portfolio.open_position("BTC/USDT", "long", Decimal("1"), Decimal("100"))
+        self.close_trade(portfolio, manager, "99")
+        expected = self.clock.current + timedelta(minutes=5)
+        self.assertEqual(manager._cooldown_until, expected)
+        self.assertIsNone(manager._cooldown_until.tzinfo)
+        self.assertEqual(manager.get_risk_report()["cooldown_remaining"], 5)
+        self.clock.current += timedelta(minutes=2)
+        self.assertEqual(self.clock.now().date().isoformat(), "2026-10-05")
+        allowed, reason = manager.check_trade_allowed(
+            "ETH/USDT", "buy", Decimal("0.01"), Decimal("100")
+        )
+        self.assertFalse(allowed)
+        self.assertIn("Cooldown active", reason)
+        self.assertEqual(manager.get_risk_report()["cooldown_remaining"], 3)
+        self.clock.current = expected
+        self.assertTrue(
+            manager.check_trade_allowed("ETH/USDT", "buy", Decimal("0.01"), Decimal("100"))[0]
+        )
 
 
 if __name__ == "__main__":

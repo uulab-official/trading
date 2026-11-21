@@ -13,7 +13,9 @@ def validate_execution_mode(config: Any, *, enable_live_trading: bool = False) -
     if config.mode == "paper":
         return
     if enable_live_trading is not True:
-        raise ValueError("Live trading is disabled; the user must explicitly pass --enable-live-trading")
+        raise ValueError(
+            "Live trading is disabled; the user must explicitly pass --enable-live-trading"
+        )
     exchange = config.exchange
     if not exchange.api_key or not exchange.api_secret:
         raise ValueError("Live mode requires user-configured exchange credentials")

@@ -1,16 +1,17 @@
 """Offline Toss token-reuse and read-only market-data contract tests."""
+
+import json
+import os
+import stat
+import sys
+import tempfile
+import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone, tzinfo
 from email.message import Message
 from io import BytesIO, StringIO
-import json
-import os
 from pathlib import Path
-import stat
-import sys
-import tempfile
 from types import SimpleNamespace
-import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs
@@ -20,14 +21,23 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from tools.toss_readonly_snapshot import fetch_readonly_minute, main
 
-
 TOKEN = "EXAMPLE-TOKEN-DO-NOT-PRINT"
-CANDLES = {"result": {"candles": [{
-    "timestamp": "2026-03-25T09:30:00+09:00",
-    "openPrice": "100", "highPrice": "120",
-    "lowPrice": "90", "closePrice": "110",
-    "volume": "10", "currency": "KRW",
-}], "nextBefore": None}}
+CANDLES = {
+    "result": {
+        "candles": [
+            {
+                "timestamp": "2026-03-25T09:30:00+09:00",
+                "openPrice": "100",
+                "highPrice": "120",
+                "lowPrice": "90",
+                "closePrice": "110",
+                "volume": "10",
+                "currency": "KRW",
+            }
+        ],
+        "nextBefore": None,
+    }
+}
 
 
 class _Response:
@@ -59,8 +69,7 @@ class TossReadOnlyTests(unittest.TestCase):
     def setUp(self):
         self.requests = []
         self.observed = datetime(2026, 3, 25, 1, 0, tzinfo=timezone.utc)
-        for target in ("socket.socket.connect", "socket.create_connection",
-                       "socket.getaddrinfo"):
+        for target in ("socket.socket.connect", "socket.create_connection", "socket.getaddrinfo"):
             guard = patch(target, side_effect=AssertionError("Network forbidden"))
             guard.start()
             self.addCleanup(guard.stop)
@@ -68,31 +77,51 @@ class TossReadOnlyTests(unittest.TestCase):
     def fake_open(self, request, *, timeout):
         self.requests.append(request)
         self.assertEqual(10, timeout)
-        if (request.get_method() == "POST"
-                and request.full_url == "https://openapi.tossinvest.com/oauth2/token"):
-            return _Response({"access_token": TOKEN,
-                              "token_type": "Bearer", "expires_in": 3600})
-        if (request.get_method() == "GET" and request.full_url.startswith(
-                "https://openapi.tossinvest.com/api/v1/candles?")):
+        if (
+            request.get_method() == "POST"
+            and request.full_url == "https://openapi.tossinvest.com/oauth2/token"
+        ):
+            return _Response({"access_token": TOKEN, "token_type": "Bearer", "expires_in": 3600})
+        if request.get_method() == "GET" and request.full_url.startswith(
+            "https://openapi.tossinvest.com/api/v1/candles?"
+        ):
             return _Response(CANDLES)
         self.fail("Unexpected request method or endpoint")
 
     def cli(self, output, environment, *, flags=(), opener=None):
-        args = ["--mode", "paper", "--allow-network-readonly",
-                "--symbol", "005930", "--currency", "KRW",
-                "--output", str(output), *flags]
+        args = [
+            "--mode",
+            "paper",
+            "--allow-network-readonly",
+            "--symbol",
+            "005930",
+            "--currency",
+            "KRW",
+            "--output",
+            str(output),
+            *flags,
+        ]
         stdout, stderr = StringIO(), StringIO()
         transport = SimpleNamespace(open=opener or self.fake_open)
-        with patch.dict(os.environ, environment, clear=True), patch(
-                "tools.toss_readonly_snapshot.build_opener", return_value=transport
-        ), redirect_stdout(stdout), redirect_stderr(stderr):
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch("tools.toss_readonly_snapshot.build_opener", return_value=transport),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
             result = main(args)
         return result, stdout.getvalue(), stderr.getvalue()
 
     def test_only_oauth_post_and_market_data_get_are_requested(self):
         result = fetch_readonly_minute(
-            "005930", "KRW", client_id="client", client_secret="secret",
-            count=10, adjusted=False, issue_token=True, opener=self.fake_open,
+            "005930",
+            "KRW",
+            client_id="client",
+            client_secret="secret",
+            count=10,
+            adjusted=False,
+            issue_token=True,
+            opener=self.fake_open,
             observed_at=self.observed,
         )
         self.assertEqual("paper", result["mode"])
@@ -103,34 +132,43 @@ class TossReadOnlyTests(unittest.TestCase):
         self.assertTrue(token.full_url.endswith("/oauth2/token"))
         self.assertIn(b"client_secret=secret", token.data)
         self.assertEqual("GET", data.get_method())
-        self.assertTrue(data.full_url.startswith(
-            "https://openapi.tossinvest.com/api/v1/candles?"
-        ))
+        self.assertTrue(data.full_url.startswith("https://openapi.tossinvest.com/api/v1/candles?"))
         self.assertIn("adjusted=false", data.full_url)
-        self.assertEqual("Bearer EXAMPLE-TOKEN-DO-NOT-PRINT",
-                         data.get_header("Authorization"))
+        self.assertEqual("Bearer EXAMPLE-TOKEN-DO-NOT-PRINT", data.get_header("Authorization"))
         self.assertIsNone(data.get_header("X-Tossinvest-Account"))
         self.assertNotIn("secret", json.dumps(result))
         self.assertNotIn("EXAMPLE-TOKEN", json.dumps(result))
 
     def test_missing_credentials_fails_without_network_call(self):
         with self.assertRaises(ValueError):
-            fetch_readonly_minute("AAPL", "USD",
-                                  client_id=None, client_secret="",
-                                  issue_token=True, opener=self.fake_open)
+            fetch_readonly_minute(
+                "AAPL",
+                "USD",
+                client_id=None,
+                client_secret="",
+                issue_token=True,
+                opener=self.fake_open,
+            )
         self.assertEqual([], self.requests)
 
     def test_credentials_alone_refuse_without_issuing_a_token(self):
         with self.assertRaises(ValueError):
             fetch_readonly_minute(
-                "005930", "KRW", client_id="client", client_secret="secret",
-                opener=self.fake_open, observed_at=self.observed,
+                "005930",
+                "KRW",
+                client_id="client",
+                client_secret="secret",
+                opener=self.fake_open,
+                observed_at=self.observed,
             )
         self.assertEqual([], self.requests)
 
     def test_supplied_token_requires_only_one_market_get(self):
         result = fetch_readonly_minute(
-            "005930", "KRW", access_token=TOKEN, opener=self.fake_open,
+            "005930",
+            "KRW",
+            access_token=TOKEN,
+            opener=self.fake_open,
             observed_at=self.observed,
         )
         self.assertEqual(1, len(self.requests))
@@ -142,8 +180,7 @@ class TossReadOnlyTests(unittest.TestCase):
         self.assertNotIn(TOKEN, request.full_url)
         self.assertEqual("toss_readonly_authenticated_quote", result["source"])
         self.assertEqual("2026-03-25T01:00:00+00:00", result["observed_at_utc"])
-        self.assertEqual([[1774398540000, "100", "120", "90", "110", "10"]],
-                         result["candles"])
+        self.assertEqual([[1774398540000, "100", "120", "90", "110", "10"]], result["candles"])
         self.assertNotIn(TOKEN, json.dumps(result))
 
     def test_supplied_token_takes_precedence_over_credentials_and_issue_optin(self):
@@ -151,59 +188,101 @@ class TossReadOnlyTests(unittest.TestCase):
             with self.subTest(issue_token=issue_token):
                 self.requests.clear()
                 fetch_readonly_minute(
-                    "005930", "KRW", access_token=TOKEN,
-                    client_id="client", client_secret="secret",
-                    issue_token=issue_token, opener=self.fake_open,
+                    "005930",
+                    "KRW",
+                    access_token=TOKEN,
+                    client_id="client",
+                    client_secret="secret",
+                    issue_token=issue_token,
+                    opener=self.fake_open,
                     observed_at=self.observed,
                 )
                 self.assertEqual(["GET"], [r.get_method() for r in self.requests])
 
     def test_supplied_token_does_not_require_valid_unused_credentials(self):
         fetch_readonly_minute(
-            "005930", "KRW", access_token=TOKEN, issue_token=True,
-            client_id=None, client_secret="unused\r\ncredential",
-            opener=self.fake_open, observed_at=self.observed,
+            "005930",
+            "KRW",
+            access_token=TOKEN,
+            issue_token=True,
+            client_id=None,
+            client_secret="unused\r\ncredential",
+            opener=self.fake_open,
+            observed_at=self.observed,
         )
         self.assertEqual(["GET"], [r.get_method() for r in self.requests])
 
     def test_invalid_supplied_tokens_refuse_before_any_request_or_fallback(self):
         invalid = {
-            "empty": "", "spaces": " ", "embedded space": "abc def",
-            "newline": "abc\ndef", "header injection": "abc\r\nX-Evil: 1",
-            "tab": "abc\tdef", "NUL": "abc\x00def", "DEL": "abc\x7f",
-            "Unicode": "abcé", "colon": "abc:def", "quotes": '"abc"',
-            "scheme prefix": "Bearer abc", "internal padding": "ab=cd",
-            "padding only": "=", "integer": 123, "boolean": True,
-            "bytes": b"abc", "list": ["abc"], "oversized": "a" * 4097,
+            "empty": "",
+            "spaces": " ",
+            "embedded space": "abc def",
+            "newline": "abc\ndef",
+            "header injection": "abc\r\nX-Evil: 1",
+            "tab": "abc\tdef",
+            "NUL": "abc\x00def",
+            "DEL": "abc\x7f",
+            "Unicode": "abcé",
+            "colon": "abc:def",
+            "quotes": '"abc"',
+            "scheme prefix": "Bearer abc",
+            "internal padding": "ab=cd",
+            "padding only": "=",
+            "integer": 123,
+            "boolean": True,
+            "bytes": b"abc",
+            "list": ["abc"],
+            "oversized": "a" * 4097,
         }
         for label, token in invalid.items():
             for issue_token in (False, True):
                 with self.subTest(case=label, issue_token=issue_token):
                     with self.assertRaises(ValueError):
                         fetch_readonly_minute(
-                            "005930", "KRW", access_token=token,
-                            client_id="client", client_secret="secret",
-                            issue_token=issue_token, opener=self.fake_open,
+                            "005930",
+                            "KRW",
+                            access_token=token,
+                            client_id="client",
+                            client_secret="secret",
+                            issue_token=issue_token,
+                            opener=self.fake_open,
                             observed_at=self.observed,
                         )
                     self.assertEqual([], self.requests)
 
     def test_bearer_grammar_and_local_length_boundary_are_supported(self):
-        for label, token in (("short", "a"), ("all symbols", "AZaz09-._~+/=="),
-                             ("length boundary", "a" * 4096)):
+        for label, token in (
+            ("short", "a"),
+            ("all symbols", "AZaz09-._~+/=="),
+            ("length boundary", "a" * 4096),
+        ):
             with self.subTest(case=label):
                 self.requests.clear()
                 fetch_readonly_minute(
-                    "005930", "KRW", access_token=token,
-                    opener=self.fake_open, observed_at=self.observed,
+                    "005930",
+                    "KRW",
+                    access_token=token,
+                    opener=self.fake_open,
+                    observed_at=self.observed,
                 )
                 self.assertEqual(1, len(self.requests))
-                self.assertEqual("Bearer " + token,
-                                 self.requests[0].get_header("Authorization"))
+                self.assertEqual("Bearer " + token, self.requests[0].get_header("Authorization"))
 
     def test_invalid_issuance_credentials_refuse_before_network(self):
-        invalid = (None, "", " ", 123, True, b"abc", "abc\r\nX-Evil: 1",
-                   "abc\t", "abc\x00", "abc\x7f", "abcé", "a" * 4097)
+        invalid = (
+            None,
+            "",
+            " ",
+            123,
+            True,
+            b"abc",
+            "abc\r\nX-Evil: 1",
+            "abc\t",
+            "abc\x00",
+            "abc\x7f",
+            "abcé",
+            "a" * 4097,
+        )
         for field in ("client_id", "client_secret"):
             for index, value in enumerate(invalid):
                 with self.subTest(field=field, case=index):
@@ -211,45 +290,65 @@ class TossReadOnlyTests(unittest.TestCase):
                     credentials[field] = value
                     with self.assertRaises(ValueError):
                         fetch_readonly_minute(
-                            "005930", "KRW", issue_token=True,
-                            opener=self.fake_open, observed_at=self.observed,
+                            "005930",
+                            "KRW",
+                            issue_token=True,
+                            opener=self.fake_open,
+                            observed_at=self.observed,
                             **credentials,
                         )
                     self.assertEqual([], self.requests)
 
     def test_issued_credentials_remain_form_encoded(self):
         fetch_readonly_minute(
-            "005930", "KRW", client_id="client+id&scope=paper",
-            client_secret="secret /?&=:+", issue_token=True,
-            opener=self.fake_open, observed_at=self.observed,
+            "005930",
+            "KRW",
+            client_id="client+id&scope=paper",
+            client_secret="secret /?&=:+",
+            issue_token=True,
+            opener=self.fake_open,
+            observed_at=self.observed,
         )
-        self.assertEqual({
-            "grant_type": ["client_credentials"],
-            "client_id": ["client+id&scope=paper"],
-            "client_secret": ["secret /?&=:+"],
-        }, parse_qs(self.requests[0].data.decode("utf-8")))
+        self.assertEqual(
+            {
+                "grant_type": ["client_credentials"],
+                "client_id": ["client+id&scope=paper"],
+                "client_secret": ["secret /?&=:+"],
+            },
+            parse_qs(self.requests[0].data.decode("utf-8")),
+        )
 
     def test_invalid_issue_optin_refuses_before_network(self):
         for value in (None, 0, 1, "true"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 fetch_readonly_minute(
-                    "005930", "KRW", access_token=TOKEN,
-                    issue_token=value, opener=self.fake_open,
+                    "005930",
+                    "KRW",
+                    access_token=TOKEN,
+                    issue_token=value,
+                    opener=self.fake_open,
                 )
         self.assertEqual([], self.requests)
 
     def test_invalid_request_inputs_refuse_before_token_issuance(self):
         for values in (
-            {"symbol": "005930\r\nX-Evil: 1"}, {"symbol": ""},
-            {"currency": "EUR"}, {"count": 0}, {"count": 201},
-            {"count": True}, {"adjusted": "true"},
+            {"symbol": "005930\r\nX-Evil: 1"},
+            {"symbol": ""},
+            {"currency": "EUR"},
+            {"count": 0},
+            {"count": 201},
+            {"count": True},
+            {"adjusted": "true"},
         ):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 inputs = dict(symbol="005930", currency="KRW", count=10, adjusted=True)
                 inputs.update(values)
                 fetch_readonly_minute(
-                    **inputs, client_id="client", client_secret="secret",
-                    issue_token=True, opener=self.fake_open,
+                    **inputs,
+                    client_id="client",
+                    client_secret="secret",
+                    issue_token=True,
+                    opener=self.fake_open,
                     observed_at=self.observed,
                 )
         self.assertEqual([], self.requests)
@@ -259,22 +358,34 @@ class TossReadOnlyTests(unittest.TestCase):
             def utcoffset(self, unused):
                 return None
 
-        for value in ("2026-03-25T01:00:00Z", 0, False,
-                      datetime(2026, 3, 25), datetime(2026, 3, 25, tzinfo=NoOffset())):
+        for value in (
+            "2026-03-25T01:00:00Z",
+            0,
+            False,
+            datetime(2026, 3, 25),
+            datetime(2026, 3, 25, tzinfo=NoOffset()),
+        ):
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):
                     fetch_readonly_minute(
-                        "005930", "KRW", client_id="client", client_secret="secret",
-                        issue_token=True, opener=self.fake_open, observed_at=value,
+                        "005930",
+                        "KRW",
+                        client_id="client",
+                        client_secret="secret",
+                        issue_token=True,
+                        opener=self.fake_open,
+                        observed_at=value,
                     )
                 self.assertEqual([], self.requests)
 
     def test_observation_offset_is_normalized_to_utc(self):
-        observed = datetime(2026, 3, 25, 10, 0,
-                            tzinfo=timezone(timedelta(hours=9)))
+        observed = datetime(2026, 3, 25, 10, 0, tzinfo=timezone(timedelta(hours=9)))
         result = fetch_readonly_minute(
-            "005930", "KRW", access_token=TOKEN,
-            opener=self.fake_open, observed_at=observed,
+            "005930",
+            "KRW",
+            access_token=TOKEN,
+            opener=self.fake_open,
+            observed_at=observed,
         )
         self.assertEqual("2026-03-25T01:00:00+00:00", result["observed_at_utc"])
 
@@ -285,14 +396,20 @@ class TossReadOnlyTests(unittest.TestCase):
 
                 def failed(request, *, timeout):
                     self.requests.append(request)
-                    raise HTTPError(request.full_url, status, "Rejected " + TOKEN,
-                                    {}, BytesIO(TOKEN.encode()))
+                    raise HTTPError(
+                        request.full_url, status, "Rejected " + TOKEN, {}, BytesIO(TOKEN.encode())
+                    )
 
                 with self.assertRaises(HTTPError):
                     fetch_readonly_minute(
-                        "005930", "KRW", access_token=TOKEN, issue_token=True,
-                        client_id="client", client_secret="secret",
-                        opener=failed, observed_at=self.observed,
+                        "005930",
+                        "KRW",
+                        access_token=TOKEN,
+                        issue_token=True,
+                        client_id="client",
+                        client_secret="secret",
+                        opener=failed,
+                        observed_at=self.observed,
                     )
                 self.assertEqual(["GET"], [r.get_method() for r in self.requests])
 
@@ -305,15 +422,23 @@ class TossReadOnlyTests(unittest.TestCase):
 
         with self.assertRaises(HTTPError):
             fetch_readonly_minute(
-                "005930", "KRW", issue_token=True,
-                client_id="client", client_secret="secret",
-                opener=failed_get, observed_at=self.observed,
+                "005930",
+                "KRW",
+                issue_token=True,
+                client_id="client",
+                client_secret="secret",
+                opener=failed_get,
+                observed_at=self.observed,
             )
         self.assertEqual(["POST", "GET"], [r.get_method() for r in self.requests])
 
     def test_malformed_market_responses_do_not_retry(self):
-        for body in (b"{", b"[]", {"result": {"candles": []}},
-                     {"error": "EXAMPLE-SECRET-DO-NOT-PRINT"}):
+        for body in (
+            b"{",
+            b"[]",
+            {"result": {"candles": []}},
+            {"error": "EXAMPLE-SECRET-DO-NOT-PRINT"},
+        ):
             with self.subTest(body=body):
                 self.requests.clear()
 
@@ -323,15 +448,29 @@ class TossReadOnlyTests(unittest.TestCase):
 
                 with self.assertRaises(ValueError):
                     fetch_readonly_minute(
-                        "005930", "KRW", access_token=TOKEN, issue_token=True,
-                        client_id="client", client_secret="secret",
-                        opener=malformed, observed_at=self.observed,
+                        "005930",
+                        "KRW",
+                        access_token=TOKEN,
+                        issue_token=True,
+                        client_id="client",
+                        client_secret="secret",
+                        opener=malformed,
+                        observed_at=self.observed,
                     )
                 self.assertEqual(["GET"], [r.get_method() for r in self.requests])
 
     def test_invalid_issued_token_cannot_reach_a_market_request(self):
-        for token in (None, "", "abc\r\nX-Evil: 1", "abc\x00", "abc:def",
-                      "abc=def", "=", "abcé", "a" * 4097):
+        for token in (
+            None,
+            "",
+            "abc\r\nX-Evil: 1",
+            "abc\x00",
+            "abc:def",
+            "abc=def",
+            "=",
+            "abcé",
+            "a" * 4097,
+        ):
             with self.subTest(case=type(token).__name__, length=len(token or "")):
                 self.requests.clear()
 
@@ -341,8 +480,13 @@ class TossReadOnlyTests(unittest.TestCase):
 
                 with self.assertRaises(ValueError):
                     fetch_readonly_minute(
-                        "005930", "KRW", client_id="client", client_secret="secret",
-                        issue_token=True, opener=invalid, observed_at=self.observed,
+                        "005930",
+                        "KRW",
+                        client_id="client",
+                        client_secret="secret",
+                        issue_token=True,
+                        opener=invalid,
+                        observed_at=self.observed,
                     )
                 self.assertEqual(["POST"], [r.get_method() for r in self.requests])
 
@@ -353,21 +497,35 @@ class TossReadOnlyTests(unittest.TestCase):
             destinations.append((request.host, request._tunnel_host))
             return self.fake_open(request, timeout=10)
 
-        with patch.dict(os.environ, {
-                "HTTPS_PROXY": "http://proxy.invalid:3128",
-                "https_proxy": "http://proxy.invalid:3128", "NO_PROXY": "",
-                "no_proxy": "",
-        }, clear=True), patch("urllib.request.HTTPSHandler.https_open", https_open):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "HTTPS_PROXY": "http://proxy.invalid:3128",
+                    "https_proxy": "http://proxy.invalid:3128",
+                    "NO_PROXY": "",
+                    "no_proxy": "",
+                },
+                clear=True,
+            ),
+            patch("urllib.request.HTTPSHandler.https_open", https_open),
+        ):
             fetch_readonly_minute(
-                "005930", "KRW", client_id="client", client_secret="secret",
-                issue_token=True, observed_at=self.observed,
+                "005930",
+                "KRW",
+                client_id="client",
+                client_secret="secret",
+                issue_token=True,
+                observed_at=self.observed,
             )
         self.assertEqual([("openapi.tossinvest.com", None)] * 2, destinations)
 
     def test_real_default_transport_refuses_all_redirects_without_second_request(self):
         for status in (301, 302, 303, 307, 308):
-            for destination in ("https://openapi.tossinvest.com/other",
-                                "https://different-host.invalid/steal"):
+            for destination in (
+                "https://openapi.tossinvest.com/other",
+                "https://different-host.invalid/steal",
+            ):
                 with self.subTest(status=status, destination=destination):
                     self.requests.clear()
 
@@ -378,7 +536,9 @@ class TossReadOnlyTests(unittest.TestCase):
                     with patch("urllib.request.HTTPSHandler.https_open", redirected):
                         with self.assertRaises(ValueError):
                             fetch_readonly_minute(
-                                "005930", "KRW", access_token=TOKEN,
+                                "005930",
+                                "KRW",
+                                access_token=TOKEN,
                                 observed_at=self.observed,
                             )
                     self.assertEqual(["GET"], [r.get_method() for r in self.requests])
@@ -392,8 +552,10 @@ class TossReadOnlyTests(unittest.TestCase):
             delattr(HTTPRedirectHandler, "http_error_308")
         try:
             for method in ("GET", "POST"):
-                for destination in ("https://openapi.tossinvest.com/other",
-                                    "https://different-host.invalid/steal"):
+                for destination in (
+                    "https://openapi.tossinvest.com/other",
+                    "https://different-host.invalid/steal",
+                ):
                     with self.subTest(method=method, destination=destination):
                         self.requests.clear()
 
@@ -401,13 +563,22 @@ class TossReadOnlyTests(unittest.TestCase):
                             self.requests.append(request)
                             return _Response({}, status=308, location=destination)
 
-                        auth = {"access_token": TOKEN} if method == "GET" else {
-                            "issue_token": True, "client_id": "client", "client_secret": "secret",
-                        }
+                        auth = (
+                            {"access_token": TOKEN}
+                            if method == "GET"
+                            else {
+                                "issue_token": True,
+                                "client_id": "client",
+                                "client_secret": "secret",
+                            }
+                        )
                         with patch("urllib.request.HTTPSHandler.https_open", redirected):
                             with self.assertRaisesRegex(ValueError, "redirects are forbidden"):
                                 fetch_readonly_minute(
-                                    "005930", "KRW", observed_at=self.observed, **auth,
+                                    "005930",
+                                    "KRW",
+                                    observed_at=self.observed,
+                                    **auth,
                                 )
                         self.assertEqual([method], [r.get_method() for r in self.requests])
         finally:
@@ -431,10 +602,13 @@ class TossReadOnlyTests(unittest.TestCase):
     def test_cli_credentials_alone_refuse_without_network_or_file(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "quote.json"
-            result, stdout, stderr = self.cli(output, {
-                "TOSS_CLIENT_ID": "EXAMPLE-CLIENT-DO-NOT-PRINT",
-                "TOSS_CLIENT_SECRET": "EXAMPLE-SECRET-DO-NOT-PRINT",
-            })
+            result, stdout, stderr = self.cli(
+                output,
+                {
+                    "TOSS_CLIENT_ID": "EXAMPLE-CLIENT-DO-NOT-PRINT",
+                    "TOSS_CLIENT_SECRET": "EXAMPLE-SECRET-DO-NOT-PRINT",
+                },
+            )
             self.assertEqual(2, result)
             self.assertEqual([], self.requests)
             self.assertFalse(output.exists())
@@ -444,10 +618,14 @@ class TossReadOnlyTests(unittest.TestCase):
     def test_cli_explicit_issue_token_preserves_one_shot_oauth(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "quote.json"
-            result, stdout, stderr = self.cli(output, {
-                "TOSS_CLIENT_ID": "EXAMPLE-CLIENT-DO-NOT-PRINT",
-                "TOSS_CLIENT_SECRET": "EXAMPLE-SECRET-DO-NOT-PRINT",
-            }, flags=("--issue-token",))
+            result, stdout, stderr = self.cli(
+                output,
+                {
+                    "TOSS_CLIENT_ID": "EXAMPLE-CLIENT-DO-NOT-PRINT",
+                    "TOSS_CLIENT_SECRET": "EXAMPLE-SECRET-DO-NOT-PRINT",
+                },
+                flags=("--issue-token",),
+            )
             self.assertEqual(0, result)
             self.assertEqual(["POST", "GET"], [r.get_method() for r in self.requests])
             self.assertNotIn("EXAMPLE-", output.read_text() + stdout + stderr)
@@ -455,10 +633,15 @@ class TossReadOnlyTests(unittest.TestCase):
     def test_cli_supplied_token_wins_even_with_explicit_issuance(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "quote.json"
-            result, _, _ = self.cli(output, {
-                "TOSS_ACCESS_TOKEN": TOKEN,
-                "TOSS_CLIENT_ID": "client", "TOSS_CLIENT_SECRET": "secret",
-            }, flags=("--issue-token",))
+            result, _, _ = self.cli(
+                output,
+                {
+                    "TOSS_ACCESS_TOKEN": TOKEN,
+                    "TOSS_CLIENT_ID": "client",
+                    "TOSS_CLIENT_SECRET": "secret",
+                },
+                flags=("--issue-token",),
+            )
             self.assertEqual(0, result)
             self.assertEqual(["GET"], [r.get_method() for r in self.requests])
 
@@ -466,16 +649,20 @@ class TossReadOnlyTests(unittest.TestCase):
         def failed(request, *, timeout):
             self.requests.append(request)
             private = "EXAMPLE-UPSTREAM-SECRET " + TOKEN
-            raise HTTPError(request.full_url + private, 401, private, {},
-                            BytesIO(private.encode()))
+            raise HTTPError(request.full_url + private, 401, private, {}, BytesIO(private.encode()))
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "quote.json"
-            result, stdout, stderr = self.cli(output, {
-                "TOSS_ACCESS_TOKEN": TOKEN,
-                "TOSS_CLIENT_ID": "EXAMPLE-CLIENT-DO-NOT-PRINT",
-                "TOSS_CLIENT_SECRET": "EXAMPLE-SECRET-DO-NOT-PRINT",
-            }, flags=("--issue-token",), opener=failed)
+            result, stdout, stderr = self.cli(
+                output,
+                {
+                    "TOSS_ACCESS_TOKEN": TOKEN,
+                    "TOSS_CLIENT_ID": "EXAMPLE-CLIENT-DO-NOT-PRINT",
+                    "TOSS_CLIENT_SECRET": "EXAMPLE-SECRET-DO-NOT-PRINT",
+                },
+                flags=("--issue-token",),
+                opener=failed,
+            )
             self.assertEqual(2, result)
             self.assertEqual(["GET"], [r.get_method() for r in self.requests])
             self.assertEqual("", stdout)
@@ -486,8 +673,16 @@ class TossReadOnlyTests(unittest.TestCase):
     def test_cli_requires_explicit_network_optin_and_paper_mode(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "stocks.json"
-            base = ["--mode", "paper", "--symbol", "005930",
-                    "--currency", "KRW", "--output", str(path)]
+            base = [
+                "--mode",
+                "paper",
+                "--symbol",
+                "005930",
+                "--currency",
+                "KRW",
+                "--output",
+                str(path),
+            ]
             with self.assertRaises(SystemExit) as exc, redirect_stderr(StringIO()):
                 main(base)
             self.assertEqual(2, exc.exception.code)
@@ -506,8 +701,16 @@ class TossReadOnlyTests(unittest.TestCase):
                 with self.subTest(suffix=suffix):
                     output = parent_file / suffix
                     args = [
-                        "--mode", "paper", "--allow-network-readonly", "--issue-token",
-                        "--symbol", "005930", "--currency", "KRW", "--output", str(output),
+                        "--mode",
+                        "paper",
+                        "--allow-network-readonly",
+                        "--issue-token",
+                        "--symbol",
+                        "005930",
+                        "--currency",
+                        "KRW",
+                        "--output",
+                        str(output),
                     ]
                     with patch("tools.toss_readonly_snapshot.fetch_readonly_minute") as fetch:
                         with self.assertRaises(SystemExit) as failure, redirect_stderr(StringIO()):
@@ -521,12 +724,20 @@ class TossReadOnlyTests(unittest.TestCase):
             output = Path(temporary) / "quote.json"
             output.write_text("existing paper evidence")
             args = [
-                "--mode", "paper", "--allow-network-readonly",
-                "--symbol", "005930", "--currency", "KRW",
-                "--output", str(output)
+                "--mode",
+                "paper",
+                "--allow-network-readonly",
+                "--symbol",
+                "005930",
+                "--currency",
+                "KRW",
+                "--output",
+                str(output),
             ]
-            with patch("tools.toss_readonly_snapshot.fetch_readonly_minute",
-                       side_effect=AssertionError("OAuth must not run")):
+            with patch(
+                "tools.toss_readonly_snapshot.fetch_readonly_minute",
+                side_effect=AssertionError("OAuth must not run"),
+            ):
                 with self.assertRaises(SystemExit) as error, redirect_stderr(StringIO()):
                     main(args)
             self.assertEqual(2, error.exception.code)
@@ -538,9 +749,14 @@ class TossReadOnlyTests(unittest.TestCase):
             output = Path(directory) / "quote.json"
             output.symlink_to(target)
             with self.assertRaises(SystemExit) as error:
-                self.cli(output, {
-                    "TOSS_CLIENT_ID": "client", "TOSS_CLIENT_SECRET": "secret",
-                }, flags=("--issue-token",))
+                self.cli(
+                    output,
+                    {
+                        "TOSS_CLIENT_ID": "client",
+                        "TOSS_CLIENT_SECRET": "secret",
+                    },
+                    flags=("--issue-token",),
+                )
             self.assertEqual(2, error.exception.code)
             self.assertEqual([], self.requests)
             self.assertTrue(output.is_symlink())
@@ -550,10 +766,15 @@ class TossReadOnlyTests(unittest.TestCase):
         def invalid(request, *, timeout):
             self.requests.append(request)
             return _Response({"access_token": "fake", "token_type": "Other"})
+
         with self.assertRaises(ValueError):
             fetch_readonly_minute(
-                "005930", "KRW", client_id="id", client_secret="secret",
-                issue_token=True, opener=invalid,
+                "005930",
+                "KRW",
+                client_id="id",
+                client_secret="secret",
+                issue_token=True,
+                opener=invalid,
             )
         self.assertEqual(1, len(self.requests))
 

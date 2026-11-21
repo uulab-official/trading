@@ -1,10 +1,11 @@
 """Network-free heartbeat checks with time skew, staleness and halt policy."""
-from datetime import datetime, timezone
+
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
@@ -19,8 +20,10 @@ class PaperHealthcheckTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / "status.json"
         self.data = {
-            "mode": "paper", "live_orders_enabled": False,
-            "market": "KRW-BTC", "status": "healthy",
+            "mode": "paper",
+            "live_orders_enabled": False,
+            "market": "KRW-BTC",
+            "status": "healthy",
             "last_attempt_utc": datetime.fromtimestamp(NOW - 10, tz=timezone.utc).isoformat(),
         }
         self.save()
@@ -60,7 +63,9 @@ class PaperHealthcheckTests(unittest.TestCase):
         self.assertTrue(result["operator_action_required"])
 
     def test_future_heartbeat_and_live_marker_rejected(self):
-        self.data["last_attempt_utc"] = datetime.fromtimestamp(NOW + 1000, tz=timezone.utc).isoformat()
+        self.data["last_attempt_utc"] = datetime.fromtimestamp(
+            NOW + 1000, tz=timezone.utc
+        ).isoformat()
         self.save()
         with self.assertRaises(ValueError):
             inspect(self.path, now=NOW)

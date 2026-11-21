@@ -1,16 +1,16 @@
 """Explicit KRW paper units, cross-currency rejection and legacy USDT compatibility."""
 
-from copy import deepcopy
-from decimal import Decimal
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from copy import deepcopy
+from decimal import Decimal
+from pathlib import Path
 from unittest.mock import patch
 
-from trading_core.paper_exchange import PaperExchange
-from trading_bot.paper_runner import PaperRunConfig, PaperRunner
 from test_paper_runner import rows, scripted
+from trading_bot.paper_runner import PaperRunConfig, PaperRunner
+from trading_core.paper_exchange import PaperExchange
 
 
 class PaperCurrencyTests(unittest.IsolatedAsyncioTestCase):
@@ -19,7 +19,10 @@ class PaperCurrencyTests(unittest.IsolatedAsyncioTestCase):
             guard = patch(target, side_effect=AssertionError("Currency checks forbid network/DNS"))
             guard.start()
             self.addCleanup(guard.stop)
-        guard = patch("trading_core.exchange.CCXTExchange", side_effect=AssertionError("Paper cannot construct a live exchange"))
+        guard = patch(
+            "trading_core.exchange.CCXTExchange",
+            side_effect=AssertionError("Paper cannot construct a live exchange"),
+        )
         guard.start()
         self.addCleanup(guard.stop)
 
@@ -45,14 +48,20 @@ class PaperCurrencyTests(unittest.IsolatedAsyncioTestCase):
         exchange = self.krw(fee_pct=Decimal("0.1"))
         await exchange.connect()
         exchange.set_price("BTC/KRW", Decimal("100000000"), timestamp=1)
-        first = await exchange.create_order("BTC/KRW", "market", "buy", Decimal("0.001"), params={"clientOrderId": "stable"})
+        first = await exchange.create_order(
+            "BTC/KRW", "market", "buy", Decimal("0.001"), params={"clientOrderId": "stable"}
+        )
         snapshot = exchange.snapshot()
         self.assertEqual((snapshot["version"], snapshot["quote_currency"]), (2, "KRW"))
         restored = PaperExchange.from_snapshot(json.loads(json.dumps(snapshot, sort_keys=True)))
         await restored.connect()
         self.assertEqual(restored.snapshot(), snapshot)
-        self.assertEqual(await restored.create_order("BTC/KRW", "market", "buy", Decimal("0.001"),
-                                                    params={"clientOrderId": "stable"}), first)
+        self.assertEqual(
+            await restored.create_order(
+                "BTC/KRW", "market", "buy", Decimal("0.001"), params={"clientOrderId": "stable"}
+            ),
+            first,
+        )
         self.assertEqual(restored.get_total_value(), exchange.get_total_value())
 
     async def test_legacy_usdt_snapshot_and_default_result_shape_remain_unchanged(self):
@@ -80,7 +89,9 @@ class PaperCurrencyTests(unittest.IsolatedAsyncioTestCase):
             self.krw(initial_positions={"BTC/USDT": Decimal("1")})
 
     async def test_legacy_usdt_price_metadata_is_retained_but_cross_quote_spending_fails(self):
-        exchange = PaperExchange(initial_balance=Decimal("1000"), initial_positions={"BTC/USDT": Decimal("1")})
+        exchange = PaperExchange(
+            initial_balance=Decimal("1000"), initial_positions={"BTC/USDT": Decimal("1")}
+        )
         await exchange.connect()
         exchange.set_price("BTC/USDT", Decimal("100000"))
         exchange.set_price("ETH/BTC", Decimal("100"))
@@ -92,10 +103,12 @@ class PaperCurrencyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_currency_metadata_cannot_silently_relabel_a_snapshot(self):
         snapshot = self.krw().snapshot()
-        for mutate in (lambda state: state.pop("quote_currency"),
-                       lambda state: state.update(quote_currency="USDT"),
-                       lambda state: state.update(version=1),
-                       lambda state: state["balances"].update(USDT=state["balances"].pop("KRW"))):
+        for mutate in (
+            lambda state: state.pop("quote_currency"),
+            lambda state: state.update(quote_currency="USDT"),
+            lambda state: state.update(version=1),
+            lambda state: state["balances"].update(USDT=state["balances"].pop("KRW")),
+        ):
             with self.subTest(mutation=mutate), self.assertRaises(ValueError):
                 state = deepcopy(snapshot)
                 mutate(state)
@@ -115,10 +128,18 @@ class PaperCurrencyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_one_million_krw_runner_restart_matches_uninterrupted_net_equity(self):
         config = PaperRunConfig(symbol="BTC/KRW", initial_balance=Decimal("1000000"))
-        fixture = rows([(100000000, 100000000), (110000000, 120000000),
-                        (130000000, 130000000), (125000000, 125000000)])
+        fixture = rows(
+            [
+                (100000000, 100000000),
+                (110000000, 120000000),
+                (130000000, 130000000),
+                (125000000, 125000000),
+            ]
+        )
+
         def runner():
             return PaperRunner(config, strategy_factory=scripted({0: "buy", 2: "sell"}))
+
         expected = await runner().run(fixture)
         self.assertEqual(expected["quote_currency"], "KRW")
         self.assertEqual(expected["assumptions"]["initial_balance"], "1000000")
@@ -133,13 +154,26 @@ class PaperCurrencyTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(path.read_bytes(), before)
 
     async def test_krw_risk_halts_block_entry_and_preserve_exit(self):
-        config = PaperRunConfig(symbol="BTC/KRW", initial_balance=Decimal("1000000"),
-                                position_size_pct=Decimal("50"), fee_pct=Decimal("0"),
-                                slippage_pct=Decimal("0"), max_daily_loss_pct=Decimal("3"),
-                                max_drawdown_pct=Decimal("10"))
-        fixture = rows([(100000000, 100000000), (100000000, 50000000),
-                        (50000000, 50000000), (50000000, 50000000)])
-        result = await PaperRunner(config, strategy_factory=scripted({0: "buy", 1: "sell", 2: "buy"})).run(fixture)
+        config = PaperRunConfig(
+            symbol="BTC/KRW",
+            initial_balance=Decimal("1000000"),
+            position_size_pct=Decimal("50"),
+            fee_pct=Decimal("0"),
+            slippage_pct=Decimal("0"),
+            max_daily_loss_pct=Decimal("3"),
+            max_drawdown_pct=Decimal("10"),
+        )
+        fixture = rows(
+            [
+                (100000000, 100000000),
+                (100000000, 50000000),
+                (50000000, 50000000),
+                (50000000, 50000000),
+            ]
+        )
+        result = await PaperRunner(
+            config, strategy_factory=scripted({0: "buy", 1: "sell", 2: "buy"})
+        ).run(fixture)
         self.assertEqual([trade["side"] for trade in result["trades"]], ["buy", "sell"])
         self.assertEqual(Decimal(result["equity"]), Decimal("750000"))
         self.assertTrue(result["daily_loss_halted"])

@@ -3,22 +3,24 @@
 Default --once performs one supervised public-data paper cycle. --loop is opt-in;
 it never creates real orders or uses private exchange endpoints.
 """
+
 import argparse
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 import json
 import os
-from pathlib import Path
 import signal
 import sys
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from trading_bot.paper_checkpoint import CheckpointInUseError, locked_checkpoint
+
 from tools.upbit_paper_cycle import run_cycle
-from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
 
 
 class PaperEmergencyStop(RuntimeError):
@@ -38,13 +40,16 @@ def _check_prior_halt(heartbeat):
     if len(raw) > 65536:
         raise ValueError("Prior paper heartbeat exceeds size limit")
     saved = json.loads(raw)
-    if not isinstance(saved, dict) or saved.get("mode") != "paper" or saved.get("live_orders_enabled") is not False:
+    if (
+        not isinstance(saved, dict)
+        or saved.get("mode") != "paper"
+        or saved.get("live_orders_enabled") is not False
+    ):
         raise ValueError("Prior heartbeat is not an authenticated paper-mode marker")
     if saved.get("status") == "halted":
         if saved.get("operator_stop") is True:
             raise PaperEmergencyStop("Operator STOP still latched")
         raise PaperHaltLatched("Prior paper supervisor failure remains latched")
-
 
 
 def _safe_heartbeat(path, payload):
@@ -53,8 +58,14 @@ def _safe_heartbeat(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
-                                         prefix=".paper-health-", suffix=".tmp", delete=False) as stream:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=".paper-health-",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
             temporary = Path(stream.name)
             os.chmod(temporary, 0o600)
             json.dump(payload, stream, allow_nan=False, sort_keys=True)
@@ -66,21 +77,41 @@ def _safe_heartbeat(path, payload):
             temporary.unlink()
 
 
-def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
-                        balance, cycle=run_cycle, now=time.time, kill_switch=None,
-                        _owner_locked=False, _previous_failures=0):
+def run_supervised_once(
+    *,
+    archive,
+    checkpoint,
+    heartbeat,
+    market,
+    unit,
+    count,
+    balance,
+    cycle=run_cycle,
+    now=time.time,
+    kill_switch=None,
+    _owner_locked=False,
+    _previous_failures=0,
+):
     if not _owner_locked:
         # One-shot calls must be excluded while the daemon owns the portfolio,
         # including during its idle period; do not race heartbeat writes.
         owner = Path(checkpoint).with_name(Path(checkpoint).name + ".supervisor")
         with locked_checkpoint(owner):
             return run_supervised_once(
-                archive=archive, checkpoint=checkpoint, heartbeat=heartbeat,
-                market=market, unit=unit, count=count, balance=balance,
-                cycle=cycle, now=now, kill_switch=kill_switch,
-                _owner_locked=True, _previous_failures=_previous_failures)
-    if len({Path(archive).resolve(), Path(checkpoint).resolve(),
-            Path(heartbeat).resolve()}) != 3:
+                archive=archive,
+                checkpoint=checkpoint,
+                heartbeat=heartbeat,
+                market=market,
+                unit=unit,
+                count=count,
+                balance=balance,
+                cycle=cycle,
+                now=now,
+                kill_switch=kill_switch,
+                _owner_locked=True,
+                _previous_failures=_previous_failures,
+            )
+    if len({Path(archive).resolve(), Path(checkpoint).resolve(), Path(heartbeat).resolve()}) != 3:
         raise ValueError("Archive, checkpoint, and heartbeat must be distinct paths")
     observed = now()
     if not isinstance(observed, (int, float)) or not (0 < observed < 10**12):
@@ -88,29 +119,49 @@ def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
     # A restart must not reset the failure threshold by replacing halted
     # state with a fresh healthy pulse. Preserve the old marker on refusal.
     _check_prior_halt(heartbeat)
-    base = {"mode": "paper", "live_orders_enabled": False, "market": market,
-            "unit_minutes": unit, "last_attempt_utc": datetime.fromtimestamp(
-                observed, tz=timezone.utc).isoformat()}
+    base = {
+        "mode": "paper",
+        "live_orders_enabled": False,
+        "market": market,
+        "unit_minutes": unit,
+        "last_attempt_utc": datetime.fromtimestamp(observed, tz=timezone.utc).isoformat(),
+    }
     try:
         if kill_switch is not None and Path(kill_switch).exists():
             raise PaperEmergencyStop("Paper operator stop marker is present")
-        result = cycle(Path(archive), Path(checkpoint), market=market, unit=unit,
-                       count=count, initial_balance=balance)
-        if not isinstance(result, dict) or result.get("mode") != "paper" or result.get("live_orders_enabled") is not False:
+        result = cycle(
+            Path(archive),
+            Path(checkpoint),
+            market=market,
+            unit=unit,
+            count=count,
+            initial_balance=balance,
+        )
+        if (
+            not isinstance(result, dict)
+            or result.get("mode") != "paper"
+            or result.get("live_orders_enabled") is not False
+        ):
             raise ValueError("Unexpected non-paper trading result")
         risk_blocked = result["daily_loss_halted"] or result["drawdown_halted"]
-        heartbeat_state = dict(base, status="risk_blocked" if risk_blocked else "healthy",
-                               processed_bars=result["processed_bars"],
-                               appended_bars=result["appended_bars"],
-                               daily_loss_halted=result["daily_loss_halted"],
-                               drawdown_halted=result["drawdown_halted"])
+        heartbeat_state = dict(
+            base,
+            status="risk_blocked" if risk_blocked else "healthy",
+            processed_bars=result["processed_bars"],
+            appended_bars=result["appended_bars"],
+            daily_loss_halted=result["daily_loss_halted"],
+            drawdown_halted=result["drawdown_halted"],
+        )
         _safe_heartbeat(heartbeat, heartbeat_state)
         return heartbeat_state
     except Exception as error:
         # Never persist broker credentials, payloads, URLs, or arbitrary error
         # strings to a report that might be shown in an operations dashboard.
-        failure = dict(base, status="halted" if isinstance(error, PaperEmergencyStop) else "degraded",
-                       last_error_type=type(error).__name__)
+        failure = dict(
+            base,
+            status="halted" if isinstance(error, PaperEmergencyStop) else "degraded",
+            last_error_type=type(error).__name__,
+        )
         if isinstance(error, PaperEmergencyStop):
             failure["operator_stop"] = True
         else:
@@ -123,10 +174,23 @@ def run_supervised_once(*, archive, checkpoint, heartbeat, market, unit, count,
         raise
 
 
-def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
-             count=200, balance=Decimal("1000000"), interval_seconds=3600,
-             max_failures=3, cycle=run_cycle, now=time.time, sleep=time.sleep,
-             should_stop=lambda: False, kill_switch=None):
+def run_loop(
+    *,
+    archive,
+    checkpoint,
+    heartbeat,
+    market="KRW-BTC",
+    unit=60,
+    count=200,
+    balance=Decimal("1000000"),
+    interval_seconds=3600,
+    max_failures=3,
+    cycle=run_cycle,
+    now=time.time,
+    sleep=time.sleep,
+    should_stop=lambda: False,
+    kill_switch=None,
+):
     if type(unit) is not int or unit not in (1, 3, 5, 10, 15, 30, 60, 240):
         raise ValueError("Unsupported paper candle minute unit")
     if type(interval_seconds) is not int or interval_seconds < unit * 60:
@@ -147,7 +211,11 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
             if len(prior_bytes) > 65536:
                 raise ValueError("Prior supervisor heartbeat exceeds size limit")
             prior = json.loads(prior_bytes)
-            if not isinstance(prior, dict) or prior.get("mode") != "paper" or prior.get("live_orders_enabled") is not False:
+            if (
+                not isinstance(prior, dict)
+                or prior.get("mode") != "paper"
+                or prior.get("live_orders_enabled") is not False
+            ):
                 raise ValueError("Invalid prior paper heartbeat")
             if prior.get("status") == "degraded":
                 prior_failures = prior.get("consecutive_failures", 1)
@@ -160,11 +228,20 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
                     return 2
         while not should_stop():
             try:
-                run_supervised_once(archive=archive, checkpoint=checkpoint,
-                                    heartbeat=heartbeat, market=market, unit=unit,
-                                    count=count, balance=balance, cycle=cycle, now=now,
-                                    kill_switch=kill_switch, _owner_locked=True,
-                                    _previous_failures=consecutive)
+                run_supervised_once(
+                    archive=archive,
+                    checkpoint=checkpoint,
+                    heartbeat=heartbeat,
+                    market=market,
+                    unit=unit,
+                    count=count,
+                    balance=balance,
+                    cycle=cycle,
+                    now=now,
+                    kill_switch=kill_switch,
+                    _owner_locked=True,
+                    _previous_failures=consecutive,
+                )
                 consecutive = 0
             except PaperHaltLatched:
                 return 2
@@ -179,7 +256,10 @@ def run_loop(*, archive, checkpoint, heartbeat, market="KRW-BTC", unit=60,
                 # Persist the failure counter after EACH attempt, not only
                 # at the terminal halt threshold. Reboots cannot reset it.
                 previous = json.loads(Path(heartbeat).read_text(encoding="utf-8"))
-                if previous.get("mode") != "paper" or previous.get("live_orders_enabled") is not False:
+                if (
+                    previous.get("mode") != "paper"
+                    or previous.get("live_orders_enabled") is not False
+                ):
                     raise ValueError("Refusing to overwrite invalid paper heartbeat")
                 previous["consecutive_failures"] = consecutive
                 if consecutive >= max_failures:
@@ -212,8 +292,12 @@ def main(argv=None):
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--heartbeat", type=Path, required=True)
-    parser.add_argument("--kill-switch", type=Path, default=None,
-                        help="Local STOP marker file; existence prevents starting a new paper cycle")
+    parser.add_argument(
+        "--kill-switch",
+        type=Path,
+        default=None,
+        help="Local STOP marker file; existence prevents starting a new paper cycle",
+    )
     parser.add_argument("--initial-balance", type=Decimal, default=Decimal("1000000"))
     operation = parser.add_mutually_exclusive_group()
     operation.add_argument("--once", action="store_true")
@@ -239,28 +323,47 @@ def main(argv=None):
     try:
         if args.loop:
             stopped = threading.Event()
+
             def on_signal(signum, frame):
                 stopped.set()
+
             signal.signal(signal.SIGTERM, on_signal)
             signal.signal(signal.SIGINT, on_signal)
-            code = run_loop(archive=args.archive, checkpoint=args.checkpoint,
-                            heartbeat=args.heartbeat, market=args.market,
-                            unit=args.unit, count=args.count, balance=args.initial_balance,
-                            interval_seconds=interval, max_failures=args.max_failures,
-                            should_stop=stopped.is_set, sleep=stopped.wait,
-                            kill_switch=kill_switch)
+            code = run_loop(
+                archive=args.archive,
+                checkpoint=args.checkpoint,
+                heartbeat=args.heartbeat,
+                market=args.market,
+                unit=args.unit,
+                count=args.count,
+                balance=args.initial_balance,
+                interval_seconds=interval,
+                max_failures=args.max_failures,
+                should_stop=stopped.is_set,
+                sleep=stopped.wait,
+                kill_switch=kill_switch,
+            )
             return code
-        status = run_supervised_once(archive=args.archive, checkpoint=args.checkpoint,
-                                     heartbeat=args.heartbeat, market=args.market,
-                                     unit=args.unit, count=args.count, balance=args.initial_balance,
-                                     kill_switch=kill_switch)
+        status = run_supervised_once(
+            archive=args.archive,
+            checkpoint=args.checkpoint,
+            heartbeat=args.heartbeat,
+            market=args.market,
+            unit=args.unit,
+            count=args.count,
+            balance=args.initial_balance,
+            kill_switch=kill_switch,
+        )
     except PaperEmergencyStop:
         print("Paper supervisor stopped by operator STOP marker.", file=sys.stderr)
         return 3
     except Exception as error:
         # A failed public API/lock/network operation may be a RuntimeError or
         # URLError. Always exit nonzero; never falsely report a healthy cycle.
-        print("Paper supervisor stopped safely (" + type(error).__name__ + "). Inspect local health.", file=sys.stderr)
+        print(
+            "Paper supervisor stopped safely (" + type(error).__name__ + "). Inspect local health.",
+            file=sys.stderr,
+        )
         return 2
     print(json.dumps(status, sort_keys=True))
     return 0 if status["status"] == "healthy" else 2

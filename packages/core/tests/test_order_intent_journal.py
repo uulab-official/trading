@@ -1,11 +1,12 @@
 """Offline-only durable intent journal tests: no broker, socket or API."""
-from contextlib import closing
-from decimal import Decimal, localcontext
-from pathlib import Path
+
 import sqlite3
 import sys
 import tempfile
 import unittest
+from contextlib import closing
+from decimal import Decimal, localcontext
+from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -137,19 +138,25 @@ class OrderIntentJournalTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.reconcile("client-001", outcome="filled", evidence_ref="audit-123")
         self.store.mark_uncertain("client-001")
-        result = self.store.reconcile("client-001", outcome="filled", evidence_ref="audit-123",
-                                      broker_order_id="exchange-789")
+        result = self.store.reconcile(
+            "client-001", outcome="filled", evidence_ref="audit-123", broker_order_id="exchange-789"
+        )
         self.assertEqual("reconciled", result["status"])
-        self.assertEqual(result, self.store.reconcile(
-            "client-001", outcome="filled", evidence_ref="audit-123",
-            broker_order_id="exchange-789"
-        ))
+        self.assertEqual(
+            result,
+            self.store.reconcile(
+                "client-001",
+                outcome="filled",
+                evidence_ref="audit-123",
+                broker_order_id="exchange-789",
+            ),
+        )
         with self.assertRaises(ValueError):
             self.store.reconcile("client-001", outcome="canceled", evidence_ref="audit-123")
         self.assertEqual([], self.store.unresolved())
-        self.assertEqual("reserved", self.store.reserve(
-            "client-002", "BTC/KRW", "sell", "0.01"
-        )["status"])
+        self.assertEqual(
+            "reserved", self.store.reserve("client-002", "BTC/KRW", "sell", "0.01")["status"]
+        )
 
     def test_conflicting_duplicate_does_not_change_persisted_intent(self):
         self.store.reserve("client-001", "BTC/KRW", "buy", "0.001")
@@ -161,13 +168,16 @@ class OrderIntentJournalTests(unittest.TestCase):
     def test_competing_writers_cannot_reserve_two_pending_orders(self):
         from concurrent.futures import ThreadPoolExecutor
         from threading import Barrier
+
         barrier = Barrier(2)
+
         def attempt(identity):
             barrier.wait(timeout=5)
             try:
                 return ("ok", self.store.reserve(identity, "BTC/KRW", "buy", "0.001"))
             except ValueError:
                 return ("blocked", identity)
+
         with ThreadPoolExecutor(max_workers=2) as workers:
             futures = [workers.submit(attempt, key) for key in ("client-001", "client-002")]
             results = [future.result(timeout=10) for future in futures]
@@ -187,8 +197,9 @@ class OrderIntentJournalTests(unittest.TestCase):
             with self.subTest(pair=pair), self.assertRaises(ValueError):
                 self.store.reserve("self-quote", pair, "buy", "1")
         with self.assertRaises(ValueError):
-            self.store.reconcile("missing", outcome="filled", evidence_ref="note",
-                                 broker_order_id="order-1")
+            self.store.reconcile(
+                "missing", outcome="filled", evidence_ref="note", broker_order_id="order-1"
+            )
 
     def test_audit_integrity_reports_unresolved_without_approving_orders(self):
         initial = self.store.audit_integrity()
@@ -200,9 +211,12 @@ class OrderIntentJournalTests(unittest.TestCase):
         self.assertFalse(blocked["new_intents_permitted"])
         self.store.mark_uncertain("client-001")
         self.assertFalse(self.store.audit_integrity()["new_intents_permitted"])
-        self.store.reconcile("client-001", outcome="filled",
-                             evidence_ref="broker-evidence-001",
-                             broker_order_id="upbit-001")
+        self.store.reconcile(
+            "client-001",
+            outcome="filled",
+            evidence_ref="broker-evidence-001",
+            broker_order_id="upbit-001",
+        )
         checked = self.store.audit_integrity()
         self.assertEqual(0, checked["unresolved_count"])
         self.assertEqual(1, checked["intent_count"])
@@ -210,29 +224,32 @@ class OrderIntentJournalTests(unittest.TestCase):
 
     def test_one_broker_order_cannot_reconcile_multiple_client_ids(self):
         self.store.reserve("client-001", "BTC/KRW", "buy", "0.001")
-        self.store.reconcile("client-001", outcome="filled",
-                             evidence_ref="evidence-001",
-                             broker_order_id="upbit-001")
+        self.store.reconcile(
+            "client-001", outcome="filled", evidence_ref="evidence-001", broker_order_id="upbit-001"
+        )
         self.store.reserve("client-002", "BTC/KRW", "sell", "0.001")
         with self.assertRaises(sqlite3.IntegrityError):
-            self.store.reconcile("client-002", outcome="filled",
-                                 evidence_ref="evidence-002",
-                                 broker_order_id="upbit-001")
+            self.store.reconcile(
+                "client-002",
+                outcome="filled",
+                evidence_ref="evidence-002",
+                broker_order_id="upbit-001",
+            )
         self.assertEqual("reserved", self.store.get("client-002")["status"])
         self.assertEqual(1, self.store.audit_integrity()["unresolved_count"])
 
     def test_manual_invalid_journal_rows_are_detected_by_preflight(self):
         self.store.reserve("client-001", "BTC/KRW", "buy", "0.001")
         with sqlite3.connect(self.path) as db:
-            db.execute("UPDATE intents SET outcome='filled' WHERE client_id=?",
-                       ("client-001",))
+            db.execute("UPDATE intents SET outcome='filled' WHERE client_id=?", ("client-001",))
         with self.assertRaises(ValueError):
             self.store.audit_integrity()
 
     def test_rejected_submission_can_be_reconciled_without_order_id(self):
         self.store.reserve("client-001", "BTC/KRW", "buy", "0.001")
-        result = self.store.reconcile("client-001", outcome="rejected",
-                                      evidence_ref="broker-response-42")
+        result = self.store.reconcile(
+            "client-001", outcome="rejected", evidence_ref="broker-response-42"
+        )
         self.assertEqual("rejected", result["outcome"])
         self.assertEqual([], self.store.unresolved())
 

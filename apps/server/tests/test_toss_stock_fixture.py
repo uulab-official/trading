@@ -1,11 +1,12 @@
 """Saved Toss response conversion is local-only and refuses output collisions."""
-from contextlib import redirect_stderr
-from io import StringIO
+
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
@@ -19,16 +20,38 @@ class TossStockFixtureCliTests(unittest.TestCase):
         self.folder = Path(temporary.name)
         self.source = self.folder / "api-response.json"
         self.destination = self.folder / "paper-candles.json"
-        self.source.write_text(json.dumps({"result": {"candles": [{
-            "timestamp": "2026-03-25T09:30:00+09:00",
-            "openPrice": "100", "highPrice": "110",
-            "lowPrice": "90", "closePrice": "105",
-            "volume": "500", "currency": "KRW",
-        }]}}))
+        self.source.write_text(
+            json.dumps(
+                {
+                    "result": {
+                        "candles": [
+                            {
+                                "timestamp": "2026-03-25T09:30:00+09:00",
+                                "openPrice": "100",
+                                "highPrice": "110",
+                                "lowPrice": "90",
+                                "closePrice": "105",
+                                "volume": "500",
+                                "currency": "KRW",
+                            }
+                        ]
+                    }
+                }
+            )
+        )
         self.args = [
-            "--input", str(self.source), "--output", str(self.destination),
-            "--symbol", "005930", "--currency", "KRW", "--interval", "1m",
-            "--observed-at", "2026-03-25T09:31:00+09:00",
+            "--input",
+            str(self.source),
+            "--output",
+            str(self.destination),
+            "--symbol",
+            "005930",
+            "--currency",
+            "KRW",
+            "--interval",
+            "1m",
+            "--observed-at",
+            "2026-03-25T09:31:00+09:00",
         ]
 
     def test_saved_response_is_converted_without_account_credentials(self):

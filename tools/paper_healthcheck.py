@@ -3,12 +3,13 @@
 Exit 0 healthy and fresh, 2 stale/degraded/halted/invalid, 4 unreadable/missing.
 Use in local health probes, scheduled jobs, and operator-run diagnostics.
 """
+
 import argparse
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import sys
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 MAX_HEALTH_BYTES = 65536
 
@@ -22,7 +23,11 @@ def inspect(path, *, max_age_seconds=7200, now=None):
     if len(content) > MAX_HEALTH_BYTES:
         raise ValueError("Heartbeat exceeds size limit")
     data = json.loads(content)
-    if not isinstance(data, dict) or data.get("mode") != "paper" or data.get("live_orders_enabled") is not False:
+    if (
+        not isinstance(data, dict)
+        or data.get("mode") != "paper"
+        or data.get("live_orders_enabled") is not False
+    ):
         raise ValueError("Invalid supervisor mode or live safety marker")
     status = data.get("status")
     if status not in ("healthy", "risk_blocked", "degraded", "halted", "stopped"):

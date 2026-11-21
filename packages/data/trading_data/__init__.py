@@ -24,6 +24,12 @@ class BinanceWebSocket:
 
 
 __all__ = [
-    "Candle", "CandleBuffer", "SMA", "EMA", "RSI", "ATR",
-    "BinanceWebSocket", "LiveMarketDataUnavailable",
+    "Candle",
+    "CandleBuffer",
+    "SMA",
+    "EMA",
+    "RSI",
+    "ATR",
+    "BinanceWebSocket",
+    "LiveMarketDataUnavailable",
 ]

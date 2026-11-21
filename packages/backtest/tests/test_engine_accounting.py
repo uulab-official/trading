@@ -1,15 +1,20 @@
 """Causal accounting regressions against the existing offline BacktestEngine."""
 
+import unittest
 from datetime import datetime, timezone
 from decimal import Decimal, localcontext
-import unittest
 from unittest.mock import patch
 
 import pandas as pd
-
 from trading_backtest import BacktestConfig, BacktestEngine
-from trading_strategy import MACrossStrategy, RSIStrategy, Signal, SignalType, Strategy, StrategyConfig
-
+from trading_strategy import (
+    MACrossStrategy,
+    RSIStrategy,
+    Signal,
+    SignalType,
+    Strategy,
+    StrategyConfig,
+)
 
 START = 1704067200000
 HOUR = 3600000
@@ -19,8 +24,16 @@ def fixture(size=55):
     rows = []
     for index in range(size):
         price = 20 if index < 50 else 40
-        rows.append({"timestamp": START + index * HOUR, "open": price,
-                     "high": price, "low": price, "close": price, "volume": 2000})
+        rows.append(
+            {
+                "timestamp": START + index * HOUR,
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price,
+                "volume": 2000,
+            }
+        )
     rows[49].update(open=10, high=20, low=10, close=20)
     if size > 50:
         rows[50].update(open=30, high=40, low=30, close=40)
@@ -37,13 +50,22 @@ class ScheduledStrategy(Strategy):
     def analyze(self, candles):
         candle = candles.current
         index = (candle.timestamp - START) // HOUR
-        return Signal(self.schedule.get(index, SignalType.HOLD), self.symbol, candle.close,
-                      datetime.fromtimestamp(candle.timestamp / 1000, timezone.utc), confidence=1)
+        return Signal(
+            self.schedule.get(index, SignalType.HOLD),
+            self.symbol,
+            candle.close,
+            datetime.fromtimestamp(candle.timestamp / 1000, timezone.utc),
+            confidence=1,
+        )
 
 
 def engine(**overrides):
-    settings = dict(initial_balance=Decimal("100"), position_size_pct=Decimal("50"),
-                    commission_pct=Decimal("0"), slippage_pct=Decimal("0"))
+    settings = dict(
+        initial_balance=Decimal("100"),
+        position_size_pct=Decimal("50"),
+        commission_pct=Decimal("0"),
+        slippage_pct=Decimal("0"),
+    )
     settings.update(overrides)
     return BacktestEngine(BacktestConfig(**settings))
 
@@ -69,19 +91,27 @@ class TestEngineAccounting(unittest.TestCase):
         data = fixture()
         data.loc[52, ["open", "high", "low", "close"]] = 50
         result = engine().run(ScheduledStrategy({49: SignalType.BUY, 51: SignalType.SELL}), data)
-        self.assertEqual([t["timestamp"] for t in result.trades], [START + 50 * HOUR, START + 52 * HOUR])
+        self.assertEqual(
+            [t["timestamp"] for t in result.trades], [START + 50 * HOUR, START + 52 * HOUR]
+        )
         self.assertEqual(result.trades[1]["price"], 50)
         self.assertEqual(result.final_balance, Decimal("150"))
 
     def test_close_signal_exits_at_next_open(self):
-        result = engine().run(ScheduledStrategy({49: SignalType.BUY, 51: SignalType.CLOSE}), fixture())
+        result = engine().run(
+            ScheduledStrategy({49: SignalType.BUY, 51: SignalType.CLOSE}), fixture()
+        )
         self.assertEqual([trade["side"] for trade in result.trades], ["buy", "sell"])
         self.assertEqual(result.trades[1]["timestamp"], START + 52 * HOUR)
 
     def test_invalid_accounting_config_fails_before_a_run(self):
-        bad = {"initial_balance": [0, -1, "NaN", "Infinity", True],
-               "commission_pct": [-1, 100, "NaN"], "slippage_pct": [-1, 100, "Infinity"],
-               "position_size_pct": [0, -1, 101, "NaN"], "max_positions": [0, 1.5, True]}
+        bad = {
+            "initial_balance": [0, -1, "NaN", "Infinity", True],
+            "commission_pct": [-1, 100, "NaN"],
+            "slippage_pct": [-1, 100, "Infinity"],
+            "position_size_pct": [0, -1, 101, "NaN"],
+            "max_positions": [0, 1.5, True],
+        }
         for field, values in bad.items():
             for value in values:
                 with self.subTest(field=field, value=value):
@@ -133,8 +163,9 @@ class TestEngineAccounting(unittest.TestCase):
         data = fixture()
         for i in range(len(data)):
             data.loc[i, ["open", "high", "low", "close"]] = 100 + i
-        strategy = MACrossStrategy(StrategyConfig("repeat_ma", "BTC/USDT", "1h"),
-                                   fast_period=3, slow_period=5)
+        strategy = MACrossStrategy(
+            StrategyConfig("repeat_ma", "BTC/USDT", "1h"), fast_period=3, slow_period=5
+        )
         runner = engine()
         first = runner.run(strategy, data)
         second = runner.run(strategy, data)
@@ -169,7 +200,9 @@ class TestEngineAccounting(unittest.TestCase):
         expected = regular.run(ScheduledStrategy(), fixture())
         with localcontext() as context:
             context.prec = 6
-            actual = engine(commission_pct=Decimal("0.1"), slippage_pct=Decimal("0.05")).run(ScheduledStrategy(), fixture())
+            actual = engine(commission_pct=Decimal("0.1"), slippage_pct=Decimal("0.05")).run(
+                ScheduledStrategy(), fixture()
+            )
         self.assertEqual(actual.final_balance, expected.final_balance)
         self.assertEqual(actual.total_return_pct, expected.total_return_pct)
 

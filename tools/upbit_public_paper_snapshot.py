@@ -3,14 +3,15 @@
 No exchange credentials, no orders, no auto-polling, and no live trading mode.
 The latest/incomplete candle is always excluded.
 """
+
 import argparse
-from datetime import datetime, timezone
-from decimal import Decimal, DecimalException
 import json
 import os
-from pathlib import Path
 import sys
 import tempfile
+from datetime import datetime, timezone
+from decimal import Decimal, DecimalException
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -41,9 +42,9 @@ def _request_candles(unit, market, count, to=None):
         # Never infer or substitute a local-time cutoff.
         if not isinstance(to, int) or to < 0:
             raise ValueError("Historical cutoff must be Unix milliseconds")
-        params["to"] = datetime.fromtimestamp(
-            to / 1000, tz=timezone.utc
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        params["to"] = datetime.fromtimestamp(to / 1000, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
     query = urlencode(params)
     request = Request(
         ENDPOINT + str(unit) + "?" + query,
@@ -62,8 +63,9 @@ def _request_candles(unit, market, count, to=None):
         raise ValueError("Public candle API did not return valid JSON") from exc
 
 
-def build_snapshot(market, unit, *, count=200, now_ms=None, safety_seconds=5,
-                   allow_gaps=False, fetcher=None):
+def build_snapshot(
+    market, unit, *, count=200, now_ms=None, safety_seconds=5, allow_gaps=False, fetcher=None
+):
     if not isinstance(market, str) or not market.startswith("KRW-"):
         raise ValueError("Only explicitly selected KRW-BASE public Upbit markets are accepted")
     base = market[4:]
@@ -77,10 +79,13 @@ def build_snapshot(market, unit, *, count=200, now_ms=None, safety_seconds=5,
         raise ValueError("Invalid safety delay")
     if now_ms is None:
         import time
+
         now_ms = time.time_ns() // 1_000_000
     if type(now_ms) is not int or now_ms < 0:
         raise ValueError("Invalid observation clock")
-    rows = _request_candles(unit, market, count) if fetcher is None else fetcher(unit, market, count)
+    rows = (
+        _request_candles(unit, market, count) if fetcher is None else fetcher(unit, market, count)
+    )
     if not isinstance(rows, list) or not rows or len(rows) > count:
         raise ValueError("Upbit response has an unexpected candle count")
     duration = CandleBuffer(timeframe=f"{unit}m").duration_ms
@@ -98,10 +103,23 @@ def build_snapshot(market, unit, *, count=200, now_ms=None, safety_seconds=5,
         if stamp + duration > now_ms - safety_seconds * 1000:
             # A forming candle is never strategy input.
             continue
-        candle = Candle(stamp, item["opening_price"], item["high_price"], item["low_price"],
-                        item["trade_price"], item["candle_acc_trade_volume"])
-        candles.append([stamp, *[format(getattr(candle, attr), "f")
-                                for attr in ("open", "high", "low", "close", "volume")]])
+        candle = Candle(
+            stamp,
+            item["opening_price"],
+            item["high_price"],
+            item["low_price"],
+            item["trade_price"],
+            item["candle_acc_trade_volume"],
+        )
+        candles.append(
+            [
+                stamp,
+                *[
+                    format(getattr(candle, attr), "f")
+                    for attr in ("open", "high", "low", "close", "volume")
+                ],
+            ]
+        )
     if not candles:
         raise ValueError("No completed candles available; fail closed")
     candles.sort(key=lambda row: row[0])
@@ -145,14 +163,25 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        snapshot = build_snapshot(args.market, args.unit, count=args.count,
-                                  safety_seconds=args.safety_seconds, allow_gaps=args.allow_gaps)
+        snapshot = build_snapshot(
+            args.market,
+            args.unit,
+            count=args.count,
+            safety_seconds=args.safety_seconds,
+            allow_gaps=args.allow_gaps,
+        )
         output = args.output.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
-            with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=output.parent,
-                                             prefix=".upbit-public-", suffix=".tmp", delete=False) as stream:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=output.parent,
+                prefix=".upbit-public-",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
                 temporary = Path(stream.name)
                 os.chmod(temporary, 0o600)
                 json.dump(snapshot, stream, indent=2, allow_nan=False)
@@ -163,7 +192,9 @@ def main(argv=None):
             if temporary is not None and temporary.exists():
                 temporary.unlink()
     except (ValueError, OSError, KeyError, TypeError, DecimalException, HTTPError, URLError):
-        parser.exit(2, "Public paper snapshot rejected. No trading or account action was attempted.\n")
+        parser.exit(
+            2, "Public paper snapshot rejected. No trading or account action was attempted.\n"
+        )
     print(str(output))
     return 0
 

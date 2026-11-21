@@ -1,15 +1,16 @@
 """Offline v1 checkpoint storage and economic consistency contracts."""
+
 import copy
-from decimal import Decimal
 import json
-from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from decimal import Decimal
+from pathlib import Path
 
-from trading_core.legacy_checkpoint import LegacyCheckpoint, CheckpointError
+from trading_core.legacy_checkpoint import CheckpointError, LegacyCheckpoint
 from trading_core.risk_manager import RiskConfig
-from trading_core.state_store import SQLiteStateStore, JSONStateStore
+from trading_core.state_store import JSONStateStore, SQLiteStateStore
 
 
 class LegacyCheckpointTests(unittest.TestCase):
@@ -19,7 +20,9 @@ class LegacyCheckpointTests(unittest.TestCase):
         self.path = Path(self.tmp.name) / "paper.db"
 
     def open(self, store=None, bot_id="audit", config=None):
-        session = LegacyCheckpoint(store or SQLiteStateStore(str(self.path)), bot_id, config or RiskConfig())
+        session = LegacyCheckpoint(
+            store or SQLiteStateStore(str(self.path)), bot_id, config or RiskConfig()
+        )
         self.addCleanup(session.release)
         session.restore()
         return session
@@ -91,8 +94,13 @@ class LegacyCheckpointTests(unittest.TestCase):
         base = self.open()
         saved = base.snapshot()
         base.release()
-        for field, value in (("version", 999), ("bot_id", "other"), ("quote_asset", "KRW"),
-                             ("mode", "live"), ("unexpected", "forbidden")):
+        for field, value in (
+            ("version", 999),
+            ("bot_id", "other"),
+            ("quote_asset", "KRW"),
+            ("mode", "live"),
+            ("unexpected", "forbidden"),
+        ):
             with self.subTest(field=field):
                 altered = copy.deepcopy(saved)
                 altered[field] = value

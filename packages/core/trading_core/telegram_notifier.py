@@ -2,10 +2,10 @@
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 try:
     from telegram import Bot
     from telegram.error import TelegramError
+
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
@@ -22,6 +23,7 @@ except ImportError:
 @dataclass
 class NotificationConfig:
     """알림 설정"""
+
     trade: bool = True
     error: bool = True
     daily_report: bool = True
@@ -32,12 +34,7 @@ class NotificationConfig:
 class TelegramNotifier:
     """텔레그램 알림 관리자"""
 
-    def __init__(
-        self,
-        bot_token: str,
-        chat_id: str,
-        config: Optional[NotificationConfig] = None
-    ):
+    def __init__(self, bot_token: str, chat_id: str, config: Optional[NotificationConfig] = None):
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.config = config or NotificationConfig()
@@ -65,11 +62,7 @@ class TelegramNotifier:
             return False
 
         try:
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode=parse_mode
-            )
+            await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode=parse_mode)
             return True
         except TelegramError as e:
             logger.error(f"Failed to send Telegram message: {e}")
@@ -85,7 +78,7 @@ class TelegramNotifier:
         size: Decimal,
         price: Decimal,
         pnl: Optional[Decimal] = None,
-        strategy: str = ""
+        strategy: str = "",
     ) -> bool:
         """거래 알림"""
         if not self.config.trade:
@@ -115,7 +108,7 @@ class TelegramNotifier:
         entry_price: Decimal,
         stop_loss: Optional[Decimal] = None,
         take_profit: Optional[Decimal] = None,
-        strategy: str = ""
+        strategy: str = "",
     ) -> bool:
         """포지션 진입 알림"""
         if not self.config.position:
@@ -148,7 +141,7 @@ class TelegramNotifier:
         exit_price: Decimal,
         pnl: Decimal,
         pnl_pct: Decimal,
-        reason: str = "signal"
+        reason: str = "signal",
     ) -> bool:
         """포지션 청산 알림"""
         if not self.config.position:
@@ -195,7 +188,7 @@ class TelegramNotifier:
         win_count: int,
         loss_count: int,
         win_rate: float,
-        portfolio_value: Decimal
+        portfolio_value: Decimal,
     ) -> bool:
         """일일 리포트"""
         if not self.config.daily_report:
@@ -217,10 +210,7 @@ class TelegramNotifier:
         return await self.send_message(message)
 
     async def notify_risk_alert(
-        self,
-        alert_type: str,
-        message: str,
-        current_value: Optional[Decimal] = None
+        self, alert_type: str, message: str, current_value: Optional[Decimal] = None
     ) -> bool:
         """리스크 알림"""
         emoji_map = {

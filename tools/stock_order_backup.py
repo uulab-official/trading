@@ -3,19 +3,20 @@
 Stop all journal writers first. A successful replay verifies local consistency,
 not broker evidence, account binding, economic reconciliation or order safety.
 """
+
 import argparse
-from contextlib import closing, contextmanager
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import sqlite3
 import stat
 import sys
 import tempfile
 import time
+from contextlib import closing, contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages/core/trading_core"))
@@ -26,14 +27,30 @@ MAX_MANIFEST_BYTES = 65_536
 _FILES = {"journal.sqlite", "manifest.json"}
 _SIDECARS = ("-wal", "-shm", "-journal")
 _REFUSAL = "Offline stock-order backup refused; existing state was not replaced."
-_FALSE_FLAGS = ("live_orders_enabled", "account_binding_verified",
-                "economic_reconciliation_verified", "lifecycle_confirmation_verified",
-                "safe_to_submit")
+_FALSE_FLAGS = (
+    "live_orders_enabled",
+    "account_binding_verified",
+    "economic_reconciliation_verified",
+    "lifecycle_confirmation_verified",
+    "safe_to_submit",
+)
 _MANIFEST_FIELDS = {
-    "schema_version", "kind", "mode", "account_ref", "created_at_utc",
-    "database_filename", "database_bytes", "database_sha256", "snapshot_sha256",
-    "event_count", "execution_count", "order_count", "pending_order_count",
-    "replay_verified", "candidate_restore_only", *_FALSE_FLAGS,
+    "schema_version",
+    "kind",
+    "mode",
+    "account_ref",
+    "created_at_utc",
+    "database_filename",
+    "database_bytes",
+    "database_sha256",
+    "snapshot_sha256",
+    "event_count",
+    "execution_count",
+    "order_count",
+    "pending_order_count",
+    "replay_verified",
+    "candidate_restore_only",
+    *_FALSE_FLAGS,
 }
 
 
@@ -46,8 +63,9 @@ def _static_refusal():
 
 
 def _canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=True, allow_nan=False).encode("ascii")
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    ).encode("ascii")
 
 
 def _digest(raw):
@@ -55,8 +73,7 @@ def _digest(raw):
 
 
 def _account(value):
-    if (type(value) is not str or re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", value)
-            is None):
+    if type(value) is not str or re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", value) is None:
         raise ValueError(_REFUSAL)
     return value
 
@@ -96,8 +113,9 @@ def _directory(path):
     before = path.lstat()
     if not stat.S_ISDIR(before.st_mode):
         raise ValueError(_REFUSAL)
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-                         | getattr(os, "O_NOFOLLOW", 0))
+    descriptor = os.open(
+        path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    )
     try:
         if _identity(before) != _identity(os.fstat(descriptor)):
             raise ValueError(_REFUSAL)
@@ -116,8 +134,11 @@ def _entries(descriptor, expected):
 def _read_file(descriptor, name, limit):
     info = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
     _regular(info, limit)
-    handle = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-                     | getattr(os, "O_NONBLOCK", 0), dir_fd=descriptor)
+    handle = os.open(
+        name,
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+        dir_fd=descriptor,
+    )
     with os.fdopen(handle, "rb") as source:
         opened = os.fstat(source.fileno())
         _regular(opened, limit)
@@ -132,8 +153,12 @@ def _read_file(descriptor, name, limit):
 
 
 def _write_new_file(descriptor, name, raw):
-    handle = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL
-                     | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=descriptor)
+    handle = os.open(
+        name,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+        dir_fd=descriptor,
+    )
     with os.fdopen(handle, "wb") as target:
         os.fchmod(target.fileno(), 0o600)
         identity = _identity(os.fstat(target.fileno()))
@@ -173,10 +198,12 @@ def _capture_database(database):
     """SQLite's native backup includes committed WAL pages, then exports DELETE."""
     with tempfile.TemporaryDirectory(prefix="stock-order-capture-") as temporary:
         path = _temporary_file(temporary)
-        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True,
-                                     timeout=5.0)) as source, closing(sqlite3.connect(
-                                         path.as_uri() + "?mode=rw", uri=True,
-                                         timeout=5.0)) as target:
+        with (
+            closing(
+                sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=5.0)
+            ) as source,
+            closing(sqlite3.connect(path.as_uri() + "?mode=rw", uri=True, timeout=5.0)) as target,
+        ):
             source.execute("PRAGMA query_only=ON")
             page_size = source.execute("PRAGMA page_size").fetchone()[0]
             pages = source.execute("PRAGMA page_count").fetchone()[0]
@@ -187,8 +214,11 @@ def _capture_database(database):
             def progress(status, remaining, total):
                 # SQLite's stable BUSY=5 / LOCKED=6 result codes are not
                 # exported by every supported Python sqlite3 module.
-                if (total * page_size > MAX_DB_BYTES or time.monotonic() > deadline
-                        or status in (5, 6)):
+                if (
+                    total * page_size > MAX_DB_BYTES
+                    or time.monotonic() > deadline
+                    or status in (5, 6)
+                ):
                     raise ValueError(_REFUSAL)
 
             source.backup(target, pages=128, progress=progress, sleep=0.01)
@@ -204,8 +234,9 @@ def _replay_bytes(raw, account_ref):
     """Audit private WAL copies; never open the stored backup with SQLite."""
     with tempfile.TemporaryDirectory(prefix="stock-order-replay-") as temporary:
         path = _temporary_file(temporary, raw)
-        with closing(sqlite3.connect(path.as_uri() + "?mode=rw", uri=True,
-                                     timeout=5.0)) as database:
+        with closing(
+            sqlite3.connect(path.as_uri() + "?mode=rw", uri=True, timeout=5.0)
+        ) as database:
             if database.execute("PRAGMA journal_mode").fetchone() != ("delete",):
                 raise ValueError(_REFUSAL)
             if database.execute("PRAGMA journal_mode=WAL").fetchone() != ("wal",):
@@ -215,17 +246,25 @@ def _replay_bytes(raw, account_ref):
 
 
 def _summary(snapshot):
-    return {"snapshot_sha256": _digest(_canonical(snapshot)),
-            "event_count": snapshot["event_count"],
-            "execution_count": snapshot["execution_count"],
-            "order_count": len(snapshot["orders"]),
-            "pending_order_count": len(snapshot["pending_client_order_ids"])}
+    return {
+        "snapshot_sha256": _digest(_canonical(snapshot)),
+        "event_count": snapshot["event_count"],
+        "execution_count": snapshot["execution_count"],
+        "order_count": len(snapshot["orders"]),
+        "pending_order_count": len(snapshot["pending_client_order_ids"]),
+    }
 
 
 def _result(status, account_ref, snapshot):
-    return {"status": status, "mode": "paper", "account_ref": account_ref,
-            **{flag: False for flag in _FALSE_FLAGS}, "replay_verified": True,
-            "candidate_restore_only": True, "snapshot": snapshot}
+    return {
+        "status": status,
+        "mode": "paper",
+        "account_ref": account_ref,
+        **{flag: False for flag in _FALSE_FLAGS},
+        "replay_verified": True,
+        "candidate_restore_only": True,
+        "snapshot": snapshot,
+    }
 
 
 def _unique_object(pairs):
@@ -248,31 +287,55 @@ def _invalid_number(text):
 
 
 def _manifest(raw, account_ref):
-    value = json.loads(raw, object_pairs_hook=_unique_object, parse_int=_integer,
-                       parse_float=_invalid_number, parse_constant=_invalid_number)
+    value = json.loads(
+        raw,
+        object_pairs_hook=_unique_object,
+        parse_int=_integer,
+        parse_float=_invalid_number,
+        parse_constant=_invalid_number,
+    )
     if type(value) is not dict or set(value) != _MANIFEST_FIELDS:
         raise ValueError(_REFUSAL)
-    if (type(value["schema_version"]) is not int or value["schema_version"] != 1
-            or value["kind"] != "stock_order_journal_backup" or value["mode"] != "paper"
-            or value["database_filename"] != "journal.sqlite" or value["account_ref"] != account_ref
-            or any(value[flag] is not False for flag in _FALSE_FLAGS)
-            or value["replay_verified"] is not True or value["candidate_restore_only"] is not True):
+    if (
+        type(value["schema_version"]) is not int
+        or value["schema_version"] != 1
+        or value["kind"] != "stock_order_journal_backup"
+        or value["mode"] != "paper"
+        or value["database_filename"] != "journal.sqlite"
+        or value["account_ref"] != account_ref
+        or any(value[flag] is not False for flag in _FALSE_FLAGS)
+        or value["replay_verified"] is not True
+        or value["candidate_restore_only"] is not True
+    ):
         raise ValueError(_REFUSAL)
     for field in ("database_sha256", "snapshot_sha256"):
         if type(value[field]) is not str or re.fullmatch(r"[0-9a-f]{64}", value[field]) is None:
             raise ValueError(_REFUSAL)
-    for field in ("database_bytes", "event_count", "execution_count", "order_count",
-                  "pending_order_count"):
+    for field in (
+        "database_bytes",
+        "event_count",
+        "execution_count",
+        "order_count",
+        "pending_order_count",
+    ):
         if type(value[field]) is not int or not 0 <= value[field] <= MAX_DB_BYTES:
             raise ValueError(_REFUSAL)
-    if (value["database_bytes"] == 0 or value["execution_count"] > value["event_count"]
-            or value["order_count"] > value["event_count"]
-            or value["pending_order_count"] > value["order_count"]):
+    if (
+        value["database_bytes"] == 0
+        or value["execution_count"] > value["event_count"]
+        or value["order_count"] > value["event_count"]
+        or value["pending_order_count"] > value["order_count"]
+    ):
         raise ValueError(_REFUSAL)
     clock = value["created_at_utc"]
-    if (type(clock) is not str or re.fullmatch(
-            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}\+00:00", clock)
-            is None or datetime.fromisoformat(clock).isoformat(timespec="microseconds") != clock):
+    if (
+        type(clock) is not str
+        or re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}\+00:00", clock
+        )
+        is None
+        or datetime.fromisoformat(clock).isoformat(timespec="microseconds") != clock
+    ):
         raise ValueError(_REFUSAL)
     return value
 
@@ -280,7 +343,9 @@ def _manifest(raw, account_ref):
 def _verified_backup(directory, account_ref):
     with _directory(directory) as descriptor:
         _entries(descriptor, _FILES)
-        manifest_raw, manifest_signature = _read_file(descriptor, "manifest.json", MAX_MANIFEST_BYTES)
+        manifest_raw, manifest_signature = _read_file(
+            descriptor, "manifest.json", MAX_MANIFEST_BYTES
+        )
         manifest = _manifest(manifest_raw, account_ref)
         raw, database_signature = _read_file(descriptor, "journal.sqlite", MAX_DB_BYTES)
         if len(raw) != manifest["database_bytes"] or _digest(raw) != manifest["database_sha256"]:
@@ -289,8 +354,10 @@ def _verified_backup(directory, account_ref):
         if any(manifest[key] != value for key, value in _summary(snapshot).items()):
             raise ValueError(_REFUSAL)
         _entries(descriptor, _FILES)
-        for name, expected in (("manifest.json", manifest_signature),
-                               ("journal.sqlite", database_signature)):
+        for name, expected in (
+            ("manifest.json", manifest_signature),
+            ("journal.sqlite", database_signature),
+        ):
             if _signature(os.stat(name, dir_fd=descriptor, follow_symlinks=False)) != expected:
                 raise ValueError(_REFUSAL)
         return snapshot, raw
@@ -308,8 +375,11 @@ def create_backup(database, destination, *, account_ref):
         before = journal.snapshot()
         raw = _capture_database(database)
         snapshot = _replay_bytes(raw, account_ref)
-        if (snapshot != before or journal.snapshot() != before
-                or _identity(_source_info(database)) != source_identity):
+        if (
+            snapshot != before
+            or journal.snapshot() != before
+            or _identity(_source_info(database)) != source_identity
+        ):
             raise ValueError(_REFUSAL)
         # Capture and audit before publishing any files. mkdir is exclusive and
         # no failure cleanup removes user-visible paths or observed replacements.
@@ -322,18 +392,29 @@ def create_backup(database, destination, *, account_ref):
                 database_signature = _write_new_file(descriptor, "journal.sqlite", raw)
                 _check_directory(destination, descriptor)
                 _entries(descriptor, {"journal.sqlite"})
-                if journal.snapshot() != before or _identity(_source_info(database)) != source_identity:
+                if (
+                    journal.snapshot() != before
+                    or _identity(_source_info(database)) != source_identity
+                ):
                     raise ValueError(_REFUSAL)
                 manifest = {
-                    "schema_version": 1, "kind": "stock_order_journal_backup", "mode": "paper",
-                    "account_ref": account_ref, **{flag: False for flag in _FALSE_FLAGS},
+                    "schema_version": 1,
+                    "kind": "stock_order_journal_backup",
+                    "mode": "paper",
+                    "account_ref": account_ref,
+                    **{flag: False for flag in _FALSE_FLAGS},
                     "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
-                    "database_filename": "journal.sqlite", "database_bytes": len(raw),
-                    "database_sha256": _digest(raw), **_summary(snapshot),
-                    "replay_verified": True, "candidate_restore_only": True,
+                    "database_filename": "journal.sqlite",
+                    "database_bytes": len(raw),
+                    "database_sha256": _digest(raw),
+                    **_summary(snapshot),
+                    "replay_verified": True,
+                    "candidate_restore_only": True,
                 }
                 manifest_signature = _write_new_file(
-                    descriptor, "manifest.json", _canonical(manifest) + b"\n",
+                    descriptor,
+                    "manifest.json",
+                    _canonical(manifest) + b"\n",
                 )
                 _entries(descriptor, _FILES)
                 os.fsync(descriptor)
@@ -345,9 +426,14 @@ def create_backup(database, destination, *, account_ref):
                 # already-flushed contents before reporting verified success.
                 os.fsync(parent)
                 _entries(descriptor, _FILES)
-                for name, expected in (("manifest.json", manifest_signature),
-                                       ("journal.sqlite", database_signature)):
-                    if _signature(os.stat(name, dir_fd=descriptor, follow_symlinks=False)) != expected:
+                for name, expected in (
+                    ("manifest.json", manifest_signature),
+                    ("journal.sqlite", database_signature),
+                ):
+                    if (
+                        _signature(os.stat(name, dir_fd=descriptor, follow_symlinks=False))
+                        != expected
+                    ):
                         raise ValueError(_REFUSAL)
         return _result("stock_order_backup_created", account_ref, verified)
 
@@ -388,8 +474,9 @@ def restore_candidate(directory, destination, *, account_ref):
                 raise ValueError(_REFUSAL)
             candidate._require_unused_sidecars()
             _check_directory(destination.parent, parent)
-            handle = os.open(destination.name, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0),
-                             dir_fd=parent)
+            handle = os.open(
+                destination.name, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent
+            )
             with os.fdopen(handle, "wb") as target:
                 if _identity(os.fstat(target.fileno())) != identity:
                     raise ValueError(_REFUSAL)
@@ -400,8 +487,9 @@ def restore_candidate(directory, destination, *, account_ref):
                 if _identity(destination.lstat()) != identity:
                     raise ValueError(_REFUSAL)
             candidate._require_unused_sidecars()
-            with closing(sqlite3.connect(destination.as_uri() + "?mode=rw", uri=True,
-                                         timeout=5.0)) as database:
+            with closing(
+                sqlite3.connect(destination.as_uri() + "?mode=rw", uri=True, timeout=5.0)
+            ) as database:
                 if _identity(destination.lstat()) != identity:
                     raise ValueError(_REFUSAL)
                 if database.execute("PRAGMA journal_mode=WAL").fetchone() != ("wal",):

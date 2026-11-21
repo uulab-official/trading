@@ -1,11 +1,15 @@
 """Shared numeric validation for pure, offline market data."""
 
-from decimal import Context, Decimal, DivisionByZero, InvalidOperation, Overflow, ROUND_HALF_EVEN
-
+from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow
 
 CALCULATION_CONTEXT = Context(
-    prec=28, rounding=ROUND_HALF_EVEN, Emin=-999999, Emax=999999,
-    capitals=1, clamp=0, traps=[InvalidOperation, DivisionByZero, Overflow],
+    prec=28,
+    rounding=ROUND_HALF_EVEN,
+    Emin=-999999,
+    Emax=999999,
+    capitals=1,
+    clamp=0,
+    traps=[InvalidOperation, DivisionByZero, Overflow],
 )
 
 

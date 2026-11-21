@@ -4,12 +4,12 @@ This module contains NO HTTP/API client and never submits or retries an order.
 An ambiguous order outcome must be reconciled against independent broker
 evidence, never guessed from a network timeout.
 """
+
+import re
+import sqlite3
 from contextlib import closing
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-import re
-import sqlite3
-
 
 FINAL = frozenset(("filled", "canceled", "rejected"))
 PENDING = frozenset(("reserved", "uncertain"))
@@ -89,8 +89,9 @@ class OrderIntentJournal:
         if self._read_only or read_only:
             # No implicit schema creation, data mutations, or journal
             # mode writes during a safety preflight.
-            con = sqlite3.connect(self.path.as_uri() + "?mode=ro",
-                                  uri=True, timeout=5.0, isolation_level=None)
+            con = sqlite3.connect(
+                self.path.as_uri() + "?mode=ro", uri=True, timeout=5.0, isolation_level=None
+            )
             con.execute("PRAGMA query_only=ON")
         else:
             con = sqlite3.connect(str(self.path), timeout=5.0, isolation_level=None)
@@ -160,7 +161,9 @@ class OrderIntentJournal:
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
-                row = db.execute("SELECT status FROM intents WHERE client_id=?", (client_id,)).fetchone()
+                row = db.execute(
+                    "SELECT status FROM intents WHERE client_id=?", (client_id,)
+                ).fetchone()
                 if row is None or row["status"] == "reconciled":
                     raise ValueError("Cannot mark missing or reconciled intent uncertain")
                 db.execute("UPDATE intents SET status='uncertain' WHERE client_id=?", (client_id,))
@@ -189,7 +192,9 @@ class OrderIntentJournal:
                     raise ValueError("Cannot reconcile an unknown client intent")
                 if row["status"] == "reconciled":
                     if (row["outcome"], row["evidence_ref"], row["broker_order_id"]) != (
-                        outcome, evidence_ref, broker_order_id
+                        outcome,
+                        evidence_ref,
+                        broker_order_id,
                     ):
                         raise ValueError("Final broker evidence is immutable")
                 else:
@@ -207,15 +212,18 @@ class OrderIntentJournal:
     def get(self, client_id):
         client_id = _identifier(client_id, "client_id")
         with closing(self._connect(read_only=True)) as db:
-            return self._row(db.execute(
-                "SELECT * FROM intents WHERE client_id=?", (client_id,)
-            ).fetchone())
+            return self._row(
+                db.execute("SELECT * FROM intents WHERE client_id=?", (client_id,)).fetchone()
+            )
 
     def unresolved(self):
         with closing(self._connect(read_only=True)) as db:
-            return [self._row(row) for row in db.execute(
-                "SELECT * FROM intents WHERE status IN ('reserved','uncertain') ORDER BY client_id"
-            ).fetchall()]
+            return [
+                self._row(row)
+                for row in db.execute(
+                    "SELECT * FROM intents WHERE status IN ('reserved','uncertain') ORDER BY client_id"
+                ).fetchall()
+            ]
 
     def audit_integrity(self):
         """Read-only preflight: reject corrupt or contradictory journal state.
@@ -230,9 +238,10 @@ class OrderIntentJournal:
             try:
                 if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                     raise ValueError("SQLite integrity check failed")
-                records = [dict(row) for row in db.execute(
-                    "SELECT * FROM intents ORDER BY client_id"
-                ).fetchall()]
+                records = [
+                    dict(row)
+                    for row in db.execute("SELECT * FROM intents ORDER BY client_id").fetchall()
+                ]
                 db.execute("COMMIT")
             except BaseException:
                 db.execute("ROLLBACK")
@@ -251,8 +260,10 @@ class OrderIntentJournal:
             if _quantity(row["quantity"]) != row["quantity"]:
                 raise ValueError("Noncanonical journal quantity")
             if row["status"] in PENDING:
-                if any(row[field] is not None for field in
-                       ("outcome", "evidence_ref", "broker_order_id")):
+                if any(
+                    row[field] is not None
+                    for field in ("outcome", "evidence_ref", "broker_order_id")
+                ):
                     raise ValueError("Unresolved intent carries final evidence")
                 pending.append(row["client_id"])
             elif row["status"] == "reconciled":

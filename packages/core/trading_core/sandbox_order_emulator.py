@@ -3,9 +3,10 @@
 No credentials, sockets, HTTP, exchange accounts, or live order methods.
 This adapter is for fault-injection and accounting-contract experiments only.
 """
-from decimal import Decimal, InvalidOperation
+
 import hashlib
 import re
+from decimal import Decimal, InvalidOperation
 
 
 def _positive(value, label, *, allow_zero=False):
@@ -34,17 +35,14 @@ class SandboxOrderEmulator:
         self.orders = {}
         self.next_id = 1
 
-    def submit_once(self, client_id, symbol, side, quantity, *,
-                    lose_ack=False):
+    def submit_once(self, client_id, symbol, side, quantity, *, lose_ack=False):
         if not isinstance(client_id, str) or not client_id:
             raise ValueError("Client ID required")
         if client_id in self.orders:
             raise ValueError("Duplicate submission is forbidden; query order state")
         if side not in ("buy", "sell"):
             raise ValueError("Spot side must be buy or sell")
-        if not isinstance(symbol, str) or not re.fullmatch(
-            r"[A-Z0-9]{2,20}/(?:KRW|USDT)", symbol
-        ):
+        if not isinstance(symbol, str) or not re.fullmatch(r"[A-Z0-9]{2,20}/(?:KRW|USDT)", symbol):
             raise ValueError("Invalid spot market")
         if symbol.split("/")[0] == symbol.split("/")[1]:
             raise ValueError("Self-quoted spot market forbidden")
@@ -52,10 +50,14 @@ class SandboxOrderEmulator:
         order_id = "sandbox-" + str(self.next_id)
         self.next_id += 1
         self.orders[client_id] = {
-            "order_id": order_id, "client_id": client_id,
-            "symbol": symbol, "side": side,
-            "quantity": str(qty), "filled": "0",
-            "gross_quote": "0", "fees_quote": "0",
+            "order_id": order_id,
+            "client_id": client_id,
+            "symbol": symbol,
+            "side": side,
+            "quantity": str(qty),
+            "filled": "0",
+            "gross_quote": "0",
+            "fees_quote": "0",
             "status": "open",
         }
         if lose_ack:
@@ -99,7 +101,18 @@ class SandboxOrderEmulator:
         """Immutable-test-record hash. NOT authenticated external proof."""
         if not isinstance(snapshot, dict) or not snapshot.get("order_id"):
             raise ValueError("Sandbox snapshot required")
-        content = "|".join(str(snapshot[key]) for key in
-                           ("order_id", "client_id", "symbol", "side", "quantity",
-                            "filled", "gross_quote", "fees_quote", "status"))
+        content = "|".join(
+            str(snapshot[key])
+            for key in (
+                "order_id",
+                "client_id",
+                "symbol",
+                "side",
+                "quantity",
+                "filled",
+                "gross_quote",
+                "fees_quote",
+                "status",
+            )
+        )
         return "sim-" + hashlib.sha256(content.encode()).hexdigest()[:40]

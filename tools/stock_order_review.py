@@ -1,37 +1,53 @@
 """Read-only offline stock-order review with private JSON and Korean HTML reports."""
-from datetime import datetime, timedelta, timezone
+
 import html
 import json
 import os
-from pathlib import Path
 import stat
 import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/core/trading_core"))
 from stock_order_journal import StockOrderJournal
 from stock_order_review import review_orders
+
 from tools.stock_order_journal import SafeArgumentParser
 
 MAX_OBSERVATION_BYTES = 2_000_000
 SIDECARS = ("-wal", "-shm", "-journal")
 KST = timezone(timedelta(hours=9))
 COMPARISONS = {
-    "not_supplied": "저널만 조회", "not_acknowledged": "접수 번호 미확인",
-    "not_observed": "조회 내역 없음", "observations_equal": "비교한 관측값 일치",
-    "different": "관측값 차이", "related_history": "관련 내역 확인",
-    "out_of_scope": "다른 조회일", "needs_review": "확인이 필요한 항목",
+    "not_supplied": "저널만 조회",
+    "not_acknowledged": "접수 번호 미확인",
+    "not_observed": "조회 내역 없음",
+    "observations_equal": "비교한 관측값 일치",
+    "different": "관측값 차이",
+    "related_history": "관련 내역 확인",
+    "out_of_scope": "다른 조회일",
+    "needs_review": "확인이 필요한 항목",
 }
 STATES = {
-    "reserved": "예약", "uncertain": "결과 불명", "accepted": "접수",
-    "partially_filled": "부분 체결", "cancel_pending": "취소 대기",
-    "filled": "전량 체결", "canceled": "취소", "rejected": "거절",
+    "reserved": "예약",
+    "uncertain": "결과 불명",
+    "accepted": "접수",
+    "partially_filled": "부분 체결",
+    "cancel_pending": "취소 대기",
+    "filled": "전량 체결",
+    "canceled": "취소",
+    "rejected": "거절",
 }
 FIELDS = {
-    "symbol": "종목", "side": "매수·매도", "order_division": "주문 구분",
-    "quantity": "주문 수량", "limit_price": "지정가", "filled_quantity": "체결 수량",
-    "gross_krw": "누적 체결 대금", "working_quantity": "유효·잔여 수량",
+    "symbol": "종목",
+    "side": "매수·매도",
+    "order_division": "주문 구분",
+    "quantity": "주문 수량",
+    "limit_price": "지정가",
+    "filled_quantity": "체결 수량",
+    "gross_krw": "누적 체결 대금",
+    "working_quantity": "유효·잔여 수량",
 }
 FINDINGS = {
     "unresolved_local_order": "미해결 주문이 남아 있습니다. 접수·체결·취소 근거를 확인하세요.",
@@ -82,8 +98,13 @@ def read_observations(path):
             os.close(descriptor)
     if len(raw) > MAX_OBSERVATION_BYTES:
         raise ValueError("Observation file exceeds configured bound")
-    return json.loads(raw, object_pairs_hook=_unique_object, parse_int=_integer,
-                      parse_float=_reject_float, parse_constant=_reject_float)
+    return json.loads(
+        raw,
+        object_pairs_hook=_unique_object,
+        parse_int=_integer,
+        parse_float=_reject_float,
+        parse_constant=_reject_float,
+    )
 
 
 def build_review(database, *, account_ref, observations=None, now=None, max_age_seconds=300):
@@ -99,8 +120,10 @@ def _target(path):
 
 
 def _same_family(first, second):
-    return (first == second or any(str(first) + suffix == str(second)
-                                  or str(second) + suffix == str(first) for suffix in SIDECARS))
+    return first == second or any(
+        str(first) + suffix == str(second) or str(second) + suffix == str(first)
+        for suffix in SIDECARS
+    )
 
 
 def validate_destinations(inputs, outputs):
@@ -131,8 +154,9 @@ def write_reports(outputs):
     close_identities = {}
     try:
         for target, data in zip(targets, encoded):
-            descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                                 getattr(os, "O_NOFOLLOW", 0), 0o600)
+            descriptor = os.open(
+                target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+            )
             try:
                 identity = os.fstat(descriptor)
             except BaseException:
@@ -206,83 +230,178 @@ def _time(value):
 
 
 def _paired(local, observed):
-    return "<strong>" + _number(local) + "</strong><span class='observed'>조회 " + (
-        "—" if observed is None else _number(observed)) + "</span>"
+    return (
+        "<strong>"
+        + _number(local)
+        + "</strong><span class='observed'>조회 "
+        + ("—" if observed is None else _number(observed))
+        + "</span>"
+    )
 
 
 def render_review_html(report):
-    if (type(report) is not dict or report.get("kind") != "stock_order_review"
-            or report.get("schema_version") != 1 or report.get("mode") != "paper"
-            or any(report.get(key) is not False for key in (
-                "live_orders_enabled", "account_binding_verified", "economic_reconciliation_verified",
-                "lifecycle_confirmation_verified", "safe_to_submit"))):
+    if (
+        type(report) is not dict
+        or report.get("kind") != "stock_order_review"
+        or report.get("schema_version") != 1
+        or report.get("mode") != "paper"
+        or any(
+            report.get(key) is not False
+            for key in (
+                "live_orders_enabled",
+                "account_binding_verified",
+                "economic_reconciliation_verified",
+                "lifecycle_confirmation_verified",
+                "safe_to_submit",
+            )
+        )
+    ):
         raise ValueError("Only unverified paper review reports can be rendered")
     summary = report["summary"]
     attention = report["needs_attention"]
     headline = COMPARISONS[report["comparison_status"]]
-    if (report["comparison_status"] == "observations_equal"
-            and summary["scoped_order_count"] == 0):
+    if report["comparison_status"] == "observations_equal" and summary["scoped_order_count"] == 0:
         headline = "비교 대상 없음"
-    synthetic_notice = ("<div class='notice attention'><strong>합성 데이터 예제</strong>"
-                        "가격·주문·조회 내역은 테스트용으로 만든 값입니다.</div>"
-                        if report.get("example_provenance") == "synthetic_stock_order_review" else "")
-    cards = "".join("<article class='metric'><span>" + label + "</span><strong>" +
-                    _number(summary[key]) + "</strong></article>" for label, key in (
-                        ("기록된 주문", "order_count"), ("미해결 주문", "unresolved_order_count"),
-                        ("관측값이 다른 주문", "different_order_count"),
-                        ("연결 안 된 조회 내역", "unmatched_observation_count")))
+    synthetic_notice = (
+        "<div class='notice attention'><strong>합성 데이터 예제</strong>"
+        "가격·주문·조회 내역은 테스트용으로 만든 값입니다.</div>"
+        if report.get("example_provenance") == "synthetic_stock_order_review"
+        else ""
+    )
+    cards = "".join(
+        "<article class='metric'><span>"
+        + label
+        + "</span><strong>"
+        + _number(summary[key])
+        + "</strong></article>"
+        for label, key in (
+            ("기록된 주문", "order_count"),
+            ("미해결 주문", "unresolved_order_count"),
+            ("관측값이 다른 주문", "different_order_count"),
+            ("연결 안 된 조회 내역", "unmatched_observation_count"),
+        )
+    )
     rows, differences = [], []
     for item in report["orders"]:
         local, observed = item["local"], item["observed"]
         changed = {difference["field"] for difference in item["differences"]}
         values = []
-        for local_key, observed_key in (("quantity", "ord_qty"), ("filled_quantity", "tot_ccld_qty"),
-                                        ("working_quantity", "rmn_qty"), ("gross_krw", "tot_ccld_amt")):
-            values.append("<td" + (" class='changed'" if local_key in changed else "") + ">" +
-                          _paired(local[local_key], None if observed is None else observed[observed_key]) + "</td>")
+        for local_key, observed_key in (
+            ("quantity", "ord_qty"),
+            ("filled_quantity", "tot_ccld_qty"),
+            ("working_quantity", "rmn_qty"),
+            ("gross_krw", "tot_ccld_amt"),
+        ):
+            values.append(
+                "<td"
+                + (" class='changed'" if local_key in changed else "")
+                + ">"
+                + _paired(local[local_key], None if observed is None else observed[observed_key])
+                + "</td>"
+            )
         side = "매수" if local["side"] == "buy" else "매도"
-        rows.append("<tr><td class='identity'><strong>" + _text(local["client_order_id"]) +
-                    "</strong><span>" + _text(local["symbol"]) + " · " + side + " · " +
-                    _text(local["order_date"]) + "</span></td><td>" +
-                    _text(STATES.get(local["status"], local["status"])) + "</td><td><span class='pill'>" +
-                    _text(COMPARISONS[item["comparison"]]) + "</span></td>" + "".join(values) + "</tr>")
+        rows.append(
+            "<tr><td class='identity'><strong>"
+            + _text(local["client_order_id"])
+            + "</strong><span>"
+            + _text(local["symbol"])
+            + " · "
+            + side
+            + " · "
+            + _text(local["order_date"])
+            + "</span></td><td>"
+            + _text(STATES.get(local["status"], local["status"]))
+            + "</td><td><span class='pill'>"
+            + _text(COMPARISONS[item["comparison"]])
+            + "</span></td>"
+            + "".join(values)
+            + "</tr>"
+        )
         for difference in item["differences"]:
-            differences.append("<li><strong>" + _text(local["client_order_id"]) + " · " +
-                               _text(FIELDS.get(difference["field"], difference["field"])) +
-                               "</strong><span>로컬 " + _text(difference["local"]) +
-                               " / 조회 " + _text(difference["observed"]) + "</span></li>")
+            differences.append(
+                "<li><strong>"
+                + _text(local["client_order_id"])
+                + " · "
+                + _text(FIELDS.get(difference["field"], difference["field"]))
+                + "</strong><span>로컬 "
+                + _text(difference["local"])
+                + " / 조회 "
+                + _text(difference["observed"])
+                + "</span></li>"
+            )
     if not rows:
         rows.append("<tr><td colspan='7' class='empty'>기록된 주문이 없습니다.</td></tr>")
     findings = []
     for finding in report["findings"]:
         identity = finding.get("client_order_id") or finding.get("broker_order_id")
         label = ("<strong>" + _text(identity) + "</strong> ") if identity else ""
-        findings.append("<li>" + label + _text(FINDINGS.get(finding["code"], finding["code"])) + "</li>")
-    finding_section = ("<ul class='findings'>" + "".join(findings) + "</ul>" if findings else
-                       "<p class='empty'>현재 점검 범위에서 추가 확인 항목이 없습니다.</p>")
-    difference_section = ("<section class='panel'><h2>항목별 차이</h2><ul class='differences'>" +
-                          "".join(differences) + "</ul></section>") if differences else ""
-    unmatched_rows = "".join("<tr><td>" + _text(row["odno"]) + "</td><td>" + _text(row["pdno"]) +
-                             "</td><td>" + _number(row["ord_qty"]) + "</td><td>" +
-                             _number(row["tot_ccld_qty"]) + "</td><td>" +
-                             _number(row["tot_ccld_amt"]) + "</td></tr>"
-                             for row in report["unmatched_observations"])
-    unmatched_section = ("<section class='panel'><h2>연결 안 된 조회 내역</h2>"
-                         "<p>누락·거절·추가 체결로 단정하지 않습니다. 주문 관계를 확인하세요.</p>"
-                         "<div class='table-wrap'><table><thead><tr><th>주문번호</th><th>종목</th>"
-                         "<th>주문 수량</th><th>누적 체결</th><th>대금 (원)</th></tr></thead><tbody>" +
-                         unmatched_rows + "</tbody></table></div></section>") if unmatched_rows else ""
+        findings.append(
+            "<li>" + label + _text(FINDINGS.get(finding["code"], finding["code"])) + "</li>"
+        )
+    finding_section = (
+        "<ul class='findings'>" + "".join(findings) + "</ul>"
+        if findings
+        else "<p class='empty'>현재 점검 범위에서 추가 확인 항목이 없습니다.</p>"
+    )
+    difference_section = (
+        (
+            "<section class='panel'><h2>항목별 차이</h2><ul class='differences'>"
+            + "".join(differences)
+            + "</ul></section>"
+        )
+        if differences
+        else ""
+    )
+    unmatched_rows = "".join(
+        "<tr><td>"
+        + _text(row["odno"])
+        + "</td><td>"
+        + _text(row["pdno"])
+        + "</td><td>"
+        + _number(row["ord_qty"])
+        + "</td><td>"
+        + _number(row["tot_ccld_qty"])
+        + "</td><td>"
+        + _number(row["tot_ccld_amt"])
+        + "</td></tr>"
+        for row in report["unmatched_observations"]
+    )
+    unmatched_section = (
+        (
+            "<section class='panel'><h2>연결 안 된 조회 내역</h2>"
+            "<p>누락·거절·추가 체결로 단정하지 않습니다. 주문 관계를 확인하세요.</p>"
+            "<div class='table-wrap'><table><thead><tr><th>주문번호</th><th>종목</th>"
+            "<th>주문 수량</th><th>누적 체결</th><th>대금 (원)</th></tr></thead><tbody>"
+            + unmatched_rows
+            + "</tbody></table></div></section>"
+        )
+        if unmatched_rows
+        else ""
+    )
     observation = report["observation_summary"]
     if observation is None:
         observation_text = "조회 자료 없음 · 로컬 저널 상태만 표시합니다."
     else:
-        freshness = {"fresh": "설정 시간 이내", "stale": "오래된 조회 자료", "future": "미래 조회 시각"}
-        observation_text = ("조회일 " + _text(observation["inquiry_date"]) + " · 수집 시작 " +
-                            _time(observation["observed_at_utc"]) + "<br>" +
-                            freshness[observation["freshness"]] + " · " +
-                            _number(observation["row_count"]) + "건 / " +
-                            _number(observation["pages_fetched"]) + "페이지")
-    return ("""<!doctype html>
+        freshness = {
+            "fresh": "설정 시간 이내",
+            "stale": "오래된 조회 자료",
+            "future": "미래 조회 시각",
+        }
+        observation_text = (
+            "조회일 "
+            + _text(observation["inquiry_date"])
+            + " · 수집 시작 "
+            + _time(observation["observed_at_utc"])
+            + "<br>"
+            + freshness[observation["freshness"]]
+            + " · "
+            + _number(observation["row_count"])
+            + "건 / "
+            + _number(observation["pages_fetched"])
+            + "페이지"
+        )
+    return (
+        """<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
@@ -305,26 +424,46 @@ th,td{padding:13px 11px;border-bottom:1px solid var(--line);vertical-align:middl
 @media print{body{background:white}main{padding:0}.panel,.metric{break-inside:avoid}.table-wrap{overflow:visible}header{margin-top:10px}}
 </style></head><body><main><div class="brand">UULAB / TRADING</div>
 <header><div><h1>주식 주문 점검</h1><p>로컬 저널과 저장된 주문 관측값을 함께 확인합니다.</p></div>
-<span class="badge""" + (" attention" if attention else "") + "\">PAPER · " + _text(headline) + "</span></header>" + synthetic_notice + """
+<span class="badge"""
+        + (" attention" if attention else "")
+        + '">PAPER · '
+        + _text(headline)
+        + "</span></header>"
+        + synthetic_notice
+        + """
 <div class="notice"><strong>계좌 연결과 개별 체결 증명은 미검증 상태입니다.</strong>
 관측값이 같아도 실제 체결·비용·잔고를 검증한 것은 아닙니다. 이 보고서는 주문을 전송하거나 미해결 상태를 해제하지 않습니다.</div>
-<section class="panel metadata"><div><span class="meta-label">로컬 계정 별칭</span><strong>""" +
-        _text(report["account_ref"]) + "</strong><p>점검 시각 " + _time(report["generated_at_utc"]) +
-        "</p></div><div><span class='meta-label'>조회 자료</span>" + observation_text +
-        "</div></section><section class='metrics'>" + cards + "</section>" +
-        "<section class='panel'><h2>주문별 비교</h2><p>범위 내 주문 " +
-        _number(summary["scoped_order_count"]) + "개 · 연결된 조회 " +
-        _number(summary["matched_order_count"]) + "건</p>"
+<section class="panel metadata"><div><span class="meta-label">로컬 계정 별칭</span><strong>"""
+        + _text(report["account_ref"])
+        + "</strong><p>점검 시각 "
+        + _time(report["generated_at_utc"])
+        + "</p></div><div><span class='meta-label'>조회 자료</span>"
+        + observation_text
+        + "</div></section><section class='metrics'>"
+        + cards
+        + "</section>"
+        + "<section class='panel'><h2>주문별 비교</h2><p>범위 내 주문 "
+        + _number(summary["scoped_order_count"])
+        + "개 · 연결된 조회 "
+        + _number(summary["matched_order_count"])
+        + "건</p>"
         "<p>굵은 숫자는 로컬 기록, 아래 숫자는 조회 관측값입니다. 수량 단위는 주입니다.</p>"
         "<div class='table-wrap' role='region' aria-label='주문별 비교 표' tabindex='0'><table><thead><tr>"
         "<th>주문</th><th>로컬 상태</th><th>비교 결과</th><th>주문 수량</th><th>체결 수량</th>"
-        "<th>유효·잔여 수량</th><th>누적 대금 (원)</th></tr></thead><tbody>" + "".join(rows) +
-        "</tbody></table></div><div class='footnote'><span>로컬 현금 순변화 <strong>" +
-        _number(report["journal"]["cash_delta_krw"]) + "원</strong> · 수수료·세금 반영</span>"
-        "<span>계좌 잔고나 투자 성과를 나타내지 않습니다.</span></div></section>" +
-        difference_section + "<section class='panel'><h2>확인할 항목</h2>" + finding_section +
-        "</section>" + unmatched_section + "<footer>저장된 시점의 로컬 점검 보고서 · 계정 별칭과 주문 내역을 포함하므로 비공개로 보관하세요.</footer>"
-        "</main></body></html>")
+        "<th>유효·잔여 수량</th><th>누적 대금 (원)</th></tr></thead><tbody>"
+        + "".join(rows)
+        + "</tbody></table></div><div class='footnote'><span>로컬 현금 순변화 <strong>"
+        + _number(report["journal"]["cash_delta_krw"])
+        + "원</strong> · 수수료·세금 반영</span>"
+        "<span>계좌 잔고나 투자 성과를 나타내지 않습니다.</span></div></section>"
+        + difference_section
+        + "<section class='panel'><h2>확인할 항목</h2>"
+        + finding_section
+        + "</section>"
+        + unmatched_section
+        + "<footer>저장된 시점의 로컬 점검 보고서 · 계정 별칭과 주문 내역을 포함하므로 비공개로 보관하세요.</footer>"
+        "</main></body></html>"
+    )
 
 
 def main(argv=None):
@@ -340,9 +479,15 @@ def main(argv=None):
         args = parser.parse_args(argv)
         requested = [path for path in (args.output_json, args.output_html) if path is not None]
         validate_destinations([args.database, args.observations], requested)
-        report = build_review(args.database, account_ref=args.account_ref, observations=args.observations,
-                              max_age_seconds=args.max_age_seconds)
-        serialized = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
+        report = build_review(
+            args.database,
+            account_ref=args.account_ref,
+            observations=args.observations,
+            max_age_seconds=args.max_age_seconds,
+        )
+        serialized = (
+            json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
+        )
         outputs = []
         if args.output_json is not None:
             outputs.append((args.output_json, serialized))
@@ -350,7 +495,10 @@ def main(argv=None):
             outputs.append((args.output_html, render_review_html(report)))
         write_reports(outputs)
     except Exception:
-        print("Offline stock order review refused. No journal event or broker order was changed.", file=sys.stderr)
+        print(
+            "Offline stock order review refused. No journal event or broker order was changed.",
+            file=sys.stderr,
+        )
         return 2
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, allow_nan=False))
     return 3 if report["needs_attention"] else 0

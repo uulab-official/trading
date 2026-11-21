@@ -1,10 +1,10 @@
 """Offline regressions for atomic spot fills and marked broker equity."""
 
-from copy import deepcopy
-from decimal import Decimal, ROUND_DOWN, localcontext
-from pathlib import Path
 import sys
 import unittest
+from copy import deepcopy
+from decimal import ROUND_DOWN, Decimal, localcontext
+from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 for package in ("backtest", "strategy", "data", "core"):
@@ -130,8 +130,12 @@ class BrokerAccountingTests(unittest.TestCase):
         broker = self.broker()
         before = self.accounting(broker)
         order = broker.submit_order(
-            "BTC/USDT", "buy", Decimal("1"), order_type="limit",
-            price=Decimal("90"), current_bar=candle(),
+            "BTC/USDT",
+            "buy",
+            Decimal("1"),
+            order_type="limit",
+            price=Decimal("90"),
+            current_bar=candle(),
         )
         self.assertEqual(order.status, OrderStatus.PENDING)
         self.assertIn(order.order_id, broker.pending_orders)
@@ -146,7 +150,10 @@ class BrokerAccountingTests(unittest.TestCase):
     def test_immediate_low_volume_market_order_stays_pending(self):
         broker = self.broker()
         order = broker.submit_order(
-            "BTC/USDT", "buy", Decimal("1"), current_bar=candle(volume=Decimal("999")),
+            "BTC/USDT",
+            "buy",
+            Decimal("1"),
+            current_bar=candle(volume=Decimal("999")),
         )
         self.assertEqual(order.status, OrderStatus.PENDING)
         self.assertIn(order.order_id, broker.pending_orders)
@@ -156,10 +163,15 @@ class BrokerAccountingTests(unittest.TestCase):
 
     def test_invalid_order_fields_are_terminal_without_accounting_changes(self):
         invalid = [
-            {"side": "hold"}, {"side": "BUY"}, {"symbol": ""},
-            {"order_type": "unknown"}, {"order_type": "stop", "price": Decimal("100")},
-            {"amount": Decimal("0")}, {"amount": Decimal("-1")},
-            {"amount": Decimal("NaN")}, {"amount": Decimal("Infinity")},
+            {"side": "hold"},
+            {"side": "BUY"},
+            {"symbol": ""},
+            {"order_type": "unknown"},
+            {"order_type": "stop", "price": Decimal("100")},
+            {"amount": Decimal("0")},
+            {"amount": Decimal("-1")},
+            {"amount": Decimal("NaN")},
+            {"amount": Decimal("Infinity")},
             {"amount": "invalid"},
             {"order_type": "limit"},
             {"order_type": "limit", "price": Decimal("0")},
@@ -187,21 +199,28 @@ class BrokerAccountingTests(unittest.TestCase):
             with self.subTest(price=price):
                 broker = self.broker()
                 before = self.accounting(broker)
-                order = broker.submit_order("BTC/USDT", "buy", Decimal("1"), current_bar=candle(open=price))
+                order = broker.submit_order(
+                    "BTC/USDT", "buy", Decimal("1"), current_bar=candle(open=price)
+                )
                 self.assertEqual(order.status, OrderStatus.REJECTED)
                 self.assertEqual(self.accounting(broker), before)
                 self.assert_unfilled(order)
 
     def test_invalid_volume_or_supplied_ohlc_is_rejected_atomically(self):
         for fields in (
-            {"volume": Decimal("NaN")}, {"volume": Decimal("-1")},
-            {"volume": Decimal("Infinity")}, {"high": Decimal("0")},
-            {"close": Decimal("NaN")}, {"high": Decimal("90"), "low": Decimal("110")},
+            {"volume": Decimal("NaN")},
+            {"volume": Decimal("-1")},
+            {"volume": Decimal("Infinity")},
+            {"high": Decimal("0")},
+            {"close": Decimal("NaN")},
+            {"high": Decimal("90"), "low": Decimal("110")},
         ):
             with self.subTest(fields=fields):
                 broker = self.broker()
                 before = self.accounting(broker)
-                order = broker.submit_order("BTC/USDT", "buy", Decimal("1"), current_bar=candle(**fields))
+                order = broker.submit_order(
+                    "BTC/USDT", "buy", Decimal("1"), current_bar=candle(**fields)
+                )
                 self.assertEqual(order.status, OrderStatus.REJECTED)
                 self.assertEqual(self.accounting(broker), before)
                 self.assert_unfilled(order)
@@ -247,7 +266,9 @@ class BrokerAccountingTests(unittest.TestCase):
 
     def test_successful_fill_records_a_caller_supplied_close_mark(self):
         broker = self.broker()
-        broker.submit_order("BTC/USDT", "buy", Decimal("2"), current_bar=candle(close=Decimal("110")))
+        broker.submit_order(
+            "BTC/USDT", "buy", Decimal("2"), current_bar=candle(close=Decimal("110"))
+        )
         summary = broker.get_performance_summary()
         self.assertIn("final_equity", summary)
         self.assertEqual(summary["final_equity"], 1018.0)
@@ -290,9 +311,18 @@ class BrokerAccountingTests(unittest.TestCase):
     def test_accounting_ignores_ambient_decimal_precision_and_rounding(self):
         def sample():
             broker = self.broker(fee="0.1", slippage="0.05")
-            order = broker.submit_order("BTC/USDT", "buy", Decimal("4.84709586"), current_bar=candle("103"))
+            order = broker.submit_order(
+                "BTC/USDT", "buy", Decimal("4.84709586"), current_bar=candle("103")
+            )
             equity = broker.get_total_value({"BTC/USDT": Decimal("110")})
-            return broker.balance, dict(broker.positions), broker.total_fees, order.filled_price, equity, broker.get_performance_summary()
+            return (
+                broker.balance,
+                dict(broker.positions),
+                broker.total_fees,
+                order.filled_price,
+                equity,
+                broker.get_performance_summary(),
+            )
 
         expected = sample()
         with localcontext() as context:

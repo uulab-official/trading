@@ -3,21 +3,23 @@
 Captures one new public snapshot per invocation. No live orders,
 credentials, daemon, background worker, or exchange private endpoints.
 """
+
 import argparse
-from decimal import DecimalException
 import json
 import os
-from pathlib import Path
-import tempfile
 import sys
+import tempfile
+from decimal import DecimalException
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 for source in (ROOT, ROOT / "packages/data", ROOT / "apps/server"):
     sys.path.insert(0, str(source))
 
-from tools.upbit_public_paper_snapshot import build_snapshot
-from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
+from trading_bot.paper_checkpoint import CheckpointInUseError, locked_checkpoint
 from trading_data import Candle, CandleBuffer
+
+from tools.upbit_public_paper_snapshot import build_snapshot
 
 
 def _validated_rows(payload):
@@ -50,11 +52,15 @@ def merge_archive(archive, snapshot, *, allow_gaps=False):
         raise ValueError("Only KRW spot paper symbols are accepted")
     if archive is None:
         metadata = {
-            "provider": "upbit_public_quotation", "snapshots": 1,
-            "source": "public_upbit_completed_candles", "live_orders_enabled": False,
+            "provider": "upbit_public_quotation",
+            "snapshots": 1,
+            "source": "public_upbit_completed_candles",
+            "live_orders_enabled": False,
         }
         return {
-            "mode": "paper", "symbol": symbol, "timeframe": timeframe,
+            "mode": "paper",
+            "symbol": symbol,
+            "timeframe": timeframe,
             "description": "Append-only public Upbit closed candles for offline paper replay",
             "archive_metadata": metadata,
             "candles": [list(row) for row in snapshot["candles"]],
@@ -64,7 +70,11 @@ def merge_archive(archive, snapshot, *, allow_gaps=False):
     if old_duration != duration or archive["symbol"] != symbol or archive["timeframe"] != timeframe:
         raise ValueError("Cannot mix market, currency or timeframe in a saved archive")
     meta = archive.get("archive_metadata")
-    if not isinstance(meta, dict) or meta.get("provider") != "upbit_public_quotation" or meta.get("live_orders_enabled") is not False:
+    if (
+        not isinstance(meta, dict)
+        or meta.get("provider") != "upbit_public_quotation"
+        or meta.get("live_orders_enabled") is not False
+    ):
         raise ValueError("Unrecognized paper archive provenance")
     if type(meta.get("snapshots")) is not int or meta["snapshots"] < 1:
         raise ValueError("Invalid archive snapshot counter")
@@ -75,7 +85,9 @@ def merge_archive(archive, snapshot, *, allow_gaps=False):
     for bar in fresh:
         if bar.timestamp in known:
             if known[bar.timestamp] != bar:
-                raise ValueError("Previously completed candle was revised; refusing archive rewrite")
+                raise ValueError(
+                    "Previously completed candle was revised; refusing archive rewrite"
+                )
             matches += 1
         elif bar.timestamp < last:
             # Older bars outside the saved window cannot silently be inserted.
@@ -92,8 +104,15 @@ def merge_archive(archive, snapshot, *, allow_gaps=False):
         if bar.timestamp - last > duration and not allow_gaps:
             raise ValueError("Missing archive interval; explicit --allow-gaps required")
         last = bar.timestamp
-        appended.append([bar.timestamp, *[format(getattr(bar, field), "f")
-                       for field in ("open", "high", "low", "close", "volume")]])
+        appended.append(
+            [
+                bar.timestamp,
+                *[
+                    format(getattr(bar, field), "f")
+                    for field in ("open", "high", "low", "close", "volume")
+                ],
+            ]
+        )
     if len(old) + len(appended) > 100000:
         raise ValueError("Archive would exceed 100,000 bars")
     if not appended:
@@ -104,18 +123,26 @@ def merge_archive(archive, snapshot, *, allow_gaps=False):
     return merged, len(appended)
 
 
-def capture_once(path: Path, *, market="KRW-BTC", unit=60, count=200,
-                 allow_gaps=False, fetcher=None, now_ms=None):
-    snapshot = build_snapshot(market, unit, count=count, allow_gaps=allow_gaps,
-                              fetcher=fetcher, now_ms=now_ms)
+def capture_once(
+    path: Path, *, market="KRW-BTC", unit=60, count=200, allow_gaps=False, fetcher=None, now_ms=None
+):
+    snapshot = build_snapshot(
+        market, unit, count=count, allow_gaps=allow_gaps, fetcher=fetcher, now_ms=now_ms
+    )
     with locked_checkpoint(path) as canonical:
         prior = json.loads(canonical.read_text("utf-8")) if canonical.exists() else None
         merged, added = merge_archive(prior, snapshot, allow_gaps=allow_gaps)
         if added:
             temporary = None
             try:
-                with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=canonical.parent,
-                                                 prefix=".upbit-archive-", suffix=".tmp", delete=False) as stream:
+                with tempfile.NamedTemporaryFile(
+                    "w",
+                    encoding="utf-8",
+                    dir=canonical.parent,
+                    prefix=".upbit-archive-",
+                    suffix=".tmp",
+                    delete=False,
+                ) as stream:
                     temporary = Path(stream.name)
                     os.chmod(temporary, 0o600)
                     json.dump(merged, stream, indent=2, allow_nan=False)
@@ -125,8 +152,13 @@ def capture_once(path: Path, *, market="KRW-BTC", unit=60, count=200,
             finally:
                 if temporary is not None and temporary.exists():
                     temporary.unlink()
-        return {"mode": "paper", "appended_bars": added, "archived_bars": len(merged["candles"]),
-                "live_orders_enabled": False, "archive": str(canonical)}
+        return {
+            "mode": "paper",
+            "appended_bars": added,
+            "archived_bars": len(merged["candles"]),
+            "live_orders_enabled": False,
+            "archive": str(canonical),
+        }
 
 
 def main(argv=None):
@@ -138,12 +170,19 @@ def main(argv=None):
     parser.add_argument("--allow-gaps", action="store_true")
     args = parser.parse_args(argv)
     try:
-        outcome = capture_once(args.archive, market=args.market, unit=args.unit,
-                               count=args.count, allow_gaps=args.allow_gaps)
+        outcome = capture_once(
+            args.archive,
+            market=args.market,
+            unit=args.unit,
+            count=args.count,
+            allow_gaps=args.allow_gaps,
+        )
     except CheckpointInUseError:
         parser.exit(3, "Paper archive is owned by another process; retry after it completes.\\n")
     except (ValueError, OSError, KeyError, TypeError, DecimalException):
-        parser.exit(2, "Paper archive refused public data; no orders or account access attempted.\n")
+        parser.exit(
+            2, "Paper archive refused public data; no orders or account access attempted.\n"
+        )
     print(json.dumps(outcome, sort_keys=True))
     return 0
 

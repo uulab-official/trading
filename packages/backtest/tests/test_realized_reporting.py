@@ -1,32 +1,48 @@
 """Net FIFO reporting regressions using the original broker and engine."""
 
+import importlib.util
+import json
+import tempfile
+import unittest
 from copy import deepcopy
 from decimal import Decimal, localcontext
-import unittest
-from unittest.mock import patch
-import json
 from pathlib import Path
-import importlib.util
-import tempfile
+from unittest.mock import patch
 
+from test_engine_accounting import ScheduledStrategy, fixture
 from trading_backtest import BacktestConfig, BacktestEngine, VirtualBroker
 from trading_backtest.brokers.virtual_broker import BrokerConfig
 from trading_strategy import MACrossStrategy, SignalType, StrategyConfig
-from test_engine_accounting import ScheduledStrategy, fixture
 
 
 def broker(initial="1000", fee="1"):
-    return VirtualBroker(BrokerConfig(slippage_pct=Decimal("0"),
-                         slippage_volatility_factor=False,
-                         maker_fee_pct=Decimal(fee), taker_fee_pct=Decimal(fee),
-                         min_volume_threshold=Decimal("0")), Decimal(initial))
+    return VirtualBroker(
+        BrokerConfig(
+            slippage_pct=Decimal("0"),
+            slippage_volatility_factor=False,
+            maker_fee_pct=Decimal(fee),
+            taker_fee_pct=Decimal(fee),
+            min_volume_threshold=Decimal("0"),
+        ),
+        Decimal(initial),
+    )
 
 
 def fill(account, side, amount, price, symbol="BTC/USDT"):
     price = Decimal(str(price))
-    return account.submit_order(symbol, side, Decimal(str(amount)), current_bar={
-        "open": price, "high": price, "low": price, "close": price,
-        "volume": 2000, "timestamp": len(account.trades) * 3600000})
+    return account.submit_order(
+        symbol,
+        side,
+        Decimal(str(amount)),
+        current_bar={
+            "open": price,
+            "high": price,
+            "low": price,
+            "close": price,
+            "volume": 2000,
+            "timestamp": len(account.trades) * 3600000,
+        },
+    )
 
 
 class TestRealizedReporting(unittest.TestCase):
@@ -37,16 +53,24 @@ class TestRealizedReporting(unittest.TestCase):
             self.addCleanup(guard.stop)
 
     def report(self, account):
-        self.assertTrue(hasattr(account, "get_trade_report"), "The broker needs a fee-inclusive closed-exit report")
+        self.assertTrue(
+            hasattr(account, "get_trade_report"),
+            "The broker needs a fee-inclusive closed-exit report",
+        )
         return account.get_trade_report()
 
     def test_real_engine_price_gain_after_fees_is_a_completed_loss(self):
         data = fixture()
         data.loc[:, ["open", "high", "low", "close"]] = 100
         data.loc[52:, ["open", "high", "low", "close"]] = 101
-        engine = BacktestEngine(BacktestConfig(initial_balance=Decimal("1000"),
-                                position_size_pct=Decimal("10"), commission_pct=Decimal("1"),
-                                slippage_pct=Decimal("0")))
+        engine = BacktestEngine(
+            BacktestConfig(
+                initial_balance=Decimal("1000"),
+                position_size_pct=Decimal("10"),
+                commission_pct=Decimal("1"),
+                slippage_pct=Decimal("0"),
+            )
+        )
         result = engine.run(ScheduledStrategy({49: SignalType.BUY, 51: SignalType.SELL}), data)
         self.assertEqual(result.final_balance, Decimal("998.99"))
         self.assertEqual(result.win_count, 0)
@@ -87,10 +111,15 @@ class TestRealizedReporting(unittest.TestCase):
         self.assertEqual(report.open_lots[0].entry_fee, Decimal("3"))
         self.assertEqual(report.closed_trade_count, 1)
         self.assertEqual(report.win_rate, Decimal("100"))
-        self.assertEqual(sum(exit.entry_fees + exit.exit_fee for exit in report.closed_exits)
-                         + sum(lot.entry_fee for lot in report.open_lots), account.total_fees)
-        self.assertEqual(account.get_total_value({"BTC/USDT": Decimal("180")}) - account.initial_balance,
-                         report.realized_net_pnl + Decimal("270") - Decimal("303"))
+        self.assertEqual(
+            sum(exit.entry_fees + exit.exit_fee for exit in report.closed_exits)
+            + sum(lot.entry_fee for lot in report.open_lots),
+            account.total_fees,
+        )
+        self.assertEqual(
+            account.get_total_value({"BTC/USDT": Decimal("180")}) - account.initial_balance,
+            report.realized_net_pnl + Decimal("270") - Decimal("303"),
+        )
 
     def test_remaining_exit_consumes_entry_fees_once_and_uses_currency_profit_factor(self):
         account = broker()
@@ -104,7 +133,9 @@ class TestRealizedReporting(unittest.TestCase):
         self.assertEqual(sum(e.entry_fees for e in report.closed_exits), Decimal("5"))
         self.assertEqual(sum(e.exit_fee for e in report.closed_exits), Decimal("5.55"))
         self.assertEqual(report.open_lots, ())
-        self.assertEqual((report.win_count, report.loss_count, report.closed_trade_count), (1, 1, 2))
+        self.assertEqual(
+            (report.win_count, report.loss_count, report.closed_trade_count), (1, 1, 2)
+        )
         self.assertEqual(report.win_rate, Decimal("50"))
         with localcontext() as ctx:
             ctx.prec = 28
@@ -145,13 +176,21 @@ class TestRealizedReporting(unittest.TestCase):
         first = self.report(account)
         second = self.report(account)
         self.assertEqual(second, first)
-        self.assertEqual((account.trades, account.balance, account.positions, account.total_fees), state)
+        self.assertEqual(
+            (account.trades, account.balance, account.positions, account.total_fees), state
+        )
 
     def test_mutable_source_timestamp_metadata_cannot_change_fresh_or_raw_reports(self):
         account = broker(fee="0")
         timestamp = {"tag": "original"}
-        bar = {"open": 100, "high": 100, "low": 100, "close": 100,
-               "volume": 2000, "timestamp": timestamp}
+        bar = {
+            "open": 100,
+            "high": 100,
+            "low": 100,
+            "close": 100,
+            "volume": 2000,
+            "timestamp": timestamp,
+        }
         account.submit_order("BTC/USDT", "buy", Decimal("1"), current_bar=bar)
         account.submit_order("BTC/USDT", "sell", Decimal("1"), current_bar=bar)
         report = self.report(account)
@@ -243,7 +282,9 @@ class TestRealizedReporting(unittest.TestCase):
         fill(account, "sell", 1, 150, "BTC/USDT")
         fill(account, "sell", 1, 180, "ETH/USDT")
         report = self.report(account)
-        self.assertEqual([exit.net_pnl for exit in report.closed_exits], [Decimal("50"), Decimal("-20")])
+        self.assertEqual(
+            [exit.net_pnl for exit in report.closed_exits], [Decimal("50"), Decimal("-20")]
+        )
         self.assertEqual(report.realized_net_pnl, Decimal("30"))
         self.assertEqual(report.quote_currency, "USDT")
 
@@ -271,45 +312,88 @@ class TestRealizedReporting(unittest.TestCase):
         data = fixture()
         data.loc[:, ["open", "high", "low", "close"]] = 100
         data.loc[52:, ["open", "high", "low", "close"]] = 101
-        runner = BacktestEngine(BacktestConfig(initial_balance=Decimal("1000"),
-                                position_size_pct=Decimal("10"), commission_pct=Decimal("1"),
-                                slippage_pct=Decimal("0")))
+        runner = BacktestEngine(
+            BacktestConfig(
+                initial_balance=Decimal("1000"),
+                position_size_pct=Decimal("10"),
+                commission_pct=Decimal("1"),
+                slippage_pct=Decimal("0"),
+            )
+        )
         strategy = ScheduledStrategy({49: SignalType.BUY, 51: SignalType.SELL})
         first = runner.run(strategy, data)
         second = runner.run(strategy, data)
-        for field in ("realized_net_pnl", "gross_realized_pnl", "win_rate", "closed_trade_count",
-                      "profit_factor", "avg_trade", "expectancy", "final_equity"):
+        for field in (
+            "realized_net_pnl",
+            "gross_realized_pnl",
+            "win_rate",
+            "closed_trade_count",
+            "profit_factor",
+            "avg_trade",
+            "expectancy",
+            "final_equity",
+        ):
             self.assertEqual(getattr(second, field), getattr(first, field), field)
 
     def test_cli_can_show_undefined_profit_factor_from_real_report(self):
         from argparse import Namespace
         from contextlib import redirect_stdout
         from io import StringIO
+
         from trading_backtest.cli import run_backtest
-        args = Namespace(symbol="BTC/USDT", strategy="ma_cross", timeframe="1h", data_dir="unused",
-                         fast_period=3, slow_period=5, balance=1000, commission=0, slippage=0,
-                         position_size=10, output=None, plot=False)
+
+        args = Namespace(
+            symbol="BTC/USDT",
+            strategy="ma_cross",
+            timeframe="1h",
+            data_dir="unused",
+            fast_period=3,
+            slow_period=5,
+            balance=1000,
+            commission=0,
+            slippage=0,
+            position_size=10,
+            output=None,
+            plot=False,
+        )
         output = StringIO()
-        with patch("trading_backtest.cli.HistoricalDataLoader.load_from_csv", return_value=fixture()), \
-             patch("trading_backtest.cli.HistoricalDataLoader.fetch_from_exchange", side_effect=AssertionError("No exchange data")), \
-             redirect_stdout(output):
+        with (
+            patch(
+                "trading_backtest.cli.HistoricalDataLoader.load_from_csv", return_value=fixture()
+            ),
+            patch(
+                "trading_backtest.cli.HistoricalDataLoader.fetch_from_exchange",
+                side_effect=AssertionError("No exchange data"),
+            ),
+            redirect_stdout(output),
+        ):
             run_backtest(args)
         self.assertIn("N/A (no realized losses)", output.getvalue())
         self.assertIn("Closed Exits:", output.getvalue())
 
     def test_optimizer_does_not_convert_an_undefined_ratio_into_failed_return(self):
         from trading_backtest.optimization.grid_search import GridSearchOptimizer
-        config = BacktestConfig(initial_balance=Decimal("1000"), commission_pct=Decimal("0"),
-                                slippage_pct=Decimal("0"), position_size_pct=Decimal("10"))
+
+        config = BacktestConfig(
+            initial_balance=Decimal("1000"),
+            commission_pct=Decimal("0"),
+            slippage_pct=Decimal("0"),
+            position_size_pct=Decimal("10"),
+        )
         params = {"fast_period": 3, "slow_period": 5}
-        optimizer = GridSearchOptimizer(MACrossStrategy, {name: [value] for name, value in params.items()}, config)
+        optimizer = GridSearchOptimizer(
+            MACrossStrategy, {name: [value] for name, value in params.items()}, config
+        )
         row = optimizer._evaluate_params(params, fixture(), "total_return_pct")
-        expected = BacktestEngine(config).run(MACrossStrategy(StrategyConfig("expected", "TEST", "1h"), **params), fixture())
+        expected = BacktestEngine(config).run(
+            MACrossStrategy(StrategyConfig("expected", "TEST", "1h"), **params), fixture()
+        )
         self.assertEqual(row["total_return_pct"], float(expected.total_return_pct))
         self.assertIsNone(row["profit_factor"])
 
     def test_optimizer_rejects_an_entirely_undefined_ranking_metric(self):
         from trading_backtest.optimization.grid_search import GridSearchOptimizer
+
         optimizer = GridSearchOptimizer(MACrossStrategy, {"fast_period": [3], "slow_period": [5]})
         with self.assertRaisesRegex(ValueError, "defined"):
             optimizer.optimize(fixture(), metric="profit_factor", n_jobs=1)

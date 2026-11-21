@@ -1,17 +1,18 @@
 """Native SQLite snapshot, immutable backup verification and candidate restore."""
-from contextlib import closing
-from copy import deepcopy
+
 import hashlib
 import importlib
 import json
 import os
-from pathlib import Path
 import sqlite3
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import closing
+from copy import deepcopy
+from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -59,13 +60,19 @@ class StockOrderBackupTests(unittest.TestCase):
 
     def restore(self, path=None):
         return self.backup.restore_candidate(
-            self.destination, path or self.candidate, account_ref=ACCOUNT,
+            self.destination,
+            path or self.candidate,
+            account_ref=ACCOUNT,
         )
 
     def contents(self, directory):
         return {
-            path.name: (path.read_bytes(), stat.S_IMODE(path.stat().st_mode),
-                        path.stat().st_ino, path.stat().st_mtime_ns)
+            path.name: (
+                path.read_bytes(),
+                stat.S_IMODE(path.stat().st_mode),
+                path.stat().st_ino,
+                path.stat().st_mtime_ns,
+            )
             for path in directory.iterdir()
         }
 
@@ -74,9 +81,13 @@ class StockOrderBackupTests(unittest.TestCase):
         self.assertEqual(ACCOUNT, result["account_ref"])
         self.assertIs(result["replay_verified"], True)
         self.assertIs(result["candidate_restore_only"], True)
-        for key in ("live_orders_enabled", "account_binding_verified",
-                    "economic_reconciliation_verified", "lifecycle_confirmation_verified",
-                    "safe_to_submit"):
+        for key in (
+            "live_orders_enabled",
+            "account_binding_verified",
+            "economic_reconciliation_verified",
+            "lifecycle_confirmation_verified",
+            "safe_to_submit",
+        ):
             self.assertIs(result[key], False)
         self.assertEqual(snapshot, result["snapshot"])
 
@@ -99,13 +110,17 @@ class StockOrderBackupTests(unittest.TestCase):
             self.assertEqual(3, created["snapshot"]["orders"][0]["filled_quantity"])
             self.assertEqual(original_main, self.database.read_bytes())
             self.assertEqual(original_wal, wal.read_bytes())
-        self.assertEqual({"journal.sqlite", "manifest.json"},
-                         {path.name for path in self.destination.iterdir()})
+        self.assertEqual(
+            {"journal.sqlite", "manifest.json"}, {path.name for path in self.destination.iterdir()}
+        )
         self.assertEqual(0o700, stat.S_IMODE(self.destination.stat().st_mode))
         for path in self.destination.iterdir():
             self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
-        with closing(sqlite3.connect((self.destination / "journal.sqlite").as_uri()
-                                     + "?mode=ro&immutable=1", uri=True)) as database:
+        with closing(
+            sqlite3.connect(
+                (self.destination / "journal.sqlite").as_uri() + "?mode=ro&immutable=1", uri=True
+            )
+        ) as database:
             self.assertEqual(("delete",), database.execute("PRAGMA journal_mode").fetchone())
         self.assert_verified(self.verify(), expected)
 
@@ -184,23 +199,35 @@ class StockOrderBackupTests(unittest.TestCase):
         manifest = json.loads(original)
         malformed = [
             b'{"schema_version":1,"schema_version":1}',
-            b'{"schema_version":NaN}', b'{"schema_version":Infinity}',
-            b'{"schema_version":' + b'9' * 10000 + b'}',
-            b" " * 65537, b"[" * 1000 + b"]" * 1000,
+            b'{"schema_version":NaN}',
+            b'{"schema_version":Infinity}',
+            b'{"schema_version":' + b"9" * 10000 + b"}",
+            b" " * 65537,
+            b"[" * 1000 + b"]" * 1000,
         ]
-        for field, value in (("schema_version", True), ("mode", "live"),
-                             ("account_ref", "different-account"),
-                             ("database_sha256", "A" * 64),
-                             ("snapshot_sha256", "0" * 64),
-                             ("event_count", True), ("event_count", -1),
-                             ("event_count", 3), ("created_at_utc", "not-a-time"),
-                             ("live_orders_enabled", True),
-                             ("candidate_restore_only", False)):
+        for field, value in (
+            ("schema_version", True),
+            ("mode", "live"),
+            ("account_ref", "different-account"),
+            ("database_sha256", "A" * 64),
+            ("snapshot_sha256", "0" * 64),
+            ("event_count", True),
+            ("event_count", -1),
+            ("event_count", 3),
+            ("created_at_utc", "not-a-time"),
+            ("live_orders_enabled", True),
+            ("candidate_restore_only", False),
+        ):
             altered = {**manifest, field: value}
             malformed.append(json.dumps(altered).encode())
-        malformed.extend((json.dumps({**manifest, "unknown": "EXAMPLE-SECRET"}).encode(),
-                          json.dumps({key: value for key, value in manifest.items()
-                                      if key != "database_sha256"}).encode()))
+        malformed.extend(
+            (
+                json.dumps({**manifest, "unknown": "EXAMPLE-SECRET"}).encode(),
+                json.dumps(
+                    {key: value for key, value in manifest.items() if key != "database_sha256"}
+                ).encode(),
+            )
+        )
         for raw in malformed:
             with self.subTest(raw=raw[:80]):
                 path.write_bytes(raw)
@@ -231,8 +258,12 @@ class StockOrderBackupTests(unittest.TestCase):
 
     def test_unmanifested_files_sidecars_and_final_symlinks_are_preserved_and_refused(self):
         self.create()
-        for name in ("other.json", "journal.sqlite-wal", "journal.sqlite-shm",
-                     "journal.sqlite-journal"):
+        for name in (
+            "other.json",
+            "journal.sqlite-wal",
+            "journal.sqlite-shm",
+            "journal.sqlite-journal",
+        ):
             with self.subTest(name=name):
                 entry = self.destination / name
                 entry.symlink_to(self.directory / "missing-sidecar-target")
@@ -274,8 +305,11 @@ class StockOrderBackupTests(unittest.TestCase):
                         collision.mkdir()
                         (collision / "sentinel").write_text("keep")
                     else:
-                        collision.symlink_to(self.database if kind == "symlink"
-                                             else self.directory / "missing-target")
+                        collision.symlink_to(
+                            self.database
+                            if kind == "symlink"
+                            else self.directory / "missing-target"
+                        )
                     with self.assertRaises(ValueError):
                         self.restore(candidate)
                     if kind == "file":
@@ -310,20 +344,23 @@ class StockOrderBackupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.backup.verify_backup(self.destination, account_ref="wrong-account")
         with self.assertRaises(ValueError):
-            self.backup.restore_candidate(self.destination, self.candidate,
-                                          account_ref="wrong-account")
+            self.backup.restore_candidate(
+                self.destination, self.candidate, account_ref="wrong-account"
+            )
         self.assertFalse(self.candidate.exists())
         oversized = self.directory / "oversized.sqlite"
         with oversized.open("wb") as output:
             output.truncate(100000001)
         with self.assertRaises(ValueError):
-            self.backup.create_backup(oversized, self.directory / "large-backup",
-                                      account_ref=ACCOUNT)
+            self.backup.create_backup(
+                oversized, self.directory / "large-backup", account_ref=ACCOUNT
+            )
         self.assertFalse((self.directory / "large-backup").exists())
         missing = self.directory / "absent" / "orders.sqlite"
         with self.assertRaises(ValueError):
-            self.backup.create_backup(missing, self.directory / "missing-backup",
-                                      account_ref=ACCOUNT)
+            self.backup.create_backup(
+                missing, self.directory / "missing-backup", account_ref=ACCOUNT
+            )
         self.assertFalse(missing.parent.exists())
 
     def test_replacement_of_backup_file_after_publication_flush_is_refused_and_preserved(self):
@@ -333,8 +370,11 @@ class StockOrderBackupTests(unittest.TestCase):
 
         def replace_after_flush(descriptor):
             real_fsync(descriptor)
-            if (self.destination.exists() and stat.S_ISDIR(os.fstat(descriptor).st_mode)
-                    and os.fstat(descriptor).st_ino == self.destination.stat().st_ino):
+            if (
+                self.destination.exists()
+                and stat.S_ISDIR(os.fstat(descriptor).st_mode)
+                and os.fstat(descriptor).st_ino == self.destination.stat().st_ino
+            ):
                 path = self.destination / "journal.sqlite"
                 raw = path.read_bytes()
                 path.rename(self.directory / "original-backup.sqlite")
@@ -366,8 +406,10 @@ class StockOrderBackupTests(unittest.TestCase):
                 self.create()
         self.assertNotIn("EXAMPLE-SECRET", str(caught.exception))
         self.assertEqual(expected, self.journal.snapshot())
-        self.assertEqual({"journal.sqlite", "manifest.json"},
-                         {entry.name for entry in self.destination.iterdir()})
+        self.assertEqual(
+            {"journal.sqlite", "manifest.json"},
+            {entry.name for entry in self.destination.iterdir()},
+        )
         self.assert_verified(self.verify(), expected)
 
     def test_parent_replacement_at_final_flush_is_refused_and_preserved(self):
@@ -393,8 +435,9 @@ class StockOrderBackupTests(unittest.TestCase):
                 self.create()
         self.assertEqual("replacement-parent-evidence", (parent / "sentinel").read_text())
         self.assertEqual({"sentinel"}, {entry.name for entry in parent.iterdir()})
-        self.assert_verified(self.backup.verify_backup(detached / "backup", account_ref=ACCOUNT),
-                             expected)
+        self.assert_verified(
+            self.backup.verify_backup(detached / "backup", account_ref=ACCOUNT), expected
+        )
         self.assertEqual(expected, self.journal.snapshot())
 
     def test_backup_file_replacement_during_parent_flush_is_refused_and_preserved(self):
@@ -427,8 +470,11 @@ class StockOrderBackupTests(unittest.TestCase):
 
         def replace_after_flush(descriptor):
             real_fsync(descriptor)
-            if (self.candidate.exists() and stat.S_ISDIR(os.fstat(descriptor).st_mode)
-                    and os.fstat(descriptor).st_ino == self.directory.stat().st_ino):
+            if (
+                self.candidate.exists()
+                and stat.S_ISDIR(os.fstat(descriptor).st_mode)
+                and os.fstat(descriptor).st_ino == self.directory.stat().st_ino
+            ):
                 raw = self.candidate.read_bytes()
                 self.candidate.rename(self.directory / "original-candidate.sqlite")
                 self.candidate.write_bytes(raw)
@@ -483,8 +529,10 @@ class StockOrderBackupTests(unittest.TestCase):
         manifest = json.loads(manifest_path.read_text())
         manifest["database_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
         manifest_path.write_text(json.dumps(manifest))
-        self.assertEqual({"journal.sqlite", "manifest.json"},
-                         {entry.name for entry in self.destination.iterdir()})
+        self.assertEqual(
+            {"journal.sqlite", "manifest.json"},
+            {entry.name for entry in self.destination.iterdir()},
+        )
         with self.assertRaises(ValueError):
             self.verify()
         with path.open("r+b") as output:
@@ -501,8 +549,9 @@ class StockOrderBackupTests(unittest.TestCase):
                 destination.mkdir()
                 (destination / "sentinel").write_text("keep-existing")
             else:
-                destination.symlink_to(self.database if kind == "symlink"
-                                       else self.directory / "absent-target")
+                destination.symlink_to(
+                    self.database if kind == "symlink" else self.directory / "absent-target"
+                )
             with self.subTest(kind=kind), self.assertRaises(ValueError):
                 self.backup.create_backup(self.database, destination, account_ref=ACCOUNT)
             if kind == "regular":
@@ -571,14 +620,23 @@ class StockOrderBackupTests(unittest.TestCase):
 
     def run_cli(self, arguments):
         environment = dict(os.environ)
-        environment.update({"KIS_VTS_ACCESS_TOKEN": "EXAMPLE-SECRET-TOKEN",
-                            "KIS_VTS_APPKEY": "EXAMPLE-SECRET-APPKEY",
-                            "KIS_VTS_APPSECRET": "EXAMPLE-SECRET-APPSECRET",
-                            "KIS_VTS_CANO": "12345678", "KIS_VTS_ACNT_PRDT_CD": "01",
-                            "HTTPS_PROXY": "https://EXAMPLE-SECRET.invalid"})
+        environment.update(
+            {
+                "KIS_VTS_ACCESS_TOKEN": "EXAMPLE-SECRET-TOKEN",
+                "KIS_VTS_APPKEY": "EXAMPLE-SECRET-APPKEY",
+                "KIS_VTS_APPSECRET": "EXAMPLE-SECRET-APPSECRET",
+                "KIS_VTS_CANO": "12345678",
+                "KIS_VTS_ACNT_PRDT_CD": "01",
+                "HTTPS_PROXY": "https://EXAMPLE-SECRET.invalid",
+            }
+        )
         result = subprocess.run(
             [sys.executable, "-B", "-S", "-c", GUARD, str(TOOL), *arguments],
-            cwd=self.directory, env=environment, capture_output=True, text=True, timeout=30,
+            cwd=self.directory,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         self.assertNotIn("EXAMPLE-SECRET", result.stdout + result.stderr)
         self.assertNotIn("12345678", result.stdout + result.stderr)
@@ -589,28 +647,60 @@ class StockOrderBackupTests(unittest.TestCase):
         self.record(14)
         shared = ["--account-ref", ACCOUNT]
         commands = [
-            ["create", "--database", str(self.database),
-             "--destination", str(self.destination), *shared],
+            [
+                "create",
+                "--database",
+                str(self.database),
+                "--destination",
+                str(self.destination),
+                *shared,
+            ],
             ["verify", "--backup", str(self.destination), *shared],
-            ["restore", "--backup", str(self.destination),
-             "--destination", str(self.candidate), *shared],
+            [
+                "restore",
+                "--backup",
+                str(self.destination),
+                "--destination",
+                str(self.candidate),
+                *shared,
+            ],
         ]
         for command in commands:
             with self.subTest(command=command[0]):
                 result = self.run_cli(["--mode", "paper", *command])
                 self.assertEqual(0, result.returncode, result.stderr)
                 self.assert_verified(json.loads(result.stdout), self.journal.snapshot())
-        self.assertEqual(14, StockOrderJournal.open_existing(
-            self.candidate, account_ref=ACCOUNT).snapshot()["event_count"])
+        self.assertEqual(
+            14,
+            StockOrderJournal.open_existing(self.candidate, account_ref=ACCOUNT).snapshot()[
+                "event_count"
+            ],
+        )
 
     def test_actual_cli_static_refusal_never_echoes_paths_or_credentials(self):
         for arguments in (
             ["--mode", "EXAMPLE-SECRET-MODE", "verify"],
             ["verify", "--backup", str(self.destination), "--account-ref", ACCOUNT],
-            ["--mode", "paper", "verify", "--backup", str(self.destination),
-             "--account-ref", ACCOUNT],
-            ["--mode", "paper", "create", "--database", str(self.database),
-             "--destination", str(self.destination), "--account-ref", "EXAMPLE-SECRET/<bad>"],
+            [
+                "--mode",
+                "paper",
+                "verify",
+                "--backup",
+                str(self.destination),
+                "--account-ref",
+                ACCOUNT,
+            ],
+            [
+                "--mode",
+                "paper",
+                "create",
+                "--database",
+                str(self.database),
+                "--destination",
+                str(self.destination),
+                "--account-ref",
+                "EXAMPLE-SECRET/<bad>",
+            ],
         ):
             with self.subTest(arguments=arguments[:3]):
                 result = self.run_cli(arguments)

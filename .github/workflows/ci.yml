@@ -42,7 +42,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements*.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-
 
@@ -57,7 +57,7 @@ jobs:
         pip install -e packages/backtest
         pip install -e packages/monitor
         pip install -e apps/server
-        pip install pytest pytest-asyncio pytest-cov
+        pip install -r requirements-test.txt
 
     - name: Test Python package imports and config CLI
       run: |
@@ -105,7 +105,7 @@ jobs:
 
     - name: Install linting tools
       run: |
-        pip install flake8 black isort mypy
+        pip install -r requirements-lint.txt
 
     - name: Run flake8
       run: |
@@ -113,11 +113,11 @@ jobs:
 
     - name: Run black check
       run: |
-        black --check packages/ apps/ || true
+        black --check packages/ apps/ tools/
 
     - name: Run isort check
       run: |
-        isort --check-only packages/ apps/ || true
+        isort --check-only packages/ apps/ tools/
 
   docker:
     runs-on: ubuntu-latest

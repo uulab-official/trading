@@ -3,29 +3,35 @@
 A normalized complete-bar fixture is the ONLY input. The output is a local
 SQLite simulated portfolio, not broker orders or a live market service.
 """
+
 import argparse
 import hashlib
-from contextlib import closing
-from decimal import Decimal
 import json
 import sqlite3
-from pathlib import Path
 import sys
+from contextlib import closing
+from decimal import Decimal
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 for source in (ROOT, ROOT / "packages/core", ROOT / "packages/data"):
     sys.path.insert(0, str(source))
 from trading_core.stock_paper_ledger import StockPaperLedger
+
 from tools.stock_paper_backtest import run_backtest
 
 
-def replay_forward(fixture, database, *, initial_cash, fee_pct="0.1",
-                   fast=5, slow=20, allocation_pct="20"):
+def replay_forward(
+    fixture, database, *, initial_cash, fee_pct="0.1", fast=5, slow=20, allocation_pct="20"
+):
     # Entire strategy is recalculated from complete bars. This is slower than
     # a streaming incremental indicator but avoids an unverified state cache.
     strategy_kwargs = dict(
-        initial_cash=initial_cash, fee_pct=fee_pct,
-        fast=fast, slow=slow, allocation_pct=allocation_pct,
+        initial_cash=initial_cash,
+        fee_pct=fee_pct,
+        fast=fast,
+        slow=slow,
+        allocation_pct=allocation_pct,
     )
     outcome = run_backtest(fixture, **strategy_kwargs)
 
@@ -34,13 +40,18 @@ def replay_forward(fixture, database, *, initial_cash, fee_pct="0.1",
         return run_backtest(prefix, **strategy_kwargs)["simulated_fills"]
 
     book = StockPaperLedger(
-        database, quote_currency=outcome["quote_currency"],
-        initial_cash=initial_cash, fee_pct=fee_pct,
+        database,
+        quote_currency=outcome["quote_currency"],
+        initial_cash=initial_cash,
+        fee_pct=fee_pct,
     )
     identity = {
-        "mode": "paper", "strategy": "ma_cross",
-        "symbol": outcome["symbol"], "currency": outcome["quote_currency"],
-        "fast": fast, "slow": slow,
+        "mode": "paper",
+        "strategy": "ma_cross",
+        "symbol": outcome["symbol"],
+        "currency": outcome["quote_currency"],
+        "fast": fast,
+        "slow": slow,
         "allocation_pct": str(Decimal(str(allocation_pct))),
         "initial_cash": str(Decimal(str(initial_cash))),
         "fee_pct": str(Decimal(str(fee_pct))),
@@ -52,7 +63,8 @@ def replay_forward(fixture, database, *, initial_cash, fee_pct="0.1",
     }
     latest_mark = fixture["candles"][-1][4]
     report = book.apply_strategy_replay(
-        fixture, identity=identity,
+        fixture,
+        identity=identity,
         expected_fills=outcome["simulated_fills"],
         expected_fills_for_prefix=expected_fills_for_prefix,
         marks={outcome["symbol"]: latest_mark},
@@ -64,20 +76,28 @@ def replay_forward(fixture, database, *, initial_cash, fee_pct="0.1",
     return report
 
 
-def audit_forward(fixture, database, *, initial_cash, fee_pct="0.1",
-                  fast=5, slow=20, allocation_pct="20"):
+def audit_forward(
+    fixture, database, *, initial_cash, fee_pct="0.1", fast=5, slow=20, allocation_pct="20"
+):
     """Verify persisted paper strategy state without modifying its database."""
     result = run_backtest(
-        fixture, initial_cash=initial_cash, fee_pct=fee_pct, fast=fast,
-        slow=slow, allocation_pct=allocation_pct,
+        fixture,
+        initial_cash=initial_cash,
+        fee_pct=fee_pct,
+        fast=fast,
+        slow=slow,
+        allocation_pct=allocation_pct,
     )
     path = Path(database).resolve()
     if not path.is_file():
         raise ValueError("Existing paper strategy journal required")
     identity = {
-        "mode": "paper", "strategy": "ma_cross",
-        "symbol": result["symbol"], "currency": result["quote_currency"],
-        "fast": fast, "slow": slow,
+        "mode": "paper",
+        "strategy": "ma_cross",
+        "symbol": result["symbol"],
+        "currency": result["quote_currency"],
+        "fast": fast,
+        "slow": slow,
         "allocation_pct": str(Decimal(str(allocation_pct))),
         "initial_cash": str(Decimal(str(initial_cash))),
         "fee_pct": str(Decimal(str(fee_pct))),
@@ -87,22 +107,26 @@ def audit_forward(fixture, database, *, initial_cash, fee_pct="0.1",
         "source": fixture.get("source"),
         "adjusted": fixture.get("adjusted"),
     }
-    expected_identity = json.dumps(identity, sort_keys=True, separators=(",", ":"),
-                                   allow_nan=False)
-    expected_hash = hashlib.sha256(json.dumps(
-        fixture["candles"], sort_keys=True, separators=(",", ":"),
-        allow_nan=False,
-    ).encode()).hexdigest()
+    expected_identity = json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    expected_hash = hashlib.sha256(
+        json.dumps(
+            fixture["candles"],
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+    ).hexdigest()
     # mode=ro avoids automatic database creation, DDL, and WAL changes.
-    with closing(sqlite3.connect(
-        path.as_uri() + "?mode=ro", uri=True, isolation_level=None, timeout=5
-    )) as db:
+    with closing(
+        sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, isolation_level=None, timeout=5)
+    ) as db:
         db.execute("PRAGMA query_only=ON")
         db.execute("BEGIN")
         try:
             meta = dict(db.execute("SELECT key,value FROM paper_meta"))
             expected_meta = {
-                "schema_version": "1", "mode": "paper",
+                "schema_version": "1",
+                "mode": "paper",
                 "quote_currency": result["quote_currency"],
                 "initial_cash": str(Decimal(str(initial_cash))),
                 "fee_pct": str(Decimal(str(fee_pct))),
@@ -110,11 +134,12 @@ def audit_forward(fixture, database, *, initial_cash, fee_pct="0.1",
             if meta != expected_meta:
                 raise ValueError("Paper account configuration differs")
             saved = db.execute(
-                "SELECT identity_json,bars,prefix_sha256 "
-                "FROM paper_strategy_state WHERE id=1"
+                "SELECT identity_json,bars,prefix_sha256 " "FROM paper_strategy_state WHERE id=1"
             ).fetchone()
             if saved is None or saved != (
-                expected_identity, len(fixture["candles"]), expected_hash
+                expected_identity,
+                len(fixture["candles"]),
+                expected_hash,
             ):
                 raise ValueError("Paper strategy cursor/history differs")
             book, count = StockPaperLedger._rebuild(
@@ -131,10 +156,14 @@ def audit_forward(fixture, database, *, initial_cash, fee_pct="0.1",
             raise
     return {
         "status": "audited_stock_paper",
-        "mode": "paper", "live_orders_enabled": False,
-        "symbol": result["symbol"], "quote_currency": result["quote_currency"],
-        "bars": len(fixture["candles"]), "simulated_fills": count,
-        "cash": str(book.cash), "holdings": dict(book.holdings),
+        "mode": "paper",
+        "live_orders_enabled": False,
+        "symbol": result["symbol"],
+        "quote_currency": result["quote_currency"],
+        "bars": len(fixture["candles"]),
+        "simulated_fills": count,
+        "cash": str(book.cash),
+        "holdings": dict(book.holdings),
         "marked_equity": str(equity),
         "total_return_pct": result["total_return_pct"],
         "history_sha256": expected_hash,
@@ -146,8 +175,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("fixture", type=Path)
     parser.add_argument("--database", required=True, type=Path)
-    parser.add_argument("--audit-only", action="store_true",
-                        help="Read-only audit of an existing paper strategy ledger")
+    parser.add_argument(
+        "--audit-only",
+        action="store_true",
+        help="Read-only audit of an existing paper strategy ledger",
+    )
     parser.add_argument("--mode", required=True, choices=("paper",))
     parser.add_argument("--initial-cash", type=Decimal, required=True)
     parser.add_argument("--fee-pct", type=Decimal, default=Decimal("0.1"))
@@ -165,12 +197,18 @@ def main(argv=None):
         data = json.loads(raw)
         run = audit_forward if args.audit_only else replay_forward
         outcome = run(
-            data, args.database, initial_cash=args.initial_cash,
-            fee_pct=args.fee_pct, fast=args.fast, slow=args.slow,
+            data,
+            args.database,
+            initial_cash=args.initial_cash,
+            fee_pct=args.fee_pct,
+            fast=args.fast,
+            slow=args.slow,
             allocation_pct=args.allocation_pct,
         )
     except (ValueError, TypeError, OSError, KeyError, ArithmeticError, sqlite3.Error):
-        print("Stock PAPER replay refused invalid or conflicting historical state.", file=sys.stderr)
+        print(
+            "Stock PAPER replay refused invalid or conflicting historical state.", file=sys.stderr
+        )
         return 2
     print(json.dumps(outcome, sort_keys=True, allow_nan=False))
     return 0

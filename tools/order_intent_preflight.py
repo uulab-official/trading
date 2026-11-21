@@ -1,9 +1,10 @@
 """Offline read-only SQLite order-intent preflight; never submits orders."""
+
 import argparse
 import json
-from pathlib import Path
 import sqlite3
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages/core"))
@@ -17,8 +18,10 @@ def main(argv=None):
     try:
         report = OrderIntentJournal.open_existing_readonly(args.journal).audit_integrity()
     except (ValueError, OSError, TypeError, KeyError, sqlite3.Error):
-        print("Intent preflight refused invalid or unreadable state; no orders authorized.",
-              file=sys.stderr)
+        print(
+            "Intent preflight refused invalid or unreadable state; no orders authorized.",
+            file=sys.stderr,
+        )
         return 2
     print(json.dumps(report, sort_keys=True, allow_nan=False))
     # An unresolved order blocks the next action even if the database

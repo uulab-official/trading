@@ -1,9 +1,10 @@
 """Offline stock-order events: create, record and read-only audit; no broker calls."""
+
 import argparse
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 # Directly import the pure module so the standalone command needs no packages.
@@ -43,8 +44,9 @@ def write_new_json(path, payload):
     """Exclusive private output; never remove an observed replacement on failure."""
     text = json.dumps(payload, sort_keys=True, indent=2, allow_nan=False) + "\n"
     target = Path(path)
-    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                         getattr(os, "O_NOFOLLOW", 0), 0o600)
+    descriptor = os.open(
+        target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+    )
     identity = None
     try:
         identity = os.fstat(descriptor)
@@ -93,7 +95,9 @@ def main(argv=None):
             snapshot = journal.record(event)
         else:
             journal = StockOrderJournal.open_existing(
-                args.database, account_ref=args.account_ref, read_only=True,
+                args.database,
+                account_ref=args.account_ref,
+                read_only=True,
             )
             snapshot = journal.snapshot()
     except Exception:

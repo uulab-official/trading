@@ -1,11 +1,12 @@
 """Read-only offline stock strategy HTML report regression tests."""
-from contextlib import redirect_stderr, redirect_stdout
-from io import StringIO
-from pathlib import Path
+
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
@@ -18,11 +19,15 @@ START = 1774417800000 - (1774417800000 % 60000)
 def fixture():
     prices = [10, 9, 8, 20, 21]
     return {
-        "mode": "paper", "interval": "1m", "no_live_orders": True,
+        "mode": "paper",
+        "interval": "1m",
+        "no_live_orders": True,
         "timestamp_semantics": "source_close_to_utc_open",
-        "symbol": "005930", "quote_currency": "KRW",
-        "candles": [[START + i * 60000, str(p), str(p), str(p), str(p), "100"]
-                    for i, p in enumerate(prices)]
+        "symbol": "005930",
+        "quote_currency": "KRW",
+        "candles": [
+            [START + i * 60000, str(p), str(p), str(p), str(p), "100"] for i, p in enumerate(prices)
+        ],
     }
 
 
@@ -36,8 +41,7 @@ class StockPaperReportTests(unittest.TestCase):
         self.output = self.root / "report.html"
         self.data = fixture()
         self.input.write_text(json.dumps(self.data))
-        self.opts = dict(initial_cash="1000", fee_pct="0",
-                         fast=2, slow=3, allocation_pct="50")
+        self.opts = dict(initial_cash="1000", fee_pct="0", fast=2, slow=3, allocation_pct="50")
         replay_forward(self.data, self.db, **self.opts)
 
     def test_standalone_csp_report_contains_only_hypothetical_data(self):
@@ -49,10 +53,23 @@ class StockPaperReportTests(unittest.TestCase):
         self.assertNotIn("https://", result.lower())
 
     def test_existing_output_is_never_replaced(self):
-        args = [str(self.input), "--database", str(self.db),
-                "--output", str(self.output), "--initial-cash", "1000",
-                "--fee-pct", "0", "--fast", "2", "--slow", "3",
-                "--allocation-pct", "50"]
+        args = [
+            str(self.input),
+            "--database",
+            str(self.db),
+            "--output",
+            str(self.output),
+            "--initial-cash",
+            "1000",
+            "--fee-pct",
+            "0",
+            "--fast",
+            "2",
+            "--slow",
+            "3",
+            "--allocation-pct",
+            "50",
+        ]
         with redirect_stdout(StringIO()):
             self.assertEqual(0, main(args))
         original = self.output.read_bytes()
@@ -70,6 +87,7 @@ class StockPaperReportTests(unittest.TestCase):
 
     def test_report_escapes_untrusted_symbol(self):
         from tools.stock_paper_report_html import _escape
+
         self.assertEqual("&lt;img src=x&gt;", _escape("<img src=x>"))
 
 

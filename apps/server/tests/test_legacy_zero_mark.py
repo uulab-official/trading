@@ -1,11 +1,11 @@
 """Actual legacy quote callback: missing marks are unknown, zero marks are real."""
 
 import asyncio
-from decimal import Decimal
 import importlib
 import logging
-from types import SimpleNamespace
 import unittest
+from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from trading_core.portfolio import Portfolio
@@ -17,10 +17,15 @@ class LegacyZeroMarkTests(unittest.TestCase):
             guard = patch(target, side_effect=AssertionError("Quote checks forbid network/DNS"))
             guard.start()
             self.addCleanup(guard.stop)
-        with patch("logging.FileHandler", return_value=logging.NullHandler()), patch("logging.basicConfig"):
+        with (
+            patch("logging.FileHandler", return_value=logging.NullHandler()),
+            patch("logging.basicConfig"),
+        ):
             self.bot_class = importlib.import_module("trading_bot.main").TradingBot
         self.portfolio = Portfolio(Decimal("1000"))
-        self.position = self.portfolio.open_position("BTC/USDT", "long", Decimal("1"), Decimal("1000"))
+        self.position = self.portfolio.open_position(
+            "BTC/USDT", "long", Decimal("1"), Decimal("1000")
+        )
         self.closes = []
 
         async def close_locally(symbol, price, reason):
@@ -56,8 +61,19 @@ class LegacyZeroMarkTests(unittest.TestCase):
     def test_malformed_or_nonfinite_quotes_do_not_change_valuation_or_close(self):
         self.position.stop_loss_price = Decimal("900")
         self.portfolio.update_position_prices({"BTC/USDT": Decimal("950")})
-        for mark in ("0", "bad", 0, True, [], {}, Decimal("NaN"), Decimal("sNaN"),
-                     Decimal("Infinity"), Decimal("-Infinity"), Decimal("-1")):
+        for mark in (
+            "0",
+            "bad",
+            0,
+            True,
+            [],
+            {},
+            Decimal("NaN"),
+            Decimal("sNaN"),
+            Decimal("Infinity"),
+            Decimal("-Infinity"),
+            Decimal("-1"),
+        ):
             with self.subTest(mark=mark):
                 self.update({"symbol": "BTC/USDT", "price": mark})
                 self.assertEqual(self.position.current_price, Decimal("950"))

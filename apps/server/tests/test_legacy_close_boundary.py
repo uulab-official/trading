@@ -1,12 +1,12 @@
 """Exercise the actual legacy close method with local, inert collaborators."""
 
 import asyncio
-from datetime import datetime, timedelta
-from decimal import Decimal
 import importlib
 import logging
-from types import SimpleNamespace
 import unittest
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from trading_core.portfolio import Portfolio
@@ -16,19 +16,26 @@ from trading_core.risk_manager import RiskConfig, RiskManager
 class LegacyCloseBoundaryTests(unittest.TestCase):
     def setUp(self):
         for target in ("socket.socket.connect", "socket.create_connection", "socket.getaddrinfo"):
-            guard = patch(target, side_effect=AssertionError("Legacy close checks forbid network/DNS"))
+            guard = patch(
+                target, side_effect=AssertionError("Legacy close checks forbid network/DNS")
+            )
             guard.start()
             self.addCleanup(guard.stop)
         # Import the method without opening log files or constructing a bot/client.
-        with patch("logging.FileHandler", return_value=logging.NullHandler()), patch("logging.basicConfig"):
+        with (
+            patch("logging.FileHandler", return_value=logging.NullHandler()),
+            patch("logging.basicConfig"),
+        ):
             self.bot_class = importlib.import_module("trading_bot.main").TradingBot
 
         class Clock(datetime):
             current = datetime(2026, 10, 4, 23, 59, 50)
 
             @classmethod
-            def utcnow(cls):
-                return cls.current
+            def now(cls, tz=None):
+                if tz is not None:
+                    return cls.current.replace(tzinfo=timezone.utc).astimezone(tz)
+                return cls.current + timedelta(hours=9)
 
         self.clock = Clock
         for target in ("trading_core.portfolio.datetime", "trading_core.risk_manager.datetime"):
@@ -48,17 +55,22 @@ class LegacyCloseBoundaryTests(unittest.TestCase):
         )
 
     def close(self):
-        asyncio.run(self.bot_class._close_position(self.bot, "BTC/USDT", Decimal("40"), "offline test"))
+        asyncio.run(
+            self.bot_class._close_position(self.bot, "BTC/USDT", Decimal("40"), "offline test")
+        )
         self.bot.order_manager.place_order.assert_awaited_once()
         self.bot.notifier.notify_position_closed.assert_awaited_once()
         self.bot.notifier.notify_error.assert_not_awaited()
         self.callback.assert_called_once()
-        self.assertEqual(self.callback.call_args.kwargs["accounting_date"],
-                         self.portfolio._trades[-1].accounting_date)
+        self.assertEqual(
+            self.callback.call_args.kwargs["accounting_date"],
+            self.portfolio._trades[-1].accounting_date,
+        )
 
     def test_fill_await_crossing_midnight_records_new_day_loss(self):
         async def inert_fill(**kwargs):
             self.clock.current += timedelta(seconds=20)
+
         self.bot.order_manager.place_order.side_effect = inert_fill
         self.close()
         report = self.manager.get_risk_report()

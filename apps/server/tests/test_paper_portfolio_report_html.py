@@ -1,35 +1,45 @@
 """Offline static multi-asset PAPER dashboard security and escaping tests."""
-from contextlib import redirect_stderr, redirect_stdout
-from io import StringIO
+
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from tools.paper_portfolio_report_html import render, main
+from tools.paper_portfolio_report_html import main, render
 
 
 def sample():
     return {
-        "mode": "paper", "live_orders_enabled": False,
+        "mode": "paper",
+        "live_orders_enabled": False,
         "status": "audited_offline_only",
         "generated_at_utc": "2026-11-20T00:00:00+00:00",
         "cross_portfolio_total": None,
         "portfolios": [
             {
-                "type": "crypto", "status": "verified_offline_paper",
-                "symbol": "BTC/USDT", "timeframe": "1h",
-                "processed_bars": 55, "trade_count": 2,
-                "daily_loss_halted": False, "drawdown_halted": False,
+                "type": "crypto",
+                "status": "verified_offline_paper",
+                "symbol": "BTC/USDT",
+                "timeframe": "1h",
+                "processed_bars": 55,
+                "trade_count": 2,
+                "daily_loss_halted": False,
+                "drawdown_halted": False,
             },
             {
-                "type": "stock", "status": "audited_stock_paper",
-                "symbol": "005930", "quote_currency": "KRW",
-                "processed_bars": 55, "trade_count": 2,
-                "cash": "900000", "marked_equity": "1010000",
+                "type": "stock",
+                "status": "audited_stock_paper",
+                "symbol": "005930",
+                "quote_currency": "KRW",
+                "processed_bars": 55,
+                "trade_count": 2,
+                "cash": "900000",
+                "marked_equity": "1010000",
                 "total_return_pct": "1.0",
             },
         ],

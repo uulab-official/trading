@@ -1,10 +1,10 @@
 """One cooperating writer per local POSIX paper checkpoint."""
 
-from contextlib import contextmanager
 import errno
 import os
-from pathlib import Path
 import stat
+from contextlib import contextmanager
+from pathlib import Path
 
 
 class CheckpointInUseError(RuntimeError):
@@ -25,7 +25,9 @@ def locked_checkpoint(path):
     try:
         import fcntl
     except ImportError as error:
-        raise RuntimeError("Checkpoint replay requires POSIX file locking on a local filesystem") from error
+        raise RuntimeError(
+            "Checkpoint replay requires POSIX file locking on a local filesystem"
+        ) from error
     if not hasattr(os, "O_NOFOLLOW"):
         raise RuntimeError("Checkpoint replay requires POSIX no-follow file locking support")
     canonical = Path(path).resolve()
@@ -41,7 +43,9 @@ def locked_checkpoint(path):
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as error:
             if error.errno in (errno.EACCES, errno.EAGAIN):
-                raise CheckpointInUseError(f"Paper checkpoint is already in use: {canonical}") from error
+                raise CheckpointInUseError(
+                    f"Paper checkpoint is already in use: {canonical}"
+                ) from error
             raise
         acquired = True
         yield canonical

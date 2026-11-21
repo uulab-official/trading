@@ -4,12 +4,13 @@ No network, brokerage authentication, order submission, margin, or FX.
 Every simulated fill is committed in one local SQLite transaction.
 On each command the full ledger is replayed from an immutable ordered log.
 """
-from contextlib import closing
-from decimal import Decimal
+
 import hashlib
-from pathlib import Path
 import json
 import sqlite3
+from contextlib import closing
+from decimal import Decimal
+from pathlib import Path
 
 from trading_core.stock_paper import StockPaperBook, _amount
 
@@ -39,7 +40,8 @@ class StockPaperLedger:
                 )""")
                 meta = dict(db.execute("SELECT key,value FROM paper_meta").fetchall())
                 wanted = {
-                    "schema_version": "1", "mode": "paper",
+                    "schema_version": "1",
+                    "mode": "paper",
                     "quote_currency": quote_currency,
                     "initial_cash": self.initial_cash,
                     "fee_pct": self.fee_pct,
@@ -50,7 +52,9 @@ class StockPaperLedger:
                 else:
                     if db.execute("SELECT COUNT(*) FROM paper_fills").fetchone()[0]:
                         raise ValueError("Orphan paper fills without configuration")
-                    db.executemany("INSERT INTO paper_meta (key,value) VALUES (?,?)", wanted.items())
+                    db.executemany(
+                        "INSERT INTO paper_meta (key,value) VALUES (?,?)", wanted.items()
+                    )
                 db.execute("COMMIT")
             except BaseException:
                 db.execute("ROLLBACK")
@@ -71,9 +75,11 @@ class StockPaperLedger:
         """
         current = dict(db.execute("SELECT key,value FROM paper_meta").fetchall())
         expected = {
-            "schema_version": "1", "mode": "paper",
+            "schema_version": "1",
+            "mode": "paper",
             "quote_currency": self.quote_currency,
-            "initial_cash": self.initial_cash, "fee_pct": self.fee_pct,
+            "initial_cash": self.initial_cash,
+            "fee_pct": self.fee_pct,
         }
         if current != expected:
             raise ValueError("Paper ledger configuration changed after initialization")
@@ -104,9 +110,10 @@ class StockPaperLedger:
                 has_strategy = db.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='paper_strategy_state'"
                 ).fetchone()
-                if has_strategy and db.execute(
-                    "SELECT 1 FROM paper_strategy_state WHERE id=1"
-                ).fetchone():
+                if (
+                    has_strategy
+                    and db.execute("SELECT 1 FROM paper_strategy_state WHERE id=1").fetchone()
+                ):
                     raise ValueError("Manual fill cannot mutate a strategy-managed stock ledger")
                 book, count = self._rebuild(
                     db, self.quote_currency, self.initial_cash, self.fee_pct
@@ -118,8 +125,14 @@ class StockPaperLedger:
                     db.execute(
                         "INSERT INTO paper_fills (client_id,symbol,side,shares,price,result_json) "
                         "VALUES (?,?,?,?,?,?)",
-                        (client_id, symbol, side, shares, str(_amount(price)),
-                         json.dumps(result, sort_keys=True, allow_nan=False)),
+                        (
+                            client_id,
+                            symbol,
+                            side,
+                            shares,
+                            str(_amount(price)),
+                            json.dumps(result, sort_keys=True, allow_nan=False),
+                        ),
                     )
                 db.execute("COMMIT")
                 return result
@@ -127,8 +140,16 @@ class StockPaperLedger:
                 db.execute("ROLLBACK")
                 raise
 
-    def apply_strategy_replay(self, fixture, *, identity, expected_fills,
-                              expected_fills_for_prefix, marks, expected_equity):
+    def apply_strategy_replay(
+        self,
+        fixture,
+        *,
+        identity,
+        expected_fills,
+        expected_fills_for_prefix,
+        marks,
+        expected_equity,
+    ):
         """Atomically advance one paper-only strategy and its simulated fills.
 
         Full saved candle-prefix SHA is checked before mutation, and the
@@ -173,8 +194,9 @@ class StockPaperLedger:
                         raise ValueError("Stock strategy assumptions changed")
                     if type(prior_bars) is not int or prior_bars < 1 or prior_bars > len(candles):
                         raise ValueError("Stock paper strategy cursor invalid")
-                    prefix = json.dumps(candles[:prior_bars], sort_keys=True,
-                                        separators=(",", ":"), allow_nan=False)
+                    prefix = json.dumps(
+                        candles[:prior_bars], sort_keys=True, separators=(",", ":"), allow_nan=False
+                    )
                     if hashlib.sha256(prefix.encode()).hexdigest() != prefix_sha:
                         raise ValueError("Previous completed stock candles were changed")
                 expected_prior_fills = (
@@ -182,7 +204,7 @@ class StockPaperLedger:
                 )
                 if not isinstance(expected_prior_fills, list):
                     raise ValueError("Expected prior fills must be a list")
-                if expected_prior_fills != expected_fills[:len(expected_prior_fills)]:
+                if expected_prior_fills != expected_fills[: len(expected_prior_fills)]:
                     raise ValueError("Strategy replay changed historical paper fills")
                 book, previous_fill_count = self._rebuild(
                     db, self.quote_currency, self.initial_cash, self.fee_pct
@@ -193,15 +215,26 @@ class StockPaperLedger:
                 for fill in new_fills:
                     if not isinstance(fill, dict) or fill.get("mode") != "paper":
                         raise ValueError("Strategy emitted a non-paper fill")
-                    actual = book.execute(fill["client_id"], fill["symbol"], fill["side"],
-                                          fill["shares"], price=fill["price"])
+                    actual = book.execute(
+                        fill["client_id"],
+                        fill["symbol"],
+                        fill["side"],
+                        fill["shares"],
+                        price=fill["price"],
+                    )
                     if actual != fill:
                         raise ValueError("Strategy fill cannot be reconstructed")
                     db.execute(
                         "INSERT INTO paper_fills (client_id,symbol,side,shares,price,result_json) "
                         "VALUES (?,?,?,?,?,?)",
-                        (fill["client_id"], fill["symbol"], fill["side"], fill["shares"],
-                         fill["price"], json.dumps(fill, sort_keys=True, allow_nan=False))
+                        (
+                            fill["client_id"],
+                            fill["symbol"],
+                            fill["side"],
+                            fill["shares"],
+                            fill["price"],
+                            json.dumps(fill, sort_keys=True, allow_nan=False),
+                        ),
                     )
                 valuation_decimal = book.marked_equity(marks)
                 # Verify independently computed expected equity BEFORE
@@ -210,23 +243,27 @@ class StockPaperLedger:
                 if valuation_decimal != _amount(expected_equity, zero=True):
                     raise ValueError("Paper strategy equity reconciliation failed before commit")
                 valuation = str(valuation_decimal)
-                full_prefix = json.dumps(candles, sort_keys=True, separators=(",", ":"),
-                                         allow_nan=False)
+                full_prefix = json.dumps(
+                    candles, sort_keys=True, separators=(",", ":"), allow_nan=False
+                )
                 digest = hashlib.sha256(full_prefix.encode()).hexdigest()
                 if saved is None:
                     db.execute(
                         "INSERT INTO paper_strategy_state (id,identity_json,bars,prefix_sha256) "
-                        "VALUES (1,?,?,?)", (identity_json, len(candles), digest)
+                        "VALUES (1,?,?,?)",
+                        (identity_json, len(candles), digest),
                     )
                 else:
                     db.execute(
                         "UPDATE paper_strategy_state SET bars=?,prefix_sha256=? WHERE id=1",
-                        (len(candles), digest)
+                        (len(candles), digest),
                     )
                 db.execute("COMMIT")
                 return {
-                    "mode": "paper", "live_orders_enabled": False,
-                    "bars": len(candles), "appended_bars": len(candles) - prior_bars,
+                    "mode": "paper",
+                    "live_orders_enabled": False,
+                    "bars": len(candles),
+                    "appended_bars": len(candles) - prior_bars,
                     "new_simulated_fills": len(new_fills),
                     "total_simulated_fills": len(book.fills),
                     "marked_equity": valuation,
@@ -249,7 +286,8 @@ class StockPaperLedger:
                 )
                 equity = book.marked_equity(marks or {})
                 result = {
-                    "mode": "paper", "live_orders_enabled": False,
+                    "mode": "paper",
+                    "live_orders_enabled": False,
                     "quote_currency": self.quote_currency,
                     "cash": str(book.cash),
                     "holdings": dict(book.holdings),

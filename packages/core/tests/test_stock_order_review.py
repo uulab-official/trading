@@ -1,18 +1,17 @@
 """Offline comparison is evidence for review, never permission to submit."""
 
-from contextlib import closing
-from copy import deepcopy
-from datetime import datetime, timedelta, timezone
 import importlib
 import json
-from pathlib import Path
 import sqlite3
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
-
+from contextlib import closing
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 MODULE_DIR = ROOT / "packages/core/trading_core"
@@ -23,25 +22,48 @@ DATE = "2026-11-21"
 
 def observed_row(**changes):
     return {
-        "ord_dt": "20261121", "ord_gno_brno": "06010", "odno": "0000000001",
-        "orgn_odno": "0000000000", "pdno": "005930", "sll_buy_dvsn_cd": "02",
-        "ord_dvsn_cd": "00", "ord_qty": "5", "tot_ccld_qty": "5",
-        "rmn_qty": "0", "cncl_cfrm_qty": "0", "rjct_qty": "0",
-        "ord_unpr": "70000", "tot_ccld_amt": "350000", "avg_prvs": "70000",
-        "cncl_yn": "N", "ord_tmd": "150000", "excg_id_dvsn_cd": "KRX", **changes,
+        "ord_dt": "20261121",
+        "ord_gno_brno": "06010",
+        "odno": "0000000001",
+        "orgn_odno": "0000000000",
+        "pdno": "005930",
+        "sll_buy_dvsn_cd": "02",
+        "ord_dvsn_cd": "00",
+        "ord_qty": "5",
+        "tot_ccld_qty": "5",
+        "rmn_qty": "0",
+        "cncl_cfrm_qty": "0",
+        "rjct_qty": "0",
+        "ord_unpr": "70000",
+        "tot_ccld_amt": "350000",
+        "avg_prvs": "70000",
+        "cncl_yn": "N",
+        "ord_tmd": "150000",
+        "excg_id_dvsn_cd": "KRX",
+        **changes,
     }
 
 
 def observations(rows=None, **changes):
     rows = [observed_row()] if rows is None else rows
     return {
-        "schema_version": 1, "mode": "paper", "live_orders_enabled": False,
-        "provider": "kis_vts_readonly_order_snapshot", "market": "KRX", "currency": "KRW",
-        "account_ref": "paper-desk", "account_binding_verified": False,
-        "inquiry_date": DATE, "observed_at_utc": NOW.isoformat(),
-        "pagination_complete": True, "pages_fetched": 1, "row_count": len(rows),
-        "atomic_snapshot_verified": False, "economic_reconciliation_verified": False,
-        "rows": rows, **changes,
+        "schema_version": 1,
+        "mode": "paper",
+        "live_orders_enabled": False,
+        "provider": "kis_vts_readonly_order_snapshot",
+        "market": "KRX",
+        "currency": "KRW",
+        "account_ref": "paper-desk",
+        "account_binding_verified": False,
+        "inquiry_date": DATE,
+        "observed_at_utc": NOW.isoformat(),
+        "pagination_complete": True,
+        "pages_fetched": 1,
+        "row_count": len(rows),
+        "atomic_snapshot_verified": False,
+        "economic_reconciliation_verified": False,
+        "rows": rows,
+        **changes,
     }
 
 
@@ -61,17 +83,39 @@ class StockOrderReviewTests(unittest.TestCase):
         self.path = Path(self.temp.name) / "stock.sqlite"
         self.journal = self.Journal.create(self.path, account_ref="paper-desk")
 
-    def add_order(self, client="buy-1", *, order_date=DATE, broker_id="0000000001",
-                  branch="06010", state="filled", filled_quantity=None, side="buy",
-                  quantity=5, limit_price="70000", fill_price="70000"):
+    def add_order(
+        self,
+        client="buy-1",
+        *,
+        order_date=DATE,
+        broker_id="0000000001",
+        branch="06010",
+        state="filled",
+        filled_quantity=None,
+        side="buy",
+        quantity=5,
+        limit_price="70000",
+        fill_price="70000",
+    ):
         def record(kind, **data):
-            return self.journal.record({
-                "event_id": client + "-" + kind, "kind": kind,
-                "client_order_id": client, "data": data,
-            })
-        record("reserve", order_date=order_date, symbol="005930", side=side,
-               quantity=quantity, limit_price=limit_price,
-               max_notional=str(quantity * int(limit_price)))
+            return self.journal.record(
+                {
+                    "event_id": client + "-" + kind,
+                    "kind": kind,
+                    "client_order_id": client,
+                    "data": data,
+                }
+            )
+
+        record(
+            "reserve",
+            order_date=order_date,
+            symbol="005930",
+            side=side,
+            quantity=quantity,
+            limit_price=limit_price,
+            max_notional=str(quantity * int(limit_price)),
+        )
         if state == "reserved":
             return
         if state == "uncertain":
@@ -82,8 +126,14 @@ class StockOrderReviewTests(unittest.TestCase):
         if filled_quantity is None:
             filled_quantity = quantity if state == "filled" else 0
         if filled_quantity:
-            record("fill", execution_id=client + "-execution", quantity=filled_quantity,
-                   price=fill_price, fee_krw="13", tax_krw="0")
+            record(
+                "fill",
+                execution_id=client + "-execution",
+                quantity=filled_quantity,
+                price=fill_price,
+                fee_krw="13",
+                tax_krw="0",
+            )
         if state in ("cancel_pending", "canceled"):
             record("cancel_requested")
         if state in ("canceled", "rejected"):
@@ -94,9 +144,13 @@ class StockOrderReviewTests(unittest.TestCase):
 
     def assert_unverified(self, report):
         self.assertEqual(report["mode"], "paper")
-        for name in ("live_orders_enabled", "account_binding_verified",
-                     "economic_reconciliation_verified", "lifecycle_confirmation_verified",
-                     "safe_to_submit"):
+        for name in (
+            "live_orders_enabled",
+            "account_binding_verified",
+            "economic_reconciliation_verified",
+            "lifecycle_confirmation_verified",
+            "safe_to_submit",
+        ):
             self.assertIs(report[name], False)
 
     def assert_refused(self, document, **options):
@@ -108,13 +162,30 @@ class StockOrderReviewTests(unittest.TestCase):
     def test_fresh_equal_closed_order_exposes_bounded_comparison_without_verification(self):
         self.add_order()
         report = self.report(observations())
-        self.assertEqual(set(report), {
-            "schema_version", "kind", "mode", "live_orders_enabled", "account_ref",
-            "generated_at_utc", "account_binding_verified", "economic_reconciliation_verified",
-            "lifecycle_confirmation_verified", "safe_to_submit", "comparison_status",
-            "needs_attention", "journal_blocked", "journal", "observation_summary", "orders",
-            "unmatched_observations", "findings", "summary",
-        })
+        self.assertEqual(
+            set(report),
+            {
+                "schema_version",
+                "kind",
+                "mode",
+                "live_orders_enabled",
+                "account_ref",
+                "generated_at_utc",
+                "account_binding_verified",
+                "economic_reconciliation_verified",
+                "lifecycle_confirmation_verified",
+                "safe_to_submit",
+                "comparison_status",
+                "needs_attention",
+                "journal_blocked",
+                "journal",
+                "observation_summary",
+                "orders",
+                "unmatched_observations",
+                "findings",
+                "summary",
+            },
+        )
         self.assertEqual(report["schema_version"], 1)
         self.assertEqual(report["kind"], "stock_order_review")
         self.assertEqual(report["account_ref"], "paper-desk")
@@ -128,15 +199,29 @@ class StockOrderReviewTests(unittest.TestCase):
         self.assertEqual(report["orders"][0]["differences"], [])
         self.assertEqual(report["findings"], [])
         self.assertEqual(report["unmatched_observations"], [])
-        self.assertEqual(report["observation_summary"], {
-            "inquiry_date": DATE, "observed_at_utc": NOW.isoformat(), "pages_fetched": 1,
-            "row_count": 1, "age_seconds": 0, "freshness": "fresh",
-        })
-        self.assertEqual(report["summary"], {
-            "order_count": 1, "scoped_order_count": 1, "matched_order_count": 1,
-            "different_order_count": 0, "unmatched_observation_count": 0,
-            "unresolved_order_count": 0, "findings_count": 0,
-        })
+        self.assertEqual(
+            report["observation_summary"],
+            {
+                "inquiry_date": DATE,
+                "observed_at_utc": NOW.isoformat(),
+                "pages_fetched": 1,
+                "row_count": 1,
+                "age_seconds": 0,
+                "freshness": "fresh",
+            },
+        )
+        self.assertEqual(
+            report["summary"],
+            {
+                "order_count": 1,
+                "scoped_order_count": 1,
+                "matched_order_count": 1,
+                "different_order_count": 0,
+                "unmatched_observation_count": 0,
+                "unresolved_order_count": 0,
+                "findings_count": 0,
+            },
+        )
         self.assert_unverified(report)
 
     def test_numeric_padding_matches_but_is_preserved_in_the_report(self):
@@ -155,16 +240,24 @@ class StockOrderReviewTests(unittest.TestCase):
         self.add_order("other-branch", branch="06011")
         self.add_order("today")
         report = self.report(observations())
-        self.assertEqual([entry["comparison"] for entry in report["orders"]],
-                         ["out_of_scope", "not_observed", "observations_equal"])
+        self.assertEqual(
+            [entry["comparison"] for entry in report["orders"]],
+            ["out_of_scope", "not_observed", "observations_equal"],
+        )
         self.assertIsNone(report["orders"][0]["observed"])
         self.assertIsNone(report["orders"][1]["observed"])
         self.assertEqual(report["summary"]["scoped_order_count"], 2)
         self.assertEqual(report["summary"]["matched_order_count"], 1)
-        self.assertEqual(report["findings"], [{
-            "code": "local_order_not_observed", "client_order_id": "other-branch",
-            "broker_order_id": "0000000001",
-        }])
+        self.assertEqual(
+            report["findings"],
+            [
+                {
+                    "code": "local_order_not_observed",
+                    "client_order_id": "other-branch",
+                    "broker_order_id": "0000000001",
+                }
+            ],
+        )
 
     def test_missing_observed_order_and_unknown_observation_are_both_findings(self):
         self.add_order()
@@ -174,11 +267,17 @@ class StockOrderReviewTests(unittest.TestCase):
         self.assertIs(report["needs_attention"], True)
         self.assertEqual(report["orders"][0]["comparison"], "not_observed")
         self.assertEqual(report["unmatched_observations"], [unknown])
-        self.assertEqual(report["findings"], [
-            {"code": "local_order_not_observed", "client_order_id": "buy-1",
-             "broker_order_id": "0000000001"},
-            {"code": "unmatched_observation", "client_order_id": None, "broker_order_id": "2"},
-        ])
+        self.assertEqual(
+            report["findings"],
+            [
+                {
+                    "code": "local_order_not_observed",
+                    "client_order_id": "buy-1",
+                    "broker_order_id": "0000000001",
+                },
+                {"code": "unmatched_observation", "client_order_id": None, "broker_order_id": "2"},
+            ],
+        )
         self.assert_unverified(report)
 
     def test_unacknowledged_order_is_never_guessed_from_identical_terms(self):
@@ -189,27 +288,42 @@ class StockOrderReviewTests(unittest.TestCase):
         self.assertEqual(report["unmatched_observations"], [observed_row()])
         self.assertTrue(report["journal_blocked"])
         self.assertEqual(report["summary"]["matched_order_count"], 0)
-        self.assertEqual([finding["code"] for finding in report["findings"]], [
-            "unresolved_local_order", "local_order_not_acknowledged", "unmatched_observation",
-        ])
+        self.assertEqual(
+            [finding["code"] for finding in report["findings"]],
+            [
+                "unresolved_local_order",
+                "local_order_not_acknowledged",
+                "unmatched_observation",
+            ],
+        )
         self.assert_unverified(report)
 
     def test_differences_expose_only_compared_terms_with_exact_money_and_stable_field_order(self):
         self.add_order()
-        changed = observed_row(pdno="000660", sll_buy_dvsn_cd="01", ord_dvsn_cd="01",
-                               ord_qty="6", ord_unpr="70001", tot_ccld_qty="4",
-                               tot_ccld_amt="280000", rmn_qty="2")
+        changed = observed_row(
+            pdno="000660",
+            sll_buy_dvsn_cd="01",
+            ord_dvsn_cd="01",
+            ord_qty="6",
+            ord_unpr="70001",
+            tot_ccld_qty="4",
+            tot_ccld_amt="280000",
+            rmn_qty="2",
+        )
         report = self.report(observations([changed]))
-        self.assertEqual(report["orders"][0]["differences"], [
-            {"field": "symbol", "local": "005930", "observed": "000660"},
-            {"field": "side", "local": "buy", "observed": "sell"},
-            {"field": "order_division", "local": "00", "observed": "01"},
-            {"field": "quantity", "local": 5, "observed": 6},
-            {"field": "limit_price", "local": "70000", "observed": "70001"},
-            {"field": "filled_quantity", "local": 5, "observed": 4},
-            {"field": "gross_krw", "local": "350000", "observed": "280000"},
-            {"field": "working_quantity", "local": 0, "observed": 2},
-        ])
+        self.assertEqual(
+            report["orders"][0]["differences"],
+            [
+                {"field": "symbol", "local": "005930", "observed": "000660"},
+                {"field": "side", "local": "buy", "observed": "sell"},
+                {"field": "order_division", "local": "00", "observed": "01"},
+                {"field": "quantity", "local": 5, "observed": 6},
+                {"field": "limit_price", "local": "70000", "observed": "70001"},
+                {"field": "filled_quantity", "local": 5, "observed": 4},
+                {"field": "gross_krw", "local": "350000", "observed": "280000"},
+                {"field": "working_quantity", "local": 0, "observed": 2},
+            ],
+        )
         self.assertEqual(report["orders"][0]["comparison"], "different")
         self.assertEqual(report["summary"]["different_order_count"], 1)
         self.assertEqual(report["findings"][0]["code"], "order_fields_differ")
@@ -221,9 +335,14 @@ class StockOrderReviewTests(unittest.TestCase):
                 path = Path(self.temp.name) / (state + ".sqlite")
                 self.journal = self.Journal.create(path, account_ref="paper-desk")
                 self.add_order(state=state, filled_quantity=filled)
-                row = observed_row(tot_ccld_qty=str(filled), tot_ccld_amt=str(filled * 70000),
-                                   rmn_qty=str(5 - filled), cncl_yn="Y", cncl_cfrm_qty="3",
-                                   rjct_qty="5")
+                row = observed_row(
+                    tot_ccld_qty=str(filled),
+                    tot_ccld_amt=str(filled * 70000),
+                    rmn_qty=str(5 - filled),
+                    cncl_yn="Y",
+                    cncl_cfrm_qty="3",
+                    rjct_qty="5",
+                )
                 report = self.report(observations([row]))
                 self.assertEqual(report["comparison_status"], "observations_equal")
                 self.assertEqual(report["orders"][0]["comparison"], "observations_equal")
@@ -236,8 +355,9 @@ class StockOrderReviewTests(unittest.TestCase):
 
     def test_closed_partial_order_compares_working_quantity_not_historical_unfilled_quantity(self):
         self.add_order(state="canceled", filled_quantity=2)
-        row = observed_row(tot_ccld_qty="2", tot_ccld_amt="140000", rmn_qty="0",
-                           cncl_cfrm_qty="3", cncl_yn="Y")
+        row = observed_row(
+            tot_ccld_qty="2", tot_ccld_amt="140000", rmn_qty="0", cncl_cfrm_qty="3", cncl_yn="Y"
+        )
         report = self.report(observations([row]))
         self.assertEqual(report["orders"][0]["local"]["unfilled_quantity"], 3)
         self.assertEqual(report["orders"][0]["comparison"], "observations_equal")
@@ -246,8 +366,9 @@ class StockOrderReviewTests(unittest.TestCase):
 
     def test_related_child_requires_review_without_summing_its_cumulative_fills(self):
         self.add_order()
-        child = observed_row(odno="2", orgn_odno="0000000001", tot_ccld_qty="2",
-                             tot_ccld_amt="140000")
+        child = observed_row(
+            odno="2", orgn_odno="0000000001", tot_ccld_qty="2", tot_ccld_amt="140000"
+        )
         report = self.report(observations([child, observed_row()]))
         self.assertEqual(report["orders"][0]["comparison"], "related_history")
         self.assertEqual(report["orders"][0]["local"]["filled_quantity"], 5)
@@ -262,23 +383,38 @@ class StockOrderReviewTests(unittest.TestCase):
         self.add_order()
         report = self.report(observations([observed_row(orgn_odno="0000000009")]))
         self.assertEqual(report["orders"][0]["comparison"], "related_history")
-        self.assertEqual(report["findings"], [{
-            "code": "related_order_history", "client_order_id": "buy-1",
-            "broker_order_id": "0000000001",
-        }])
+        self.assertEqual(
+            report["findings"],
+            [
+                {
+                    "code": "related_order_history",
+                    "client_order_id": "buy-1",
+                    "broker_order_id": "0000000001",
+                }
+            ],
+        )
         self.assert_unverified(report)
 
     def test_related_history_never_hides_direct_field_differences(self):
         self.add_order()
-        report = self.report(observations([
-            observed_row(orgn_odno="9", tot_ccld_amt="349999"),
-        ]))
+        report = self.report(
+            observations(
+                [
+                    observed_row(orgn_odno="9", tot_ccld_amt="349999"),
+                ]
+            )
+        )
         self.assertEqual(report["orders"][0]["comparison"], "different")
-        self.assertEqual(report["orders"][0]["differences"], [
-            {"field": "gross_krw", "local": "350000", "observed": "349999"},
-        ])
-        self.assertEqual({finding["code"] for finding in report["findings"]},
-                         {"order_fields_differ", "related_order_history"})
+        self.assertEqual(
+            report["orders"][0]["differences"],
+            [
+                {"field": "gross_krw", "local": "350000", "observed": "349999"},
+            ],
+        )
+        self.assertEqual(
+            {finding["code"] for finding in report["findings"]},
+            {"order_fields_differ", "related_order_history"},
+        )
 
     def test_unresolved_order_outside_inquiry_date_stays_visible_and_blocking(self):
         self.add_order(order_date="2026-11-20", state="uncertain")
@@ -288,10 +424,16 @@ class StockOrderReviewTests(unittest.TestCase):
         self.assertEqual(report["summary"]["scoped_order_count"], 0)
         self.assertTrue(report["journal_blocked"])
         self.assertTrue(report["needs_attention"])
-        self.assertEqual(report["findings"], [{
-            "code": "unresolved_local_order", "client_order_id": "buy-1",
-            "broker_order_id": None,
-        }])
+        self.assertEqual(
+            report["findings"],
+            [
+                {
+                    "code": "unresolved_local_order",
+                    "client_order_id": "buy-1",
+                    "broker_order_id": None,
+                }
+            ],
+        )
         self.assert_unverified(report)
 
     def test_journal_only_monitoring_is_explicit_and_preserves_unresolved_attention(self):
@@ -312,9 +454,11 @@ class StockOrderReviewTests(unittest.TestCase):
 
     def test_stale_and_any_future_timestamp_require_attention_without_altering_comparison(self):
         self.add_order()
-        cases = ((timedelta(seconds=300), "fresh", None),
-                 (timedelta(seconds=300, microseconds=1), "stale", "observation_stale"),
-                 (timedelta(microseconds=-1), "future", "observation_future"))
+        cases = (
+            (timedelta(seconds=300), "fresh", None),
+            (timedelta(seconds=300, microseconds=1), "stale", "observation_stale"),
+            (timedelta(microseconds=-1), "future", "observation_future"),
+        )
         for age, freshness, code in cases:
             with self.subTest(freshness=freshness):
                 document = observations(observed_at_utc=(NOW - age).isoformat())
@@ -322,16 +466,22 @@ class StockOrderReviewTests(unittest.TestCase):
                 self.assertEqual(report["observation_summary"]["freshness"], freshness)
                 self.assertEqual(report["observation_summary"]["age_seconds"], age.total_seconds())
                 self.assertEqual(report["orders"][0]["comparison"], "observations_equal")
-                self.assertEqual(report["comparison_status"], "needs_review" if code else "observations_equal")
+                self.assertEqual(
+                    report["comparison_status"], "needs_review" if code else "observations_equal"
+                )
                 self.assertEqual(report["needs_attention"], code is not None)
-                self.assertEqual([finding["code"] for finding in report["findings"]],
-                                 [code] if code else [])
+                self.assertEqual(
+                    [finding["code"] for finding in report["findings"]], [code] if code else []
+                )
                 self.assert_unverified(report)
 
     def test_historical_inquiry_is_valid_after_collectors_thirty_day_window(self):
         self.add_order(order_date="2025-01-01")
-        document = observations([observed_row(ord_dt="20250101")], inquiry_date="2025-01-01",
-                                observed_at_utc="2025-01-01T06:00:00+00:00")
+        document = observations(
+            [observed_row(ord_dt="20250101")],
+            inquiry_date="2025-01-01",
+            observed_at_utc="2025-01-01T06:00:00+00:00",
+        )
         report = self.report(document)
         self.assertEqual(report["orders"][0]["comparison"], "observations_equal")
         self.assertEqual(report["observation_summary"]["freshness"], "stale")
@@ -339,14 +489,19 @@ class StockOrderReviewTests(unittest.TestCase):
 
     def test_deterministic_ordering_does_not_depend_on_observation_page_order(self):
         self.add_order()
-        rows = [observed_row(odno="10"), observed_row(ord_gno_brno="06011", odno="1"),
-                observed_row(odno="2"), observed_row()]
+        rows = [
+            observed_row(odno="10"),
+            observed_row(ord_gno_brno="06011", odno="1"),
+            observed_row(odno="2"),
+            observed_row(),
+        ]
         first = self.report(observations(rows))
         second = self.report(observations(list(reversed(rows))))
         self.assertEqual(first, second)
-        self.assertEqual([(row["ord_gno_brno"], row["odno"])
-                          for row in first["unmatched_observations"]],
-                         [("06010", "2"), ("06010", "10"), ("06011", "1")])
+        self.assertEqual(
+            [(row["ord_gno_brno"], row["odno"]) for row in first["unmatched_observations"]],
+            [("06010", "2"), ("06010", "10"), ("06011", "1")],
+        )
 
     def test_exact_top_level_schema_rejects_missing_and_untrusted_metadata(self):
         for key in observations():
@@ -354,8 +509,13 @@ class StockOrderReviewTests(unittest.TestCase):
                 document = observations()
                 del document[key]
                 self.assert_refused(document)
-        for key in ("token", "raw_response", "balance", "safe_to_submit",
-                    "lifecycle_confirmation_verified"):
+        for key in (
+            "token",
+            "raw_response",
+            "balance",
+            "safe_to_submit",
+            "lifecycle_confirmation_verified",
+        ):
             with self.subTest(extra=key):
                 self.assert_refused(observations(**{key: "SENSITIVE-SENTINEL"}))
         for value in ([], (), "SENSITIVE-SENTINEL", 0, True):
@@ -372,8 +532,12 @@ class StockOrderReviewTests(unittest.TestCase):
             "account_ref": ("another-account", "<script>", "", "a" * 65, None),
             "pagination_complete": (False, 1, "true", None),
         }
-        for key in ("live_orders_enabled", "account_binding_verified",
-                    "atomic_snapshot_verified", "economic_reconciliation_verified"):
+        for key in (
+            "live_orders_enabled",
+            "account_binding_verified",
+            "atomic_snapshot_verified",
+            "economic_reconciliation_verified",
+        ):
             invalid[key] = (True, 0, "false", None)
         for key, values in invalid.items():
             for value in values:
@@ -420,16 +584,50 @@ class StockOrderReviewTests(unittest.TestCase):
         self.assert_refused(observations([observed_row(excg_id_dvsn_cd="NXT")]))
 
     def test_saved_numbers_are_canonical_strings_not_silently_normalized(self):
-        for key, maximum in (("ord_qty", 10), ("tot_ccld_qty", 10), ("rmn_qty", 10),
-                             ("cncl_cfrm_qty", 10), ("rjct_qty", 10),
-                             ("ord_unpr", 19), ("tot_ccld_amt", 19)):
-            invalid = ("", "00", "01", "-1", "+1", "1.0", "1e2", "1 ", " 1", "١",
-                       1, 1.0, True, None, float("nan"), "1" * (maximum + 1))
+        for key, maximum in (
+            ("ord_qty", 10),
+            ("tot_ccld_qty", 10),
+            ("rmn_qty", 10),
+            ("cncl_cfrm_qty", 10),
+            ("rjct_qty", 10),
+            ("ord_unpr", 19),
+            ("tot_ccld_amt", 19),
+        ):
+            invalid = (
+                "",
+                "00",
+                "01",
+                "-1",
+                "+1",
+                "1.0",
+                "1e2",
+                "1 ",
+                " 1",
+                "١",
+                1,
+                1.0,
+                True,
+                None,
+                float("nan"),
+                "1" * (maximum + 1),
+            )
             for value in invalid:
                 with self.subTest(field=key, value=value):
                     self.assert_refused(observations([observed_row(**{key: value})]))
-        for value in ("00", "070000", "70000.0", "70000.10", ".5", "1.", "-1.5",
-                      "1e2", "١.٥", 1.5, None, "1" * 20):
+        for value in (
+            "00",
+            "070000",
+            "70000.0",
+            "70000.10",
+            ".5",
+            "1.",
+            "-1.5",
+            "1e2",
+            "١.٥",
+            1.5,
+            None,
+            "1" * 20,
+        ):
             with self.subTest(average=value):
                 self.assert_refused(observations([observed_row(avg_prvs=value)]))
         for value in ("0", "0.5", "70000.125", "9999999999999999999"):
@@ -464,12 +662,21 @@ class StockOrderReviewTests(unittest.TestCase):
         for value in ("2026-02-30", "20261121", "2026-1-21", "0000-11-21", None, 20261121):
             with self.subTest(inquiry=value):
                 self.assert_refused(observations(inquiry_date=value))
-        invalid = ("2026-11-21T06:00:00", "2026-11-21T06:00:00Z",
-                   "2026-11-21 06:00:00+00:00", "2026-11-21T15:00:00+09:00",
-                   "2026-11-21T06:00:00.0+00:00", "2026-11-21T06:00:00.000000+00:00",
-                   "2026-11-21T06:00:00.1+00:00", "2026-11-21T24:00:00+00:00",
-                   "2026-11-21T06:00:60+00:00", "2026-02-30T06:00:00+00:00",
-                   "2026-11-21T06:00:00+00:00SENSITIVE-SENTINEL", None, 1)
+        invalid = (
+            "2026-11-21T06:00:00",
+            "2026-11-21T06:00:00Z",
+            "2026-11-21 06:00:00+00:00",
+            "2026-11-21T15:00:00+09:00",
+            "2026-11-21T06:00:00.0+00:00",
+            "2026-11-21T06:00:00.000000+00:00",
+            "2026-11-21T06:00:00.1+00:00",
+            "2026-11-21T24:00:00+00:00",
+            "2026-11-21T06:00:60+00:00",
+            "2026-02-30T06:00:00+00:00",
+            "2026-11-21T06:00:00+00:00SENSITIVE-SENTINEL",
+            None,
+            1,
+        )
         for value in invalid:
             with self.subTest(observed=value):
                 self.assert_refused(observations(observed_at_utc=value))
@@ -507,6 +714,7 @@ class StockOrderReviewTests(unittest.TestCase):
         class FakeJournal:
             def snapshot(inner_self):
                 return self.journal.snapshot()
+
         for candidate in (FakeJournal(), self.journal.snapshot(), self.path, None):
             with self.subTest(journal=type(candidate).__name__):
                 with self.assertRaisesRegex(ValueError, "^Stock-order review refused$"):
@@ -522,7 +730,9 @@ class StockOrderReviewTests(unittest.TestCase):
 
     def test_source_events_main_database_permissions_and_observation_document_do_not_change(self):
         self.add_order()
-        self.journal = self.Journal.open_existing(self.path, account_ref="paper-desk", read_only=True)
+        self.journal = self.Journal.open_existing(
+            self.path, account_ref="paper-desk", read_only=True
+        )
         before = self.journal.snapshot()
         database = self.path.read_bytes()
         permissions = stat.S_IMODE(self.path.stat().st_mode)
@@ -557,9 +767,21 @@ result = review_orders(journal, json.loads(sys.argv[3]),
                        now=datetime(2026, 11, 21, 6, tzinfo=timezone.utc))
 print(json.dumps(result, sort_keys=True, allow_nan=False))
 """
-        result = subprocess.run([sys.executable, "-B", "-S", "-c", script, str(MODULE_DIR),
-                                 str(self.path), json.dumps(observations())],
-                                capture_output=True, text=True, timeout=15)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                "-S",
+                "-c",
+                script,
+                str(MODULE_DIR),
+                str(self.path),
+                json.dumps(observations()),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), self.report(observations()))
 

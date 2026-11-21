@@ -3,20 +3,20 @@
 Input is never fetched from an exchange. CSV provenance is caller-supplied;
 no claim of historical authenticity or candle completeness is made.
 """
+
 import argparse
 import csv
-from decimal import Decimal, DecimalException
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import tempfile
+from decimal import Decimal, DecimalException
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages/data"))
 from trading_data import Candle, CandleBuffer
-
 
 HEADER = ["timestamp", "open", "high", "low", "close", "volume"]
 
@@ -98,7 +98,14 @@ def main(argv=None):
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
-            with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=target.parent, prefix=".offline-import-", suffix=".tmp", delete=False) as stream:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=target.parent,
+                prefix=".offline-import-",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
                 temporary = Path(stream.name)
                 os.chmod(temporary, 0o600)
                 json.dump(payload, stream, indent=2, allow_nan=False)

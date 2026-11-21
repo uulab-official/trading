@@ -1,23 +1,31 @@
 """Run targeted offline safety/replay checks with all socket/DNS access forbidden."""
 
-from pathlib import Path
 import argparse
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 # Script execution sets sys.path[0] to tools/, not the repository root.
 # Server regression tests import tools.* directly; restore project-root imports.
 sys.path.insert(0, str(ROOT))
-for source in [ROOT / "packages/core", ROOT / "packages/data", ROOT / "packages/strategy", ROOT / "apps/server"]:
+for source in [
+    ROOT / "packages/core",
+    ROOT / "packages/data",
+    ROOT / "packages/strategy",
+    ROOT / "apps/server",
+]:
     sys.path.insert(0, str(source))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--include-backtest", action="store_true",
-                        help="also run the existing offline backtest engine/broker checks (needs pandas/numpy)")
+    parser.add_argument(
+        "--include-backtest",
+        action="store_true",
+        help="also run the existing offline backtest engine/broker checks (needs pandas/numpy)",
+    )
     args = parser.parse_args()
     checks = [
         ("packages/core/tests", "*execution_safety.py"),
@@ -83,7 +91,17 @@ def main():
     if args.include_backtest:
         sys.path.insert(0, str(ROOT / "packages/backtest"))
         checks.append(("packages/backtest/tests", "test_*.py"))
-    with patch("socket.socket.connect", side_effect=AssertionError("Offline checks forbid socket connections")), patch("socket.create_connection", side_effect=AssertionError("Offline checks forbid network clients")), patch("socket.getaddrinfo", side_effect=AssertionError("Offline checks forbid DNS")):
+    with (
+        patch(
+            "socket.socket.connect",
+            side_effect=AssertionError("Offline checks forbid socket connections"),
+        ),
+        patch(
+            "socket.create_connection",
+            side_effect=AssertionError("Offline checks forbid network clients"),
+        ),
+        patch("socket.getaddrinfo", side_effect=AssertionError("Offline checks forbid DNS")),
+    ):
         suite = unittest.TestSuite()
         for directory, pattern in checks:
             suite.addTests(unittest.TestLoader().discover(str(ROOT / directory), pattern=pattern))

@@ -1,20 +1,21 @@
 """Actual legacy paper lifecycle, crash ambiguity, and explicit recovery exits."""
+
 import asyncio
-from contextlib import ExitStack
-from datetime import datetime, timedelta
-from decimal import Decimal
 import importlib
 import json
 import logging
 import os
-from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from contextlib import ExitStack
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from trading_core.state_store import JSONStateStore
 from trading_core.order_manager import OrderSide, OrderType
+from trading_core.state_store import JSONStateStore
 from trading_strategy import Signal, SignalType
 
 
@@ -22,8 +23,10 @@ class Clock(datetime):
     current = datetime(2026, 10, 4, 12)
 
     @classmethod
-    def utcnow(cls):
-        return cls.current
+    def now(cls, tz=None):
+        if tz is not None:
+            return cls.current.replace(tzinfo=timezone.utc).astimezone(tz)
+        return cls.current + timedelta(hours=9)
 
 
 class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
@@ -32,20 +35,36 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.old_cwd = Path.cwd()
         os.chdir(self.temp.name)
         self.stack = ExitStack()
-        for target in ("socket.socket.connect", "socket.socket.connect_ex", "socket.create_connection", "socket.getaddrinfo"):
-            self.stack.enter_context(patch(target, side_effect=AssertionError("Lifecycle tests forbid network/DNS")))
-        with patch("logging.FileHandler", return_value=logging.NullHandler()), patch("logging.basicConfig"):
+        for target in (
+            "socket.socket.connect",
+            "socket.socket.connect_ex",
+            "socket.create_connection",
+            "socket.getaddrinfo",
+        ):
+            self.stack.enter_context(
+                patch(target, side_effect=AssertionError("Lifecycle tests forbid network/DNS"))
+            )
+        with (
+            patch("logging.FileHandler", return_value=logging.NullHandler()),
+            patch("logging.basicConfig"),
+        ):
             self.Bot = importlib.import_module("trading_bot.main").TradingBot
         Clock.current = datetime(2026, 10, 4, 12)
-        for target in ("trading_core.portfolio.datetime", "trading_core.risk_manager.datetime",
-                       "trading_core.order_manager.datetime", "trading_core.state_store.datetime",
-                       "trading_core.legacy_checkpoint.datetime", "trading_bot.main.datetime"):
+        for target in (
+            "trading_core.portfolio.datetime",
+            "trading_core.risk_manager.datetime",
+            "trading_core.order_manager.datetime",
+            "trading_core.state_store.datetime",
+            "trading_core.legacy_checkpoint.datetime",
+            "trading_bot.main.datetime",
+        ):
             self.stack.enter_context(patch(target, Clock))
         self.stack.enter_context(patch("trading_core.config_manager._config_manager", None))
         Path("config/active").mkdir(parents=True)
         Path("config/active/bot_config.yml").write_text(
             "bot: {id: audit, mode: paper}\nexchange: {id: binance, sandbox: true, testnet: true}\n"
-            "strategies: [{name: fixture, enabled: true, type: ma_cross, symbol: BTC/USDT, timeframe: 1h}]\n")
+            "strategies: [{name: fixture, enabled: true, type: ma_cross, symbol: BTC/USDT, timeframe: 1h}]\n"
+        )
         self.bots = []
         self.bot = await self.new_bot()
 
@@ -70,15 +89,20 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def buy(self, bot=None, symbol="BTC/USDT"):
         bot = bot or self.bot
         bot.exchange.set_price(symbol, Decimal("100"))
-        await bot._process_signal(Signal(SignalType.BUY, symbol, Decimal("100"), Clock.utcnow()))
+        await bot._process_signal(Signal(SignalType.BUY, symbol, Decimal("100"), Clock.current))
 
     def raw(self):
         with sqlite3.connect("data/paper_bot_state.db") as conn:
-            return conn.execute("SELECT data FROM state WHERE key='bot:audit:legacy_checkpoint:v1'").fetchone()[0]
+            return conn.execute(
+                "SELECT data FROM state WHERE key='bot:audit:legacy_checkpoint:v1'"
+            ).fetchone()[0]
 
     def replace(self, data):
         with sqlite3.connect("data/paper_bot_state.db") as conn:
-            conn.execute("UPDATE state SET data=? WHERE key='bot:audit:legacy_checkpoint:v1'", (json.dumps(data),))
+            conn.execute(
+                "UPDATE state SET data=? WHERE key='bot:audit:legacy_checkpoint:v1'",
+                (json.dumps(data),),
+            )
 
     async def test_open_position_broker_orders_and_marks_restore_without_orders(self):
         await self.buy()
@@ -92,10 +116,46 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(resumed.order_manager.get_all_orders()), 1)
         self.assertEqual(resumed.portfolio.cash_balance, Decimal("9000"))
 
+    async def test_checkpoint_utc_offsets_and_naive_runtime_clocks_survive_restart(self):
+        opened = Clock.current
+        await self.buy()
+        position = self.bot.portfolio.get_position("BTC/USDT")
+        self.assertEqual(position.opened_at, opened)
+        self.assertIsNone(position.opened_at.tzinfo)
+        Clock.current += timedelta(seconds=10)
+        self.bot.exchange.set_price("BTC/USDT", Decimal("99"))
+        await self.bot._close_position("BTC/USDT", Decimal("99"), "timestamp compatibility")
+        await self.bot.stop()
+        saved = json.loads(self.raw())
+        self.assertEqual(saved["version"], 1)
+        self.assertEqual(saved["last_observed_at"], Clock.current.isoformat() + "+00:00")
+        trade = saved["portfolio"]["trades"][0]
+        self.assertEqual(trade["opened_at"], opened.isoformat() + "+00:00")
+        self.assertEqual(trade["closed_at"], Clock.current.isoformat() + "+00:00")
+        for order in saved["orders"].values():
+            for field in ("created_at", "updated_at"):
+                self.assertTrue(order[field].endswith("+00:00"))
+        self.assertTrue(saved["risk"]["cooldown_until"].endswith("+00:00"))
+
+        resumed = await self.new_bot()
+        self.assertIsNone(resumed.recovery_reason)
+        self.assertEqual(resumed._paper_checkpoint.snapshot(), saved)
+        self.assertIsNone(resumed._paper_checkpoint.last_observed.tzinfo)
+        self.assertIsNone(resumed.risk_manager._cooldown_until.tzinfo)
+        for order in resumed.order_manager.get_all_orders().values():
+            self.assertIsNone(order.created_at.tzinfo)
+            self.assertIsNone(order.updated_at.tzinfo)
+        restored_trade = resumed.portfolio._trades[0]
+        self.assertEqual(restored_trade.opened_at, opened)
+        self.assertEqual(restored_trade.closed_at, Clock.current)
+        self.assertIsNone(restored_trade.closed_at.tzinfo)
+
     async def test_direct_order_boundary_requires_a_current_durable_intent(self):
         self.bot.exchange.set_price("BTC/USDT", Decimal("100"))
         with self.assertRaisesRegex(RuntimeError, "intent"):
-            await self.bot.order_manager.place_order("BTC/USDT", OrderSide.BUY, OrderType.MARKET, Decimal("1"))
+            await self.bot.order_manager.place_order(
+                "BTC/USDT", OrderSide.BUY, OrderType.MARKET, Decimal("1")
+            )
         self.assertEqual(self.bot.exchange.snapshot()["orders"], {})
 
     async def test_risk_only_gap_allows_explicit_exit_keeps_source_and_blocks_later_buy(self):
@@ -117,7 +177,9 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(resumed.portfolio.has_position("BTC/USDT"))
         self.assertIsNotNone(resumed.recovery_reason)
         with sqlite3.connect("data/paper_bot_state.db") as conn:
-            source, = conn.execute("SELECT data FROM state WHERE key LIKE '%:recovery_source:%'").fetchone()
+            (source,) = conn.execute(
+                "SELECT data FROM state WHERE key LIKE '%:recovery_source:%'"
+            ).fetchone()
         self.assertEqual(source, original)
         await resumed.stop()
         again = await self.new_bot()
@@ -135,12 +197,19 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
         resumed = await self.new_bot()
         original = self.raw()
         with sqlite3.connect("data/paper_bot_state.db") as conn:
-            conn.execute("CREATE TRIGGER fail_projection BEFORE UPDATE ON state WHEN NEW.key='bot:audit:positions' BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END")
+            conn.execute(
+                "CREATE TRIGGER fail_projection BEFORE UPDATE ON state WHEN NEW.key='bot:audit:positions' BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END"
+            )
         with self.assertRaisesRegex(RuntimeError, "transaction"):
             await resumed._close_position("BTC/USDT", Decimal("100"), "explicit recovery exit")
         self.assertEqual(self.raw(), original)
         with sqlite3.connect("data/paper_bot_state.db") as conn:
-            self.assertEqual(conn.execute("SELECT count(*) FROM state WHERE key LIKE '%:recovery_source:%'").fetchone()[0], 0)
+            self.assertEqual(
+                conn.execute(
+                    "SELECT count(*) FROM state WHERE key LIKE '%:recovery_source:%'"
+                ).fetchone()[0],
+                0,
+            )
         self.assertEqual(len(resumed.exchange.snapshot()["orders"]), 1)
 
     async def test_circuit_halt_does_not_prevent_explicit_reducing_sell(self):
@@ -150,14 +219,21 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
         await self.bot._close_position("BTC/USDT", Decimal("40"), "fixture loss")
         self.assertTrue(self.bot.risk_manager._circuit_breaker_triggered)
         self.bot.exchange.set_price("ETH/USDT", Decimal("90"))
-        await self.bot._process_signal(Signal(SignalType.SELL, "ETH/USDT", Decimal("90"), Clock.utcnow()))
+        await self.bot._process_signal(
+            Signal(SignalType.SELL, "ETH/USDT", Decimal("90"), Clock.current)
+        )
         self.assertFalse(self.bot.portfolio.has_position("ETH/USDT"))
         await self.buy(symbol="LTC/USDT")
         self.assertFalse(self.bot.portfolio.has_position("LTC/USDT"))
 
     async def test_pending_close_is_never_reissued_on_boot_quote_or_explicit_retry(self):
         await self.buy()
-        self.bot._paper_checkpoint.begin_intent("sell", "BTC/USDT", amount=self.bot.portfolio.get_position("BTC/USDT").size, price=Decimal("100"))
+        self.bot._paper_checkpoint.begin_intent(
+            "sell",
+            "BTC/USDT",
+            amount=self.bot.portfolio.get_position("BTC/USDT").size,
+            price=Decimal("100"),
+        )
         await self.bot.stop()
         original = self.raw()
         resumed = await self.new_bot()
@@ -191,7 +267,9 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
         await self.buy()
         self.bot.exchange.set_price("BTC/USDT", Decimal("40"))
         with sqlite3.connect("data/paper_bot_state.db") as conn:
-            conn.execute("CREATE TRIGGER fail_finish BEFORE UPDATE ON state WHEN NEW.key='bot:audit:legacy_checkpoint:v1' AND json_extract(NEW.data,'$.intent') IS NULL BEGIN SELECT RAISE(ABORT,'fixture final commit failure'); END")
+            conn.execute(
+                "CREATE TRIGGER fail_finish BEFORE UPDATE ON state WHEN NEW.key='bot:audit:legacy_checkpoint:v1' AND json_extract(NEW.data,'$.intent') IS NULL BEGIN SELECT RAISE(ABORT,'fixture final commit failure'); END"
+            )
         with self.assertRaises(RuntimeError):
             await self.bot._close_position("BTC/USDT", Decimal("40"), "loss")
         self.assertIsNotNone(json.loads(self.raw())["intent"])
@@ -253,8 +331,9 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "generation"):
             session.save(transition=True)
         with self.assertRaisesRegex(RuntimeError, "intent"):
-            await self.bot.order_manager.place_order("BTC/USDT", OrderSide.BUY, OrderType.MARKET,
-                Decimal("1"), client_order_id=key)
+            await self.bot.order_manager.place_order(
+                "BTC/USDT", OrderSide.BUY, OrderType.MARKET, Decimal("1"), client_order_id=key
+            )
         self.assertEqual(self.bot.exchange.snapshot()["orders"], {})
         self.assertEqual(json.loads(self.raw()), altered)
 
@@ -273,7 +352,9 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_corrupt_row_is_preserved_by_actual_initialize_and_stop(self):
         await self.bot.stop()
         with sqlite3.connect("data/paper_bot_state.db") as conn:
-            conn.execute("UPDATE state SET data='not json' WHERE key='bot:audit:legacy_checkpoint:v1'")
+            conn.execute(
+                "UPDATE state SET data='not json' WHERE key='bot:audit:legacy_checkpoint:v1'"
+            )
         original = self.raw()
         resumed = await self.new_bot()
         self.assertIsNone(resumed.exchange)
@@ -320,8 +401,9 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
         data = json.loads(self.raw())
         data["portfolio"]["trades"][0]["accounting_date"] = "2027-10-04"
         data["accounting"]["daily_pnl"] = "0"
-        data["risk"].update(total_pnl="0", trade_count=0, loss_count=0,
-                            circuit_breaker=False, cooldown_until=None)
+        data["risk"].update(
+            total_pnl="0", trade_count=0, loss_count=0, circuit_breaker=False, cooldown_until=None
+        )
         self.replace(data)
         resumed = await self.new_bot()
         self.assertIsNotNone(resumed.recovery_reason)
@@ -330,14 +412,22 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def timestamped_buy(self):
         self.bot.exchange.set_ohlcv("BTC/USDT", "1h", [[1000, 100, 100, 100, 100, 1]])
-        await self.bot._process_signal(Signal(SignalType.BUY, "BTC/USDT", Decimal("100"), Clock.utcnow()))
+        await self.bot._process_signal(
+            Signal(SignalType.BUY, "BTC/USDT", Decimal("100"), Clock.current)
+        )
         self.assertTrue(self.bot.portfolio.has_position("BTC/USDT"))
 
     async def test_timestamped_callback_and_explicit_close_commit_and_restore(self):
         await self.timestamped_buy()
-        await self.bot._on_price_update({"symbol": "BTC/USDT", "price": Decimal("101"), "timestamp": 2000})
-        await self.bot._process_signal(Signal(SignalType.SELL, "BTC/USDT", Decimal("101"), Clock.utcnow()))
-        self.assertEqual([t["timestamp"] for t in self.bot.exchange.snapshot()["trades"]], [1000, 2000])
+        await self.bot._on_price_update(
+            {"symbol": "BTC/USDT", "price": Decimal("101"), "timestamp": 2000}
+        )
+        await self.bot._process_signal(
+            Signal(SignalType.SELL, "BTC/USDT", Decimal("101"), Clock.current)
+        )
+        self.assertEqual(
+            [t["timestamp"] for t in self.bot.exchange.snapshot()["trades"]], [1000, 2000]
+        )
         await self.bot.stop()
         resumed = await self.new_bot()
         self.assertIsNone(resumed.recovery_reason)
@@ -345,14 +435,18 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_timestamped_stop_callback_closes_without_ambiguous_intent(self):
         await self.timestamped_buy()
-        await self.bot._on_price_update({"symbol": "BTC/USDT", "price": Decimal("90"), "timestamp": 2000})
+        await self.bot._on_price_update(
+            {"symbol": "BTC/USDT", "price": Decimal("90"), "timestamp": 2000}
+        )
         self.assertFalse(self.bot.portfolio.has_position("BTC/USDT"))
         self.assertIsNone(json.loads(self.raw())["intent"])
         self.assertEqual(self.bot.exchange.snapshot()["trades"][-1]["timestamp"], 2000)
 
     async def test_timestamped_take_profit_callback_closes_without_ambiguous_intent(self):
         await self.timestamped_buy()
-        await self.bot._on_price_update({"symbol": "BTC/USDT", "price": Decimal("105"), "timestamp": 2000})
+        await self.bot._on_price_update(
+            {"symbol": "BTC/USDT", "price": Decimal("105"), "timestamp": 2000}
+        )
         self.assertFalse(self.bot.portfolio.has_position("BTC/USDT"))
         self.assertIsNone(json.loads(self.raw())["intent"])
         self.assertEqual(self.bot.exchange.snapshot()["trades"][-1]["timestamp"], 2000)
@@ -363,23 +457,35 @@ class LegacyPaperLifecycleTests(unittest.IsolatedAsyncioTestCase):
         quote = await self.bot.exchange.fetch_ticker("BTC/USDT")
         self.assertEqual(quote.timestamp, 1000)
         for timestamp in (500, -1, True, "2000", 2.5):
-            await self.bot._on_price_update({"symbol": "BTC/USDT", "price": Decimal("90"), "timestamp": timestamp})
+            await self.bot._on_price_update(
+                {"symbol": "BTC/USDT", "price": Decimal("90"), "timestamp": timestamp}
+            )
             current = await self.bot.exchange.fetch_ticker("BTC/USDT")
             self.assertEqual((current.last, current.timestamp), (Decimal("101"), 1000))
             self.assertTrue(self.bot.portfolio.has_position("BTC/USDT"))
 
     async def test_unsupported_currency_never_spends_an_existing_quote_asset(self):
         self.bot.exchange.set_price("BTC/USDT", Decimal("1"))
-        await self.bot._process_signal(Signal(SignalType.BUY, "BTC/USDT", Decimal("1"), Clock.utcnow()))
+        await self.bot._process_signal(
+            Signal(SignalType.BUY, "BTC/USDT", Decimal("1"), Clock.current)
+        )
         self.bot.exchange.set_price("ETH/BTC", Decimal("100"))
-        broker, portfolio, canonical = self.bot.exchange.snapshot(), self.bot.portfolio.to_dict(), self.raw()
-        await self.bot._process_signal(Signal(SignalType.BUY, "ETH/BTC", Decimal("100"), Clock.utcnow()))
+        broker, portfolio, canonical = (
+            self.bot.exchange.snapshot(),
+            self.bot.portfolio.to_dict(),
+            self.raw(),
+        )
+        await self.bot._process_signal(
+            Signal(SignalType.BUY, "ETH/BTC", Decimal("100"), Clock.current)
+        )
         self.assertEqual(self.bot.exchange.snapshot(), broker)
         self.assertEqual(self.bot.portfolio.to_dict(), portfolio)
         self.assertEqual(self.raw(), canonical)
         self.assertIsNone(self.bot._paper_checkpoint.intent)
         with self.assertRaisesRegex(RuntimeError, "USDT"):
-            self.bot._paper_checkpoint.begin_intent("buy", "ETH/BTC", amount=Decimal("10"), price=Decimal("100"))
+            self.bot._paper_checkpoint.begin_intent(
+                "buy", "ETH/BTC", amount=Decimal("10"), price=Decimal("100")
+            )
 
     async def test_zero_byte_existing_database_is_not_initialized_or_changed(self):
         await self.bot.stop()

@@ -4,9 +4,10 @@ This is an offline simulation, NOT a Toss Securities API connector. No sockets,
 account tokens, real orders, margin, short selling or cross-currency conversion.
 Caller supplies the execution price; no claim of exchange fill quality.
 """
-from decimal import Decimal, InvalidOperation, ROUND_DOWN, localcontext, Context
-from dataclasses import dataclass, field
+
 import re
+from dataclasses import dataclass, field
+from decimal import ROUND_DOWN, Context, Decimal, InvalidOperation, localcontext
 
 _CONTEXT = Context(prec=28)
 
@@ -17,8 +18,11 @@ def _amount(value, *, zero=False):
     except (InvalidOperation, TypeError) as exc:
         raise ValueError("Invalid decimal") from exc
     if not number.is_finite() or (number < 0 if zero else number <= 0):
-        raise ValueError("Amount must be finite and nonnegative" if zero else
-                         "Amount must be finite and positive")
+        raise ValueError(
+            "Amount must be finite and nonnegative"
+            if zero
+            else "Amount must be finite and positive"
+        )
     return number
 
 
@@ -73,9 +77,14 @@ class StockPaperBook:
                 next_cash = self.cash + gross - fee
                 next_held = held - shares
             result = {
-                "mode": "paper", "client_id": client_id, "symbol": symbol,
-                "side": side, "shares": shares, "price": str(price),
-                "gross": str(gross), "fee": str(fee),
+                "mode": "paper",
+                "client_id": client_id,
+                "symbol": symbol,
+                "side": side,
+                "shares": shares,
+                "price": str(price),
+                "gross": str(gross),
+                "fee": str(fee),
                 "quote_currency": self.quote_currency,
                 "status": "simulated_fill",
             }

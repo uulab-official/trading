@@ -1,17 +1,18 @@
 """Regression tests for the read-only checkpoint audit."""
+
 import asyncio
 import json
-from pathlib import Path
+import sys
 import tempfile
 import unittest
-import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-from tools.paper_checkpoint_audit import audit
 from trading_bot.paper_runner import PaperRunConfig, PaperRunner
 
+from tools.paper_checkpoint_audit import audit
 
 
 class TestPaperCheckpointAudit(unittest.TestCase):
@@ -23,7 +24,9 @@ class TestPaperCheckpointAudit(unittest.TestCase):
         source = json.loads((ROOT / "config/examples/offline_fixture.json").read_text())
         self.fixture.write_text(json.dumps(source), encoding="utf-8")
         self.checkpoint = self.folder / "checkpoint.json"
-        asyncio.run(PaperRunner(PaperRunConfig()).run(source["candles"], checkpoint_path=self.checkpoint))
+        asyncio.run(
+            PaperRunner(PaperRunConfig()).run(source["candles"], checkpoint_path=self.checkpoint)
+        )
 
     def test_valid_audit_is_read_only_and_never_approves_live(self):
         before = self.checkpoint.read_bytes()

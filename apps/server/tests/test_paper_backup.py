@@ -1,15 +1,17 @@
 """Offline paper backup integration and tamper-refusal tests."""
+
 import asyncio
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from tools.paper_backup import backup_pair, verify_backup, main
 from trading_bot.paper_runner import PaperRunConfig, PaperRunner
+
+from tools.paper_backup import backup_pair, main, verify_backup
 
 
 class PaperBackupTests(unittest.TestCase):
@@ -22,11 +24,15 @@ class PaperBackupTests(unittest.TestCase):
         self.backup = self.root / "backup-001"
         fixture = json.loads((ROOT / "config/examples/offline_fixture.json").read_text())
         self.archive.write_text(json.dumps(fixture), encoding="utf-8")
-        asyncio.run(PaperRunner(PaperRunConfig()).run(
-            fixture["candles"], checkpoint_path=self.checkpoint))
+        asyncio.run(
+            PaperRunner(PaperRunConfig()).run(fixture["candles"], checkpoint_path=self.checkpoint)
+        )
 
     def test_creates_verified_pair_without_modifying_sources(self):
-        previous_archive, previous_checkpoint = self.archive.read_bytes(), self.checkpoint.read_bytes()
+        previous_archive, previous_checkpoint = (
+            self.archive.read_bytes(),
+            self.checkpoint.read_bytes(),
+        )
         result = backup_pair(self.archive, self.checkpoint, self.backup)
         self.assertEqual("offline_paper_pair_backup", result["type"])
         self.assertFalse(result["live_orders_enabled"])
@@ -50,9 +56,11 @@ class PaperBackupTests(unittest.TestCase):
         before = (self.backup / "checkpoint.json").read_bytes()
         self.assertEqual(0, main(["verify", str(self.backup), "--deep"]))
         self.assertEqual(before, (self.backup / "checkpoint.json").read_bytes())
-        self.assertEqual({"archive.json", "checkpoint.json", "manifest.json"},
-                         {child.name for child in self.backup.iterdir()},
-                         "Deep auditing must not create .lock files in the immutable backup")
+        self.assertEqual(
+            {"archive.json", "checkpoint.json", "manifest.json"},
+            {child.name for child in self.backup.iterdir()},
+            "Deep auditing must not create .lock files in the immutable backup",
+        )
 
     def test_existing_backup_cannot_be_overwritten(self):
         backup_pair(self.archive, self.checkpoint, self.backup)
@@ -77,6 +85,7 @@ class PaperBackupTests(unittest.TestCase):
 
     def test_deep_replay_rejects_consistent_hashes_with_forged_balance(self):
         import hashlib
+
         backup_pair(self.archive, self.checkpoint, self.backup)
         checkpoint_path = self.backup / "checkpoint.json"
         state = json.loads(checkpoint_path.read_text())
@@ -93,7 +102,8 @@ class PaperBackupTests(unittest.TestCase):
             verify_backup(self.backup, deep=True)
 
     def test_running_supervisor_prevents_manual_backup(self):
-        from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
+        from trading_bot.paper_checkpoint import CheckpointInUseError, locked_checkpoint
+
         owner = self.checkpoint.with_name(self.checkpoint.name + ".supervisor")
         with locked_checkpoint(owner):
             with self.assertRaises(CheckpointInUseError):

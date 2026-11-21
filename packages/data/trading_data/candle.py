@@ -1,14 +1,17 @@
 """Validated historical candles and deterministic, local-only tick aggregation."""
 
+import re
 from collections import deque
 from dataclasses import dataclass
 from decimal import Decimal, localcontext
-import re
 from typing import Deque, List, Optional, Union
 
 from ._validation import (
-    CALCULATION_CONTEXT, nonnegative_decimal, positive_decimal,
-    positive_integer, timestamp_milliseconds,
+    CALCULATION_CONTEXT,
+    nonnegative_decimal,
+    positive_decimal,
+    positive_integer,
+    timestamp_milliseconds,
 )
 
 
@@ -103,7 +106,10 @@ class CandleBuffer:
         return [candle.volume for candle in self._candles]
 
     def add_tick(
-        self, timestamp: int, price: Decimal, volume: Decimal = Decimal("0"),
+        self,
+        timestamp: int,
+        price: Decimal,
+        volume: Decimal = Decimal("0"),
     ) -> Optional[Candle]:
         """Aggregate supplied ticks; never fetch ticks or fill missing buckets.
 
@@ -132,8 +138,12 @@ class CandleBuffer:
             with localcontext(CALCULATION_CONTEXT):
                 total_volume = self._pending.volume + volume
             pending = Candle(
-                bucket, self._pending.open, max(self._pending.high, price),
-                min(self._pending.low, price), price, total_volume,
+                bucket,
+                self._pending.open,
+                max(self._pending.high, price),
+                min(self._pending.low, price),
+                price,
+                total_volume,
             )
         self._pending = pending
         self._last_tick = tick

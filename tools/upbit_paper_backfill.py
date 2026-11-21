@@ -3,24 +3,29 @@
 Never mutates source archive, checkpoint or orders. Writes a distinct candidate
 fixture for manual audit. Uses only public quotation with exclusive UTC cutoffs.
 """
+
 import argparse
-from datetime import datetime, timezone
-from decimal import DecimalException
 import json
 import os
-from pathlib import Path
 import sys
 import tempfile
+from datetime import datetime, timezone
+from decimal import DecimalException
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 for source in (ROOT, ROOT / "packages/data", ROOT / "apps/server"):
     sys.path.insert(0, str(source))
 
+from trading_data import Candle, CandleBuffer
+
 from tools.upbit_paper_archive import _validated_rows, merge_archive
 from tools.upbit_public_paper_snapshot import (
-    _request_candles, _time_ms, build_snapshot, ALLOWED_UNITS,
+    ALLOWED_UNITS,
+    _request_candles,
+    _time_ms,
+    build_snapshot,
 )
-from trading_data import Candle, CandleBuffer
 
 
 def _historical_page(rows, market, unit, cutoff, max_count):
@@ -38,18 +43,37 @@ def _historical_page(rows, market, unit, cutoff, max_count):
         if stamp in timestamps:
             raise ValueError("Duplicate historical candle")
         timestamps.add(stamp)
-        candle = Candle(stamp, row["opening_price"], row["high_price"],
-                        row["low_price"], row["trade_price"],
-                        row["candle_acc_trade_volume"])
-        validated.append([stamp, *[
-            format(getattr(candle, attr), "f")
-            for attr in ("open", "high", "low", "close", "volume")
-        ]])
+        candle = Candle(
+            stamp,
+            row["opening_price"],
+            row["high_price"],
+            row["low_price"],
+            row["trade_price"],
+            row["candle_acc_trade_volume"],
+        )
+        validated.append(
+            [
+                stamp,
+                *[
+                    format(getattr(candle, attr), "f")
+                    for attr in ("open", "high", "low", "close", "volume")
+                ],
+            ]
+        )
     return sorted(validated, key=lambda row: row[0])
 
 
-def plan_backfill(archive, *, market="KRW-BTC", unit=60, pages=3, count=200,
-                  now_ms=None, fetcher=None, newest=None):
+def plan_backfill(
+    archive,
+    *,
+    market="KRW-BTC",
+    unit=60,
+    pages=3,
+    count=200,
+    now_ms=None,
+    fetcher=None,
+    newest=None,
+):
     """Create fully verified candidate archive; caller controls writing separately.
 
     fetcher receives (unit, market, count, to_ms), returning raw Upbit rows.
@@ -64,8 +88,8 @@ def plan_backfill(archive, *, market="KRW-BTC", unit=60, pages=3, count=200,
     previous, duration = _validated_rows(archive)
     if archive.get("symbol") != market[4:] + "/KRW" or archive.get("timeframe") != f"{unit}m":
         raise ValueError("Backfill identity does not match saved archive")
-    newest = newest if newest is not None else build_snapshot(
-        market, unit, count=count, now_ms=now_ms
+    newest = (
+        newest if newest is not None else build_snapshot(market, unit, count=count, now_ms=now_ms)
     )
     current, newest_duration = _validated_rows(newest)
     if newest_duration != duration or newest.get("symbol") != archive["symbol"]:
@@ -75,8 +99,10 @@ def plan_backfill(archive, *, market="KRW-BTC", unit=60, pages=3, count=200,
     all_rows = {row.timestamp: row for row in current}
     known = {row.timestamp: row for row in previous}
     last_saved = previous[-1].timestamp
+
     def has_overlap():
         return any(stamp in known for stamp in all_rows)
+
     cutoff = min(all_rows)
     requests_made = 0
     while not has_overlap():
@@ -86,8 +112,11 @@ def plan_backfill(archive, *, market="KRW-BTC", unit=60, pages=3, count=200,
         # no overlap means contradictory history or missing material.
         if cutoff < last_saved:
             raise ValueError("Reached past saved archive without a matching candle")
-        raw = (_request_candles(unit, market, count, to=cutoff)
-               if fetcher is None else fetcher(unit, market, count, cutoff))
+        raw = (
+            _request_candles(unit, market, count, to=cutoff)
+            if fetcher is None
+            else fetcher(unit, market, count, cutoff)
+        )
         page = _historical_page(raw, market, unit, cutoff, count)
         requests_made += 1
         if not page:
@@ -106,11 +135,17 @@ def plan_backfill(archive, *, market="KRW-BTC", unit=60, pages=3, count=200,
     # are byte-equivalent economically, no future data is inserted in the past,
     # and no missing intervals are silently manufactured.
     combined = {
-        "mode": "paper", "symbol": newest["symbol"],
+        "mode": "paper",
+        "symbol": newest["symbol"],
         "timeframe": newest["timeframe"],
         "candles": [
-            [bar.timestamp, *[format(getattr(bar, attr), "f")
-                              for attr in ("open", "high", "low", "close", "volume")]]
+            [
+                bar.timestamp,
+                *[
+                    format(getattr(bar, attr), "f")
+                    for attr in ("open", "high", "low", "close", "volume")
+                ],
+            ]
             for bar in ordered
         ],
     }
@@ -141,8 +176,9 @@ def main(argv=None):
     try:
         original = args.archive.read_bytes()
         old = json.loads(original)
-        candidate = plan_backfill(old, market=args.market, unit=args.unit,
-                                  pages=args.pages, count=args.count)
+        candidate = plan_backfill(
+            old, market=args.market, unit=args.unit, pages=args.pages, count=args.count
+        )
         if args.archive.read_bytes() != original:
             raise ValueError("Original archive changed during data collection")
         target = args.candidate.resolve()
@@ -151,7 +187,9 @@ def main(argv=None):
         target.parent.mkdir(parents=True, exist_ok=True)
         # Exclusive file creation: unlike os.replace, never overwrite a
         # concurrently created recovery proposal.
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        fd = os.open(
+            target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as output:
                 json.dump(candidate, output, indent=2, allow_nan=False)

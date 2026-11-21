@@ -1,14 +1,15 @@
 """Append-only archive contracts without any real networking."""
+
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 for source in (ROOT, ROOT / "packages/data", ROOT / "apps/server"):
     sys.path.insert(0, str(source))
-from tools.upbit_paper_archive import merge_archive, capture_once
+from tools.upbit_paper_archive import capture_once, merge_archive
 
 START = 1699920000000
 H = 3600000
@@ -16,7 +17,9 @@ H = 3600000
 
 def make_snapshot(indices, *, price="100"):
     return {
-        "mode": "paper", "symbol": "BTC/KRW", "timeframe": "60m",
+        "mode": "paper",
+        "symbol": "BTC/KRW",
+        "timeframe": "60m",
         "candles": [[START + i * H, price, price, price, price, "100"] for i in indices],
     }
 
@@ -65,19 +68,29 @@ class PaperArchiveTests(unittest.TestCase):
         def response(*args):
             return [
                 {
-                    "market": "KRW-BTC", "unit": 60,
+                    "market": "KRW-BTC",
+                    "unit": 60,
                     "candle_date_time_utc": datetime.fromtimestamp(
                         (START + i * H) / 1000, tz=timezone.utc
                     ).strftime("%Y-%m-%dT%H:%M:%S"),
-                    "opening_price": 100, "high_price": 100, "low_price": 100,
-                    "trade_price": 100, "candle_acc_trade_volume": 10,
+                    "opening_price": 100,
+                    "high_price": 100,
+                    "low_price": 100,
+                    "trade_price": 100,
+                    "candle_acc_trade_volume": 10,
                 }
                 for i in (2, 1, 0)
             ]
+
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "history.json"
-            kwargs = {"market": "KRW-BTC", "unit": 60, "count": 3,
-                      "now_ms": START + 3 * H + 10000, "fetcher": response}
+            kwargs = {
+                "market": "KRW-BTC",
+                "unit": 60,
+                "count": 3,
+                "now_ms": START + 3 * H + 10000,
+                "fetcher": response,
+            }
             first = capture_once(path, **kwargs)
             before = path.read_bytes()
             second = capture_once(path, **kwargs)

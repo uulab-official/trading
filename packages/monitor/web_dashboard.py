@@ -1,17 +1,18 @@
 # Web Dashboard Service
 # FastAPI + WebSocket으로 실시간 트레이딩 모니터링
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-from contextlib import asynccontextmanager
 import asyncio
 import json
-import sqlite3
-from datetime import datetime
-from pathlib import Path
-from typing import List, Dict, Optional
 import logging
+import sqlite3
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,8 +24,9 @@ app_state = {
     "portfolio": {},
     "positions": [],
     "recent_trades": [],
-    "logs": []
+    "logs": [],
 }
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,6 +38,7 @@ async def lifespan(app: FastAPI):
     # 종료
     logger.info("Web Dashboard stopped")
 
+
 app = FastAPI(title="Trading Bot Dashboard", lifespan=lifespan)
 
 # 정적 파일 서빙 (HTML, JS, CSS)
@@ -44,11 +47,13 @@ app.mount("/static", StaticFiles(directory="/app/web/static"), name="static")
 # 데이터베이스 경로
 DB_PATH = "/app/data/trading.db"
 
+
 def get_db_connection():
     """SQLite 연결"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 async def data_sync_loop():
     """1초마다 데이터 동기화"""
@@ -61,16 +66,17 @@ async def data_sync_loop():
             logger.error(f"Sync error: {e}")
             await asyncio.sleep(5)
 
+
 def sync_data():
     """SQLite에서 데이터 읽기"""
-    
+
     try:
         if not Path(DB_PATH).exists():
             return
-        
+
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         # 포트폴리오 상태
         cursor.execute("""
             SELECT data FROM state WHERE key = 'bot:main:portfolio'
@@ -78,7 +84,7 @@ def sync_data():
         row = cursor.fetchone()
         if row:
             app_state["portfolio"] = json.loads(row[0])
-        
+
         # 포지션 목록
         cursor.execute("""
             SELECT data FROM state WHERE key = 'bot:main:positions'
@@ -86,7 +92,7 @@ def sync_data():
         row = cursor.fetchone()
         if row:
             app_state["positions"] = json.loads(row[0])
-        
+
         # 봇 상태
         cursor.execute("""
             SELECT data FROM state WHERE key = 'bot:main:status'
@@ -95,33 +101,35 @@ def sync_data():
         if row:
             status_data = json.loads(row[0])
             app_state["trading_status"] = status_data.get("status", "unknown")
-        
+
         conn.close()
-        
+
     except Exception as e:
         logger.error(f"Database read error: {e}")
+
 
 async def broadcast_to_clients():
     """모든 클라이언트에 데이터 브로드캐스트"""
     if not connected_clients:
         return
-    
+
     message = {
         "type": "update",
-        "timestamp": datetime.utcnow().isoformat(),
-        "data": app_state
+        "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+        "data": app_state,
     }
-    
+
     disconnected = []
     for client in connected_clients:
         try:
             await client.send_json(message)
         except:
             disconnected.append(client)
-    
+
     # 연결 끊긴 클라이언트 제거
     for client in disconnected:
         connected_clients.remove(client)
+
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
@@ -410,41 +418,46 @@ async def dashboard():
 </html>
     """
 
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket 연결 - 실시간 데이터"""
     await websocket.accept()
     connected_clients.append(websocket)
-    
+
     # 초기 데이터 전송
-    await websocket.send_json({
-        "type": "update",
-        "timestamp": datetime.utcnow().isoformat(),
-        "data": app_state
-    })
-    
+    await websocket.send_json(
+        {
+            "type": "update",
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            "data": app_state,
+        }
+    )
+
     try:
         while True:
             # 클라이언트 메시지 대기 (ping/pong 등)
             data = await websocket.receive_text()
             message = json.loads(data)
-            
+
             if message.get("action") == "ping":
                 await websocket.send_json({"type": "pong"})
-                
+
     except WebSocketDisconnect:
         connected_clients.remove(websocket)
         logger.info("Client disconnected")
+
 
 @app.get("/api/status")
 async def get_status():
     """REST API: 현재 상태"""
     return {
         "status": app_state["trading_status"],
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         "portfolio": app_state["portfolio"],
-        "positions": app_state["positions"]
+        "positions": app_state["positions"],
     }
+
 
 @app.get("/api/history")
 async def get_history(limit: int = 100):
@@ -452,21 +465,26 @@ async def get_history(limit: int = 100):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        cursor.execute("""
+
+        cursor.execute(
+            """
             SELECT data FROM state 
             WHERE key LIKE 'trade:%'
             ORDER BY key DESC
             LIMIT ?
-        """, (limit,))
-        
+        """,
+            (limit,),
+        )
+
         trades = [json.loads(row[0]) for row in cursor.fetchall()]
         conn.close()
-        
+
         return {"trades": trades}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8080)

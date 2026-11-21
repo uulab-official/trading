@@ -3,21 +3,22 @@
 This command never submits orders to a broker and never repairs or overwrites state.
 It independently replays the processed prefix using the existing paper engine.
 """
+
 import argparse
 import asyncio
-from dataclasses import fields
 import hashlib
 import json
+import sys
+from dataclasses import fields
 from decimal import localcontext
 from pathlib import Path
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 for package in ("core", "data", "strategy"):
     sys.path.insert(0, str(ROOT / "packages" / package))
 sys.path.insert(0, str(ROOT / "apps/server"))
 
-from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
+from trading_bot.paper_checkpoint import CheckpointInUseError, locked_checkpoint
 from trading_bot.paper_runner import PaperRunConfig, PaperRunner
 from trading_core.paper_exchange import PAPER_CALCULATION_CONTEXT
 
@@ -43,7 +44,10 @@ def audit(fixture_path: Path, checkpoint_path: Path):
         config = PaperRunConfig(**identity)
         if config.identity() != identity:
             raise ValueError("Checkpoint configuration is not canonical")
-        if fixture.get("symbol", "BTC/USDT") != config.symbol or fixture.get("timeframe", "1h") != config.timeframe:
+        if (
+            fixture.get("symbol", "BTC/USDT") != config.symbol
+            or fixture.get("timeframe", "1h") != config.timeframe
+        ):
             raise ValueError("Fixture symbol/timeframe differs from checkpoint")
         cursor = state.get("next_index")
         if type(cursor) is not int or cursor < 1 or cursor > len(candles):

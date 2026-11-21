@@ -3,14 +3,15 @@
 No server, JavaScript, CDN, account credentials or order execution.
 The database is inspected read-only before generating any view.
 """
+
 import argparse
-from decimal import Decimal, Context, localcontext
-import sqlite3
 import html
 import json
 import os
-from pathlib import Path
+import sqlite3
 import sys
+from decimal import Context, Decimal, localcontext
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -21,11 +22,17 @@ def _escape(value):
     return html.escape(str(value), quote=True)
 
 
-def generate(fixture, database, *, initial_cash, fee_pct="0.1",
-             fast=5, slow=20, allocation_pct="20"):
+def generate(
+    fixture, database, *, initial_cash, fee_pct="0.1", fast=5, slow=20, allocation_pct="20"
+):
     audit = audit_forward(
-        fixture, database, initial_cash=initial_cash,
-        fee_pct=fee_pct, fast=fast, slow=slow, allocation_pct=allocation_pct,
+        fixture,
+        database,
+        initial_cash=initial_cash,
+        fee_pct=fee_pct,
+        fast=fast,
+        slow=slow,
+        allocation_pct=allocation_pct,
     )
     with localcontext(Context(prec=28)):
         closes = [Decimal(str(row[4])) for row in fixture["candles"]]
@@ -44,8 +51,14 @@ def generate(fixture, database, *, initial_cash, fee_pct="0.1",
         ("모드", "PAPER ONLY"),
         ("종목", audit["symbol"]),
         ("통화", audit["quote_currency"]),
-        ("데이터", "합성 데이터 · 실제 시세 아님" if fixture.get("provider") == "synthetic_fixture"
-         else "공급된 분봉 데이터"),
+        (
+            "데이터",
+            (
+                "합성 데이터 · 실제 시세 아님"
+                if fixture.get("provider") == "synthetic_fixture"
+                else "공급된 분봉 데이터"
+            ),
+        ),
         ("입력 분봉", audit["bars"]),
         ("가상 체결", audit["simulated_fills"]),
         ("현금", audit["cash"]),
@@ -55,8 +68,11 @@ def generate(fixture, database, *, initial_cash, fee_pct="0.1",
         ("시세 SHA-256", audit["history_sha256"]),
     ]
     items = "".join(
-        '<div class="metric"><small>' + _escape(label) + '</small><strong>'
-        + _escape(value) + '</strong></div>'
+        '<div class="metric"><small>'
+        + _escape(label)
+        + "</small><strong>"
+        + _escape(value)
+        + "</strong></div>"
         for label, value in cards
     )
     # No script, linked images, forms, websocket or external resources.
@@ -115,21 +131,27 @@ def main(argv=None):
         if len(contents) > 10_000_000:
             raise ValueError("Fixture too large")
         page = generate(
-            json.loads(contents), args.database,
-            initial_cash=args.initial_cash, fee_pct=args.fee_pct,
-            fast=args.fast, slow=args.slow, allocation_pct=args.allocation_pct,
+            json.loads(contents),
+            args.database,
+            initial_cash=args.initial_cash,
+            fee_pct=args.fee_pct,
+            fast=args.fast,
+            slow=args.slow,
+            allocation_pct=args.allocation_pct,
         )
         dest = args.output.resolve()
         dest.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                     getattr(os, "O_NOFOLLOW", 0), 0o600)
+        fd = os.open(
+            dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+        )
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(page)
             stream.flush()
             os.fsync(stream.fileno())
     except (ValueError, OSError, TypeError, KeyError, ArithmeticError, sqlite3.Error):
-        print("Paper stock HTML report refused invalid data; ledger was not changed.",
-              file=sys.stderr)
+        print(
+            "Paper stock HTML report refused invalid data; ledger was not changed.", file=sys.stderr
+        )
         return 2
     print(str(dest))
     return 0

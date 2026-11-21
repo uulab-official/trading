@@ -1,7 +1,7 @@
 """Stateless Decimal indicators for supplied offline price histories.
 
-    Every calculation uses a fixed 28-digit, half-even Decimal context. No
-    network, clock, environment, exchange, or global mutable indicator state.
+Every calculation uses a fixed 28-digit, half-even Decimal context. No
+network, clock, environment, exchange, or global mutable indicator state.
 """
 
 from collections.abc import Mapping, Set
@@ -41,7 +41,7 @@ class SMA(_PeriodIndicator):
     def calculate(self, prices: Iterable[Decimal]) -> Decimal:
         values = self._history(prices)
         with localcontext(CALCULATION_CONTEXT):
-            return sum(values[-self.period:], Decimal("0")) / Decimal(self.period)
+            return sum(values[-self.period :], Decimal("0")) / Decimal(self.period)
 
 
 class EMA(_PeriodIndicator):
@@ -50,9 +50,9 @@ class EMA(_PeriodIndicator):
     def calculate(self, prices: Iterable[Decimal]) -> Decimal:
         values = self._history(prices)
         with localcontext(CALCULATION_CONTEXT):
-            value = sum(values[:self.period], Decimal("0")) / Decimal(self.period)
+            value = sum(values[: self.period], Decimal("0")) / Decimal(self.period)
             alpha = Decimal("2") / Decimal(self.period + 1)
-            for price in values[self.period:]:
+            for price in values[self.period :]:
                 value = alpha * price + (Decimal("1") - alpha) * value
             return value
 
@@ -61,7 +61,9 @@ class RSI(_PeriodIndicator):
     """Wilder RSI: period deltas require period + 1 prices; flat RSI is 50."""
 
     def __init__(
-        self, period: int, oversold: Decimal = Decimal("30"),
+        self,
+        period: int,
+        oversold: Decimal = Decimal("30"),
         overbought: Decimal = Decimal("70"),
     ) -> None:
         super().__init__(period)
@@ -77,9 +79,9 @@ class RSI(_PeriodIndicator):
             gains = [max(change, Decimal("0")) for change in changes]
             losses = [max(-change, Decimal("0")) for change in changes]
             divisor = Decimal(self.period)
-            average_gain = sum(gains[:self.period], Decimal("0")) / divisor
-            average_loss = sum(losses[:self.period], Decimal("0")) / divisor
-            for gain, loss in zip(gains[self.period:], losses[self.period:]):
+            average_gain = sum(gains[: self.period], Decimal("0")) / divisor
+            average_loss = sum(losses[: self.period], Decimal("0")) / divisor
+            for gain, loss in zip(gains[self.period :], losses[self.period :]):
                 average_gain = (average_gain * (self.period - 1) + gain) / divisor
                 average_loss = (average_loss * (self.period - 1) + loss) / divisor
             if average_gain == 0 and average_loss == 0:
@@ -93,9 +95,16 @@ class ATR(_PeriodIndicator):
     """Wilder ATR, with first-bar true range equal to high minus low."""
 
     def calculate(
-        self, highs: Iterable[Decimal], lows: Iterable[Decimal], closes: Iterable[Decimal],
+        self,
+        highs: Iterable[Decimal],
+        lows: Iterable[Decimal],
+        closes: Iterable[Decimal],
     ) -> Decimal:
-        highs, lows, closes = _prices(highs, "highs"), _prices(lows, "lows"), _prices(closes, "closes")
+        highs, lows, closes = (
+            _prices(highs, "highs"),
+            _prices(lows, "lows"),
+            _prices(closes, "closes"),
+        )
         if not len(highs) == len(lows) == len(closes):
             raise ValueError("highs, lows, and closes must have equal lengths")
         if len(highs) < self.period:
@@ -106,12 +115,15 @@ class ATR(_PeriodIndicator):
         with localcontext(CALCULATION_CONTEXT):
             ranges = [highs[0] - lows[0]]
             for index in range(1, len(highs)):
-                ranges.append(max(
-                    highs[index] - lows[index], abs(highs[index] - closes[index - 1]),
-                    abs(lows[index] - closes[index - 1]),
-                ))
+                ranges.append(
+                    max(
+                        highs[index] - lows[index],
+                        abs(highs[index] - closes[index - 1]),
+                        abs(lows[index] - closes[index - 1]),
+                    )
+                )
             divisor = Decimal(self.period)
-            value = sum(ranges[:self.period], Decimal("0")) / divisor
-            for true_range in ranges[self.period:]:
+            value = sum(ranges[: self.period], Decimal("0")) / divisor
+            for true_range in ranges[self.period :]:
                 value = (value * (self.period - 1) + true_range) / divisor
             return value

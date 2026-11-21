@@ -7,7 +7,6 @@ neither authenticated broker evidence nor evidence of an executed fill.
 
 import re
 
-
 VTS_BASE = "https://openapivts.koreainvestment.com:29443"
 ORDER_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
 
@@ -29,8 +28,15 @@ def _positive_krw_integer(value, *, max_digits, label):
 
 
 def build_order_plan(
-    *, client_order_id, symbol, side, quantity, limit_price, max_notional,
-    market="KRX", currency="KRW",
+    *,
+    client_order_id,
+    symbol,
+    side,
+    quantity,
+    limit_price,
+    max_notional,
+    market="KRX",
+    currency="KRW",
 ):
     """Prepare an unsigned request template without consulting external state.
 
@@ -55,10 +61,14 @@ def build_order_plan(
     if type(quantity) is not int or not 1 <= quantity <= MAX_QUANTITY:
         raise ValueError("Quantity must be a bounded positive integer share count")
     price_value = _positive_krw_integer(
-        limit_price, max_digits=MAX_PRICE_DIGITS, label="Limit price",
+        limit_price,
+        max_digits=MAX_PRICE_DIGITS,
+        label="Limit price",
     )
     budget_value = _positive_krw_integer(
-        max_notional, max_digits=MAX_NOTIONAL_DIGITS, label="Maximum notional",
+        max_notional,
+        max_digits=MAX_NOTIONAL_DIGITS,
+        label="Maximum notional",
     )
     notional = quantity * price_value
     if notional > budget_value:
@@ -72,9 +82,14 @@ def build_order_plan(
         "client_order_id": client_order_id,
         "client_order_id_scope": "local_correlation_only",
         "order": {
-            "symbol": symbol, "side": side, "quantity": quantity,
-            "limit_price": limit_price, "max_notional": max_notional,
-            "notional": str(notional), "market": market, "currency": currency,
+            "symbol": symbol,
+            "side": side,
+            "quantity": quantity,
+            "limit_price": limit_price,
+            "max_notional": max_notional,
+            "notional": str(notional),
+            "market": market,
+            "currency": currency,
         },
         "request_template": {
             "method": "POST",
@@ -126,11 +141,7 @@ def _valid_acknowledgment(output):
         return False
     if not _bounded_digits(order_time, 6) or len(order_time) != 6:
         return False
-    return (
-        int(order_time[:2]) < 24
-        and int(order_time[2:4]) < 60
-        and int(order_time[4:]) < 60
-    )
+    return int(order_time[:2]) < 24 and int(order_time[2:4]) < 60 and int(order_time[4:]) < 60
 
 
 def classify_order_response(payload, *, http_status):

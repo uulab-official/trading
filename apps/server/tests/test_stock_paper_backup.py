@@ -1,16 +1,17 @@
 """Stock paper WAL backup and restore-verification regression tests."""
+
 import json
-from contextlib import closing
-from pathlib import Path
 import sqlite3
 import sys
 import tempfile
 import unittest
+from contextlib import closing
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
+from tools.stock_paper_backup import create_backup, main, verify_backup
 from tools.stock_paper_forward import replay_forward
-from tools.stock_paper_backup import create_backup, verify_backup, main
 
 START = 1774417800000 - (1774417800000 % 60000)
 
@@ -18,12 +19,15 @@ START = 1774417800000 - (1774417800000 % 60000)
 def fixture():
     values = (10, 9, 8, 20, 21)
     return {
-        "mode": "paper", "interval": "1m", "no_live_orders": True,
+        "mode": "paper",
+        "interval": "1m",
+        "no_live_orders": True,
         "timestamp_semantics": "source_close_to_utc_open",
-        "symbol": "005930", "quote_currency": "KRW",
+        "symbol": "005930",
+        "quote_currency": "KRW",
         "candles": [
-            [START + i * 60000, str(value), str(value), str(value),
-             str(value), "100"] for i, value in enumerate(values)
+            [START + i * 60000, str(value), str(value), str(value), str(value), "100"]
+            for i, value in enumerate(values)
         ],
     }
 
@@ -38,8 +42,7 @@ class StockPaperBackupTests(unittest.TestCase):
         self.destination = self.root / "stock-backup-001"
         self.fixture = fixture()
         self.source.write_text(json.dumps(self.fixture))
-        self.settings = dict(initial_cash="1000", fee_pct="0",
-                             fast=2, slow=3, allocation_pct="50")
+        self.settings = dict(initial_cash="1000", fee_pct="0", fast=2, slow=3, allocation_pct="50")
         replay_forward(self.fixture, self.db, **self.settings)
 
     def test_consistent_deep_backup_and_no_original_modification(self):
@@ -48,13 +51,17 @@ class StockPaperBackupTests(unittest.TestCase):
         self.assertEqual("paper", report["mode"])
         self.assertFalse(report["live_orders_enabled"])
         self.assertEqual(before_fixture, self.source.read_bytes())
-        self.assertEqual({"candles.json", "stock.sqlite", "manifest.json"},
-                         {file.name for file in self.destination.iterdir()})
+        self.assertEqual(
+            {"candles.json", "stock.sqlite", "manifest.json"},
+            {file.name for file in self.destination.iterdir()},
+        )
         check = verify_backup(self.destination)
         self.assertEqual("stock_paper_backup_deep_verified", check["status"])
         self.assertTrue(check["economic_replay_verified"])
-        self.assertEqual({"candles.json", "stock.sqlite", "manifest.json"},
-                         {file.name for file in self.destination.iterdir()})
+        self.assertEqual(
+            {"candles.json", "stock.sqlite", "manifest.json"},
+            {file.name for file in self.destination.iterdir()},
+        )
 
     def test_existing_backup_cannot_be_replaced(self):
         create_backup(self.source, self.db, self.destination, **self.settings)
@@ -74,6 +81,7 @@ class StockPaperBackupTests(unittest.TestCase):
 
     def test_deep_audit_rejects_recomputed_hash_after_fake_execution(self):
         import hashlib
+
         create_backup(self.source, self.db, self.destination, **self.settings)
         dbfile = self.destination / "stock.sqlite"
         with sqlite3.connect(dbfile) as db:
@@ -82,13 +90,16 @@ class StockPaperBackupTests(unittest.TestCase):
         manifest = json.loads(manifest_file.read_text())
         manifest["database_sha256"] = hashlib.sha256(dbfile.read_bytes()).hexdigest()
         manifest_file.write_text(json.dumps(manifest))
-        self.assertEqual("stock_paper_backup_bytes_verified",
-                         verify_backup(self.destination, deep=False)["status"])
+        self.assertEqual(
+            "stock_paper_backup_bytes_verified",
+            verify_backup(self.destination, deep=False)["status"],
+        )
         with self.assertRaises(ValueError):
             verify_backup(self.destination, deep=True)
 
     def test_backup_verification_rejects_unmanifested_wal_changes(self):
         import hashlib
+
         create_backup(self.source, self.db, self.destination, **self.settings)
         dbfile = self.destination / "stock.sqlite"
         manifest_file = self.destination / "manifest.json"

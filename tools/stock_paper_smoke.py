@@ -3,21 +3,22 @@
 Uses explicitly SYNTHETIC fixtures bundled in the repository, NO API
 keys or network requests. Optional output retains private local evidence.
 """
+
 import argparse
-from contextlib import closing
-import os
-from pathlib import Path
-import sqlite3
-from tempfile import TemporaryDirectory
 import json
+import os
+import sqlite3
 import sys
+from contextlib import closing
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 for path in ("core", "data"):
     sys.path.insert(0, str(ROOT / "packages" / path))
-from tools.stock_paper_forward import replay_forward, audit_forward
 from tools.stock_paper_backup import create_backup, verify_backup
+from tools.stock_paper_forward import audit_forward, replay_forward
 from tools.stock_paper_report_html import generate
 
 
@@ -32,8 +33,9 @@ def _json(value):
 
 def _write_private(path, text):
     path = Path(path)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                         getattr(os, "O_NOFOLLOW", 0), 0o600)
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+    )
     identity = None
     try:
         identity = os.fstat(descriptor)
@@ -70,11 +72,16 @@ def _exercise(root, fixture, opts, retained):
     saved = create_backup(fixture_path, db, backup_path, **opts)
     copy_audit = verify_backup(backup_path, deep=True)
     page = generate(fixture, db, **opts)
-    if ("PAPER ONLY" not in page or "<script" in page.lower()
-            or copy_audit["economic_replay_verified"] is not True):
+    if (
+        "PAPER ONLY" not in page
+        or "<script" in page.lower()
+        or copy_audit["economic_replay_verified"] is not True
+    ):
         raise ValueError("Static paper dashboard or backup audit failed")
-    if (first["total_simulated_fills"] != verified["simulated_fills"]
-            or saved["simulated_fills"] != verified["simulated_fills"]):
+    if (
+        first["total_simulated_fills"] != verified["simulated_fills"]
+        or saved["simulated_fills"] != verified["simulated_fills"]
+    ):
         raise ValueError("Stock paper flow reported inconsistent fill counts")
     # Publish a standalone closed database, without transient WAL sidecars.
     # replay_forward re-enables its usual WAL mode if resumed later.
@@ -108,17 +115,29 @@ def run_smoke(output_dir=None, *, currency="KRW"):
     if type(currency) is not str or currency not in ("KRW", "USD"):
         raise ValueError("Synthetic stock smoke currency must be KRW or USD")
     if currency == "KRW":
-        name, source, symbol = ("synthetic_toss_stock_paper_1m.json",
-                                "bundled_demo_not_real_toss_prices", "005930")
+        name, source, symbol = (
+            "synthetic_toss_stock_paper_1m.json",
+            "bundled_demo_not_real_toss_prices",
+            "005930",
+        )
     else:
-        name, source, symbol = ("synthetic_us_stock_paper_1m.json",
-                                "bundled_demo_not_real_us_prices", "DEMO")
+        name, source, symbol = (
+            "synthetic_us_stock_paper_1m.json",
+            "bundled_demo_not_real_us_prices",
+            "DEMO",
+        )
     fixture = json.loads((ROOT / "config/examples" / name).read_text(encoding="utf-8"))
-    if (type(fixture) is not dict or fixture.get("provider") != "synthetic_fixture"
-            or fixture.get("source") != source or fixture.get("mode") != "paper"
-            or fixture.get("no_live_orders") is not True
-            or fixture.get("quote_currency") != currency or fixture.get("symbol") != symbol
-            or type(fixture.get("candles")) is not list or len(fixture["candles"]) != 55):
+    if (
+        type(fixture) is not dict
+        or fixture.get("provider") != "synthetic_fixture"
+        or fixture.get("source") != source
+        or fixture.get("mode") != "paper"
+        or fixture.get("no_live_orders") is not True
+        or fixture.get("quote_currency") != currency
+        or fixture.get("symbol") != symbol
+        or type(fixture.get("candles")) is not list
+        or len(fixture["candles"]) != 55
+    ):
         raise ValueError("Refusing non-synthetic stock demonstration input")
     opts = {
         "initial_cash": "1000000" if currency == "KRW" else "10000",
@@ -139,16 +158,25 @@ def run_smoke(output_dir=None, *, currency="KRW"):
 
 def main(argv=None):
     parser = SafeArgumentParser(description=__doc__, allow_abbrev=False)
-    parser.add_argument("--output-dir", type=Path,
-                        help="Optional new private directory in an existing trusted parent")
-    parser.add_argument("--currency", choices=("KRW", "USD"), default="KRW",
-                        help="Independent synthetic stock portfolio denomination")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Optional new private directory in an existing trusted parent",
+    )
+    parser.add_argument(
+        "--currency",
+        choices=("KRW", "USD"),
+        default="KRW",
+        help="Independent synthetic stock portfolio denomination",
+    )
     try:
         args = parser.parse_args(argv)
         result = run_smoke(args.output_dir, currency=args.currency)
     except Exception:
-        print("Synthetic paper smoke failed; no real orders attempted. Retained evidence may be incomplete.",
-              file=sys.stderr)
+        print(
+            "Synthetic paper smoke failed; no real orders attempted. Retained evidence may be incomplete.",
+            file=sys.stderr,
+        )
         return 2
     print(json.dumps(result, sort_keys=True, allow_nan=False))
     return 0

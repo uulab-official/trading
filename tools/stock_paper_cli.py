@@ -1,10 +1,11 @@
 """Explicit operator-only STOCK PAPER command. No network or brokerage orders."""
+
 import argparse
-from decimal import Decimal
 import json
-from pathlib import Path
 import sqlite3
 import sys
+from decimal import Decimal
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages/core"))
@@ -26,18 +27,20 @@ def main(argv=None):
     trade.add_argument("--shares", required=True, type=int)
     trade.add_argument("--price", required=True, type=Decimal)
     report = operation.add_parser("report")
-    report.add_argument("--mark", action="append", default=[],
-                        help="Required SYMBOL=PRICE for each nonzero holding")
+    report.add_argument(
+        "--mark", action="append", default=[], help="Required SYMBOL=PRICE for each nonzero holding"
+    )
     args = parser.parse_args(argv)
     try:
         ledger = StockPaperLedger(
-            args.database, quote_currency=args.currency,
-            initial_cash=args.initial_cash, fee_pct=args.fee_pct
+            args.database,
+            quote_currency=args.currency,
+            initial_cash=args.initial_cash,
+            fee_pct=args.fee_pct,
         )
         if args.operation == "trade":
             outcome = ledger.execute(
-                args.client_id, args.symbol, args.side,
-                args.shares, price=args.price
+                args.client_id, args.symbol, args.side, args.shares, price=args.price
             )
         else:
             marks = {}

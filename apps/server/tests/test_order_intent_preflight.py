@@ -1,18 +1,20 @@
 """Read-only CLI tests: no account, API, or live orders."""
-from contextlib import redirect_stdout, redirect_stderr
-from io import StringIO
+
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/core"))
 
-from tools.order_intent_preflight import main
 from trading_core.order_intent_journal import OrderIntentJournal
+
+from tools.order_intent_preflight import main
 
 
 class IntentPreflightCliTests(unittest.TestCase):

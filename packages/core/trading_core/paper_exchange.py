@@ -4,8 +4,8 @@ This deliberately has no credential fields, sockets, HTTP client, or fallback to
 an exchange. Friction is explicitly configurable; it cannot establish profitability.
 """
 
-from decimal import Decimal, Context, ROUND_HALF_EVEN, localcontext
 from copy import deepcopy
+from decimal import ROUND_HALF_EVEN, Context, Decimal, localcontext
 from typing import Any, Dict, List, Mapping, Optional
 
 from trading_core.exchange import Balance, ExchangeInterface, Market, Ticker
@@ -16,13 +16,22 @@ PAPER_CALCULATION_CONTEXT = Context(prec=28, rounding=ROUND_HALF_EVEN)
 def _decimal(value: Any, *, positive: bool = True) -> Decimal:
     number = Decimal(str(value))
     if not number.is_finite() or (number <= 0 if positive else number < 0):
-        raise ValueError("Value must be finite and positive" if positive else "Value must be finite and non-negative")
+        raise ValueError(
+            "Value must be finite and positive"
+            if positive
+            else "Value must be finite and non-negative"
+        )
     return number
 
 
 def _assets(symbol: str):
     parts = symbol.split("/")
-    if len(parts) != 2 or not all(parts) or any(":" in part or part != part.strip() for part in parts) or parts[0] == parts[1]:
+    if (
+        len(parts) != 2
+        or not all(parts)
+        or any(":" in part or part != part.strip() for part in parts)
+        or parts[0] == parts[1]
+    ):
         raise ValueError("Paper supports spot symbols in BASE/QUOTE format")
     return parts[0], parts[1]
 
@@ -38,7 +47,15 @@ def _serialize(value):
 
 
 class PaperExchange(ExchangeInterface):
-    def __init__(self, initial_balance: Decimal = Decimal("10000"), initial_positions: Optional[Mapping[str, Decimal]] = None, *, fee_pct: Decimal = Decimal("0"), slippage_pct: Decimal = Decimal("0"), quote_currency: str = "USDT"):
+    def __init__(
+        self,
+        initial_balance: Decimal = Decimal("10000"),
+        initial_positions: Optional[Mapping[str, Decimal]] = None,
+        *,
+        fee_pct: Decimal = Decimal("0"),
+        slippage_pct: Decimal = Decimal("0"),
+        quote_currency: str = "USDT",
+    ):
         if not isinstance(quote_currency, str) or quote_currency not in ("USDT", "KRW"):
             raise ValueError("Offline paper quote currency must be USDT or KRW")
         self._quote_currency = quote_currency
@@ -91,7 +108,9 @@ class PaperExchange(ExchangeInterface):
         copied = [list(candle) for candle in candles]
         for candle in copied:
             if len(candle) != 6:
-                raise ValueError("Each fixture candle must contain timestamp, open, high, low, close, volume")
+                raise ValueError(
+                    "Each fixture candle must contain timestamp, open, high, low, close, volume"
+                )
             for value in candle[1:5]:
                 _decimal(value)
             _decimal(candle[5], positive=False)
@@ -101,7 +120,10 @@ class PaperExchange(ExchangeInterface):
 
     async def fetch_balance(self) -> Dict[str, Balance]:
         self._ensure_connected()
-        return {asset: Balance(asset, amount, Decimal("0"), amount) for asset, amount in self._balances.items()}
+        return {
+            asset: Balance(asset, amount, Decimal("0"), amount)
+            for asset, amount in self._balances.items()
+        }
 
     async def fetch_ticker(self, symbol: str) -> Ticker:
         self._ensure_connected()
@@ -112,15 +134,28 @@ class PaperExchange(ExchangeInterface):
 
     async def fetch_markets(self) -> List[Market]:
         self._ensure_connected()
-        return [Market(symbol, *_assets(symbol), Decimal("0"), Decimal("0"), 8, True) for symbol in self._tickers]
+        return [
+            Market(symbol, *_assets(symbol), Decimal("0"), Decimal("0"), 8, True)
+            for symbol in self._tickers
+        ]
 
-    async def fetch_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 100) -> List[List[Any]]:
+    async def fetch_ohlcv(
+        self, symbol: str, timeframe: str = "1h", limit: int = 100
+    ) -> List[List[Any]]:
         self._ensure_connected()
         if not isinstance(limit, int) or limit <= 0:
             raise ValueError("Candle limit must be a positive integer")
         return [list(candle) for candle in self._candles.get((symbol, timeframe), [])[-limit:]]
 
-    async def create_order(self, symbol: str, order_type: str, side: str, amount: Decimal, price: Optional[Decimal] = None, params: Optional[Dict] = None) -> Dict[str, Any]:
+    async def create_order(
+        self,
+        symbol: str,
+        order_type: str,
+        side: str,
+        amount: Decimal,
+        price: Optional[Decimal] = None,
+        params: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
         self._ensure_connected()
         base, quote = self._market_assets(symbol)
         amount = _decimal(amount)
@@ -157,10 +192,21 @@ class PaperExchange(ExchangeInterface):
                 self._balances[quote] = self._balances.get(quote, Decimal("0")) + cost - fee
             self.total_fees += fee
         self._next_order_id = next_id
-        order = {"id": f"paper-{key}", "clientOrderId": key, "symbol": symbol, "type": order_type, "side": side,
-                 "amount": amount, "filled": amount, "remaining": Decimal("0"), "average": fill_price,
-                 "price": fill_price, "status": "closed", "timestamp": ticker.timestamp,
-                 "fee": {"cost": fee, "currency": quote}}
+        order = {
+            "id": f"paper-{key}",
+            "clientOrderId": key,
+            "symbol": symbol,
+            "type": order_type,
+            "side": side,
+            "amount": amount,
+            "filled": amount,
+            "remaining": Decimal("0"),
+            "average": fill_price,
+            "price": fill_price,
+            "status": "closed",
+            "timestamp": ticker.timestamp,
+            "fee": {"cost": fee, "currency": quote},
+        }
         self._requests[key] = request
         self._orders[key] = order
         self._trades.append(deepcopy(order))
@@ -181,9 +227,16 @@ class PaperExchange(ExchangeInterface):
         self._ensure_connected()
         return []
 
-    async def fetch_my_trades(self, symbol: Optional[str] = None, since: Optional[int] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    async def fetch_my_trades(
+        self, symbol: Optional[str] = None, since: Optional[int] = None, limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         self._ensure_connected()
-        trades = [deepcopy(trade) for trade in self._trades if (symbol is None or trade["symbol"] == symbol) and (since is None or trade["timestamp"] >= since)]
+        trades = [
+            deepcopy(trade)
+            for trade in self._trades
+            if (symbol is None or trade["symbol"] == symbol)
+            and (since is None or trade["timestamp"] >= since)
+        ]
         return trades[-limit:] if limit is not None and limit > 0 else trades
 
     def get_total_value(self) -> Decimal:
@@ -201,11 +254,16 @@ class PaperExchange(ExchangeInterface):
     def snapshot(self) -> Dict[str, Any]:
         """Plain JSON-compatible paper state; never credentials or executable objects."""
         state = {
-            "version": 1 if self.quote_currency == "USDT" else 2, "mode": "paper", "fee_pct": self.fee_pct,
-            "slippage_pct": self.slippage_pct, "total_fees": self.total_fees,
+            "version": 1 if self.quote_currency == "USDT" else 2,
+            "mode": "paper",
+            "fee_pct": self.fee_pct,
+            "slippage_pct": self.slippage_pct,
+            "total_fees": self.total_fees,
             "balances": self._balances,
             "tickers": {symbol: vars(ticker) for symbol, ticker in self._tickers.items()},
-            "orders": self._orders, "requests": self._requests, "trades": self._trades,
+            "orders": self._orders,
+            "requests": self._requests,
+            "trades": self._trades,
             "next_order_id": self._next_order_id,
         }
         # Keep the existing USDT schema byte-compatible; new KRW books state
@@ -225,11 +283,20 @@ class PaperExchange(ExchangeInterface):
             quote_currency = "KRW"
         else:
             raise ValueError("Paper snapshot version and quote currency do not match")
-        exchange = cls(initial_balance=Decimal("0"), fee_pct=state["fee_pct"], slippage_pct=state["slippage_pct"], quote_currency=quote_currency)
+        exchange = cls(
+            initial_balance=Decimal("0"),
+            fee_pct=state["fee_pct"],
+            slippage_pct=state["slippage_pct"],
+            quote_currency=quote_currency,
+        )
         balances = state["balances"]
-        if quote_currency not in balances or any(not isinstance(asset, str) or not asset or "/" in asset for asset in balances):
+        if quote_currency not in balances or any(
+            not isinstance(asset, str) or not asset or "/" in asset for asset in balances
+        ):
             raise ValueError("Invalid paper balances")
-        exchange._balances = {asset: _decimal(amount, positive=False) for asset, amount in balances.items()}
+        exchange._balances = {
+            asset: _decimal(amount, positive=False) for asset, amount in balances.items()
+        }
         for symbol, ticker in state["tickers"].items():
             exchange.set_price(symbol, _decimal(ticker["last"]), timestamp=int(ticker["timestamp"]))
         exchange.total_fees = _decimal(state["total_fees"], positive=False)
@@ -240,25 +307,65 @@ class PaperExchange(ExchangeInterface):
         for key, raw in state["orders"].items():
             order = deepcopy(raw)
             _, quote = exchange._market_assets(order["symbol"])
-            expected_fields = {"id", "clientOrderId", "symbol", "type", "side", "amount", "filled", "remaining", "average", "price", "status", "timestamp", "fee"}
-            if set(order) != expected_fields or not isinstance(key, str) or not key or order["clientOrderId"] != key or order["id"] != f"paper-{key}" or order["type"] != "market" or order["status"] != "closed" or order["side"] not in ("buy", "sell"):
+            expected_fields = {
+                "id",
+                "clientOrderId",
+                "symbol",
+                "type",
+                "side",
+                "amount",
+                "filled",
+                "remaining",
+                "average",
+                "price",
+                "status",
+                "timestamp",
+                "fee",
+            }
+            if (
+                set(order) != expected_fields
+                or not isinstance(key, str)
+                or not key
+                or order["clientOrderId"] != key
+                or order["id"] != f"paper-{key}"
+                or order["type"] != "market"
+                or order["status"] != "closed"
+                or order["side"] not in ("buy", "sell")
+            ):
                 raise ValueError("Invalid paper order snapshot")
-            if type(order["timestamp"]) is not int or order["timestamp"] < 0 or order["fee"]["currency"] != quote:
+            if (
+                type(order["timestamp"]) is not int
+                or order["timestamp"] < 0
+                or order["fee"]["currency"] != quote
+            ):
                 raise ValueError("Invalid paper order timestamp or fee currency")
             for name in ("amount", "filled", "average", "price"):
                 order[name] = _decimal(order[name])
             order["remaining"] = _decimal(order["remaining"], positive=False)
             order["fee"]["cost"] = _decimal(order["fee"]["cost"], positive=False)
-            if order["filled"] != order["amount"] or order["remaining"] != 0 or order["price"] != order["average"]:
+            if (
+                order["filled"] != order["amount"]
+                or order["remaining"] != 0
+                or order["price"] != order["average"]
+            ):
                 raise ValueError("Offline market snapshot must contain complete fills")
             with localcontext(PAPER_CALCULATION_CONTEXT):
-                if order["fee"]["cost"] != order["amount"] * order["average"] * exchange.fee_pct / 100:
+                if (
+                    order["fee"]["cost"]
+                    != order["amount"] * order["average"] * exchange.fee_pct / 100
+                ):
                     raise ValueError("Paper order fee does not match its fill")
             exchange._orders[key] = order
         for key, raw in state["requests"].items():
             if key not in exchange._orders or len(raw) != 5:
                 raise ValueError("Invalid paper deduplication snapshot")
-            request = (raw[0], raw[1], raw[2], _decimal(raw[3]), _decimal(raw[4]) if raw[4] is not None else None)
+            request = (
+                raw[0],
+                raw[1],
+                raw[2],
+                _decimal(raw[3]),
+                _decimal(raw[4]) if raw[4] is not None else None,
+            )
             order = exchange._orders[key]
             if request[:4] != (order["symbol"], order["type"], order["side"], order["amount"]):
                 raise ValueError("Paper request does not match its filled order")
@@ -277,6 +384,8 @@ class PaperExchange(ExchangeInterface):
         exchange._orders = {order["clientOrderId"]: order for order in ordered}
         exchange._trades = deepcopy(ordered)
         with localcontext(PAPER_CALCULATION_CONTEXT):
-            if exchange.total_fees != sum((order["fee"]["cost"] for order in ordered), Decimal("0")):
+            if exchange.total_fees != sum(
+                (order["fee"]["cost"] for order in ordered), Decimal("0")
+            ):
                 raise ValueError("Paper fee totals do not match filled orders")
         return exchange

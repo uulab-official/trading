@@ -3,9 +3,9 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 # This pure module needs only the standard library. Avoid importing the core
@@ -30,7 +30,9 @@ def _share_count(value):
 def _write_new_plan(target, serialized):
     # Do not resolve the leaf: O_EXCL must reject even a dangling output symlink.
     descriptor = os.open(
-        target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600,
+        target,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
     )
     identity = os.fstat(descriptor)
     try:
@@ -60,13 +62,18 @@ def main(argv=None):
     parser.add_argument("--quantity", required=True, type=_share_count)
     parser.add_argument("--limit-price", required=True)
     parser.add_argument("--max-notional", required=True)
-    parser.add_argument("--output", required=True, type=Path,
-                        help="New JSON file in an existing directory")
+    parser.add_argument(
+        "--output", required=True, type=Path, help="New JSON file in an existing directory"
+    )
     try:
         args = parser.parse_args(argv)
         result = build_order_plan(
-            client_order_id=args.client_order_id, symbol=args.symbol, side=args.side,
-            quantity=args.quantity, limit_price=args.limit_price, max_notional=args.max_notional,
+            client_order_id=args.client_order_id,
+            symbol=args.symbol,
+            side=args.side,
+            quantity=args.quantity,
+            limit_price=args.limit_price,
+            max_notional=args.max_notional,
         )
         serialized = json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n"
         _write_new_plan(args.output, serialized)

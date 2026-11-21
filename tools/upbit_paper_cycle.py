@@ -3,34 +3,52 @@
 Designed for an operator-owned local scheduler; there are no private API calls,
 no live orders, and no unattended auto-promotion to a real-money mode.
 """
+
 import argparse
 import asyncio
-from decimal import Decimal, DecimalException
 import json
-from pathlib import Path
 import sys
+from decimal import Decimal, DecimalException
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-for source in (ROOT, ROOT / "packages/core", ROOT / "packages/data",
-               ROOT / "packages/strategy", ROOT / "apps/server"):
+for source in (
+    ROOT,
+    ROOT / "packages/core",
+    ROOT / "packages/data",
+    ROOT / "packages/strategy",
+    ROOT / "apps/server",
+):
     sys.path.insert(0, str(source))
 
-from tools.upbit_paper_archive import capture_once
-from tools.paper_checkpoint_audit import audit
 from trading_bot.paper_checkpoint import CheckpointInUseError, locked_checkpoint
-from trading_bot.paper_runner import PaperRunner, PaperRunConfig
+from trading_bot.paper_runner import PaperRunConfig, PaperRunner
+
+from tools.paper_checkpoint_audit import audit
+from tools.upbit_paper_archive import capture_once
 
 
-def run_cycle(archive, checkpoint, *, market="KRW-BTC", unit=60, count=200,
-              initial_balance=Decimal("1000000"), allow_gaps=False,
-              fetcher=None, now_ms=None):
+def run_cycle(
+    archive,
+    checkpoint,
+    *,
+    market="KRW-BTC",
+    unit=60,
+    count=200,
+    initial_balance=Decimal("1000000"),
+    allow_gaps=False,
+    fetcher=None,
+    now_ms=None,
+):
     if archive.resolve() == checkpoint.resolve():
         raise ValueError("Archive and ledger checkpoint must be different files")
     if not market.startswith("KRW-"):
         raise ValueError("Cycle accepts KRW public quotation markets only")
     # Validate the complete run identity before touching an existing archive.
     config = PaperRunConfig(
-        mode="paper", symbol=market[4:] + "/KRW", timeframe=f"{unit}m",
+        mode="paper",
+        symbol=market[4:] + "/KRW",
+        timeframe=f"{unit}m",
         initial_balance=Decimal(str(initial_balance)),
     )
     # A separate cycle lock encloses capture AND replay, preventing cooperating
@@ -40,22 +58,36 @@ def run_cycle(archive, checkpoint, *, market="KRW-BTC", unit=60, count=200,
         if checkpoint.exists():
             prior = json.loads(checkpoint.read_text(encoding="utf-8"))
             if not isinstance(prior, dict) or prior.get("config") != config.identity():
-                raise ValueError("Stored paper portfolio configuration differs; archive left unchanged")
+                raise ValueError(
+                    "Stored paper portfolio configuration differs; archive left unchanged"
+                )
             # Validate the entire previously recorded paper economy BEFORE
             # any new public snapshot can mutate archived history. A corrupt
             # checkpoint cannot be concealed by fetching new candles.
             checked = audit(archive, checkpoint)
-            if (checked["mode"] != "paper" or checked["symbol"] != config.symbol
-                    or checked["timeframe"] != config.timeframe):
+            if (
+                checked["mode"] != "paper"
+                or checked["symbol"] != config.symbol
+                or checked["timeframe"] != config.timeframe
+            ):
                 raise ValueError("Previous paper portfolio identity mismatch")
-        capture = capture_once(archive, market=market, unit=unit, count=count,
-                               allow_gaps=allow_gaps, fetcher=fetcher, now_ms=now_ms)
+        capture = capture_once(
+            archive,
+            market=market,
+            unit=unit,
+            count=count,
+            allow_gaps=allow_gaps,
+            fetcher=fetcher,
+            now_ms=now_ms,
+        )
         fixture = json.loads(archive.read_text(encoding="utf-8"))
         if fixture.get("mode") != "paper" or fixture.get("symbol") != market[4:] + "/KRW":
             raise ValueError("Paper fixture market identity changed")
         if fixture.get("timeframe") != f"{unit}m":
             raise ValueError("Paper fixture timeframe changed")
-        result = asyncio.run(PaperRunner(config).run(fixture["candles"], checkpoint_path=checkpoint))
+        result = asyncio.run(
+            PaperRunner(config).run(fixture["candles"], checkpoint_path=checkpoint)
+        )
     return {
         "mode": "paper",
         "live_orders_enabled": False,
@@ -83,9 +115,15 @@ def main(argv=None):
     parser.add_argument("--allow-gaps", action="store_true")
     args = parser.parse_args(argv)
     try:
-        result = run_cycle(args.archive, args.checkpoint, market=args.market, unit=args.unit,
-                           count=args.count, initial_balance=args.initial_balance,
-                           allow_gaps=args.allow_gaps)
+        result = run_cycle(
+            args.archive,
+            args.checkpoint,
+            market=args.market,
+            unit=args.unit,
+            count=args.count,
+            initial_balance=args.initial_balance,
+            allow_gaps=args.allow_gaps,
+        )
     except CheckpointInUseError:
         parser.exit(3, "Paper cycle is already active; no concurrent cycle permitted.\n")
     except (ValueError, OSError, KeyError, TypeError, DecimalException):

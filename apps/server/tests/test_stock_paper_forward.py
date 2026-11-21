@@ -1,36 +1,43 @@
 """Fully offline durable stock strategy cursor, append, and tamper tests."""
-from concurrent.futures import ThreadPoolExecutor
-from decimal import Decimal
-from pathlib import Path
+
 import json
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/core"))
-from tools.stock_paper_forward import replay_forward, audit_forward
 from trading_core.stock_paper_ledger import StockPaperLedger
 
+from tools.stock_paper_forward import audit_forward, replay_forward
 
 START = 1774417800000 - (1774417800000 % 60000)
 
 
 def candles(prices):
-    return [[START + i * 60000, str(p), str(p), str(p), str(p), "100"]
-            for i, p in enumerate(prices)]
+    return [
+        [START + i * 60000, str(p), str(p), str(p), str(p), "100"] for i, p in enumerate(prices)
+    ]
 
 
 def fixture(prices):
-    return {"mode": "paper", "interval": "1m", "no_live_orders": True,
-            "timestamp_semantics": "source_close_to_utc_open",
-            "symbol": "005930", "quote_currency": "KRW",
-            "provider": "tossinvest_caller_supplied_json",
-            "source": "operator_supplied_response_not_authenticated",
-            "candles": candles(prices)}
+    return {
+        "mode": "paper",
+        "interval": "1m",
+        "no_live_orders": True,
+        "timestamp_semantics": "source_close_to_utc_open",
+        "symbol": "005930",
+        "quote_currency": "KRW",
+        "provider": "tossinvest_caller_supplied_json",
+        "source": "operator_supplied_response_not_authenticated",
+        "candles": candles(prices),
+    }
 
 
 class DurableStockForwardTests(unittest.TestCase):
@@ -38,8 +45,7 @@ class DurableStockForwardTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.path = Path(tmp.name) / "stocks.sqlite"
-        self.kwargs = dict(initial_cash="1000", fee_pct="0",
-                           allocation_pct="50", fast=2, slow=3)
+        self.kwargs = dict(initial_cash="1000", fee_pct="0", allocation_pct="50", fast=2, slow=3)
         self.prices = [10, 9, 8, 20, 21]
         self.fixture = fixture(self.prices)
 
@@ -65,9 +71,9 @@ class DurableStockForwardTests(unittest.TestCase):
         replay_forward(self.fixture, self.path, **self.kwargs)
         appended = fixture(self.prices + [22, 23, 8, 7])
         with ThreadPoolExecutor(max_workers=2) as pool:
-            reports = list(pool.map(
-                lambda _: replay_forward(appended, self.path, **self.kwargs), range(2)
-            ))
+            reports = list(
+                pool.map(lambda _: replay_forward(appended, self.path, **self.kwargs), range(2))
+            )
         self.assertEqual([0, 1], sorted(row["new_simulated_fills"] for row in reports))
         self.assertEqual([0, 4], sorted(row["appended_bars"] for row in reports))
         audit = audit_forward(appended, self.path, **self.kwargs)
@@ -95,6 +101,7 @@ class DurableStockForwardTests(unittest.TestCase):
 
     def test_equity_mismatch_rolls_back_new_fills_and_cursor_atomically(self):
         from unittest.mock import patch
+
         replay_forward(self.fixture, self.path, **self.kwargs)
         appended = fixture(self.prices + [22, 23, 8, 7])
         with sqlite3.connect(self.path) as db:
@@ -141,9 +148,9 @@ class DurableStockForwardTests(unittest.TestCase):
         recovered = replay_forward(appended, self.path, **self.kwargs)
         self.assertEqual(1, recovered["new_simulated_fills"])
         self.assertEqual(4, recovered["appended_bars"])
-        self.assertEqual(0, replay_forward(
-            appended, self.path, **self.kwargs
-        )["new_simulated_fills"])
+        self.assertEqual(
+            0, replay_forward(appended, self.path, **self.kwargs)["new_simulated_fills"]
+        )
 
     def test_process_exit_after_cursor_update_rolls_back_entire_replay(self):
         replay_forward(self.fixture, self.path, **self.kwargs)
@@ -175,7 +182,10 @@ replay_forward(payload["fixture"], sys.argv[2], **payload["kwargs"])
         process = subprocess.run(
             [sys.executable, "-c", child, str(ROOT), str(self.path)],
             input=json.dumps({"fixture": appended, "kwargs": self.kwargs}),
-            text=True, capture_output=True, timeout=10, cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            cwd=ROOT,
         )
         self.assertEqual(73, process.returncode, process.stderr)
         with sqlite3.connect(self.path) as db:
@@ -183,9 +193,7 @@ replay_forward(payload["fixture"], sys.argv[2], **payload["kwargs"])
         recovered = replay_forward(appended, self.path, **self.kwargs)
         self.assertEqual(1, recovered["new_simulated_fills"])
         self.assertEqual(4, recovered["appended_bars"])
-        self.assertEqual(2, audit_forward(
-            appended, self.path, **self.kwargs
-        )["simulated_fills"])
+        self.assertEqual(2, audit_forward(appended, self.path, **self.kwargs)["simulated_fills"])
 
     def test_historical_candle_mutation_refused_before_new_fills(self):
         replay_forward(self.fixture, self.path, **self.kwargs)
@@ -194,29 +202,26 @@ replay_forward(payload["fixture"], sys.argv[2], **payload["kwargs"])
         edited["candles"][1][2] = "10"
         with self.assertRaises(ValueError):
             replay_forward(edited, self.path, **self.kwargs)
-        self.assertEqual(1, StockPaperLedger(
-            self.path, quote_currency="KRW", initial_cash="1000",
-            fee_pct="0"
-        ).report(marks={"005930": "21"})["simulated_fills"])
+        self.assertEqual(
+            1,
+            StockPaperLedger(
+                self.path, quote_currency="KRW", initial_cash="1000", fee_pct="0"
+            ).report(marks={"005930": "21"})["simulated_fills"],
+        )
 
     def test_manual_order_cannot_contaminate_strategy_ledger(self):
         replay_forward(self.fixture, self.path, **self.kwargs)
-        ledger = StockPaperLedger(
-            self.path, quote_currency="KRW", initial_cash="1000", fee_pct="0"
-        )
+        ledger = StockPaperLedger(self.path, quote_currency="KRW", initial_cash="1000", fee_pct="0")
         with self.assertRaises(ValueError):
             ledger.execute("manual-1", "005930", "sell", 1, price="21")
 
     def test_strategy_parameters_changed_after_restart_refused(self):
         replay_forward(self.fixture, self.path, **self.kwargs)
         with self.assertRaises(ValueError):
-            replay_forward(self.fixture, self.path, **dict(
-                self.kwargs, allocation_pct="25"
-            ))
+            replay_forward(self.fixture, self.path, **dict(self.kwargs, allocation_pct="25"))
 
     def test_cannot_attach_strategy_to_manual_stock_portfolio(self):
-        ledger = StockPaperLedger(self.path, quote_currency="KRW",
-                                  initial_cash="1000", fee_pct="0")
+        ledger = StockPaperLedger(self.path, quote_currency="KRW", initial_cash="1000", fee_pct="0")
         ledger.execute("manual-1", "005930", "buy", 1, price="10")
         with self.assertRaises(ValueError):
             replay_forward(self.fixture, self.path, **self.kwargs)
@@ -249,9 +254,16 @@ replay_forward(payload["fixture"], sys.argv[2], **payload["kwargs"])
         completed = self.prices + [22, 23, 8, 7]
         replay_forward(fixture(completed), self.path, **self.kwargs)
         future_fill = {
-            "mode": "paper", "client_id": "ma-11-buy", "symbol": "005930",
-            "side": "buy", "shares": 16, "price": "21", "gross": "336",
-            "fee": "0", "quote_currency": "KRW", "status": "simulated_fill",
+            "mode": "paper",
+            "client_id": "ma-11-buy",
+            "symbol": "005930",
+            "side": "buy",
+            "shares": 16,
+            "price": "21",
+            "gross": "336",
+            "fee": "0",
+            "quote_currency": "KRW",
+            "status": "simulated_fill",
         }
         with sqlite3.connect(self.path) as db:
             db.execute(
@@ -283,8 +295,7 @@ replay_forward(payload["fixture"], sys.argv[2], **payload["kwargs"])
     def test_distinct_currency_cannot_reuse_one_database(self):
         replay_forward(self.fixture, self.path, **self.kwargs)
         with self.assertRaises(ValueError):
-            StockPaperLedger(self.path, quote_currency="USD",
-                             initial_cash="1000", fee_pct="0")
+            StockPaperLedger(self.path, quote_currency="USD", initial_cash="1000", fee_pct="0")
 
 
 if __name__ == "__main__":

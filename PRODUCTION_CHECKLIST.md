@@ -23,7 +23,9 @@ may automatically enable live order placement.
 - [x] Strict historical OHLCV CSV import and provenance
 - [x] Public Upbit one-shot candle snapshot with completed-bar/staleness/gap guards
 - [x] Append-only archive with overlapping-history equality checks
-- [x] Linux Python 3.10/3.11/3.12, required lint and Docker verified for published `b4e2bad` ([run 44901201080](https://github.com/uulab-official/trading/actions/runs/44901201080)); every later revision still requires its own exact-head CI
+- [x] Linux Python 3.10/3.11/3.12, required lint and Docker verified for published `8aaaf71` ([run 44904305168](https://github.com/uulab-official/trading/actions/runs/44904305168)); every later revision still requires its own exact-head CI
+- [x] Black/isort failures now block CI across packages, apps and tools; pinned direct tools and 148-file local check recorded in [quality verification](docs/QUALITY_UTC_VERIFICATION_2026_11_21.md)
+- [x] Deprecated UTC clock calls removed while preserving legacy timestamp formats; timezone-independent historical request epochs regression-tested
 - [ ] Obtain real market sample and manually verify candles against exchange history
 - [ ] Evaluate long history and market regime diversity; remove survivorship/lookahead biases
 

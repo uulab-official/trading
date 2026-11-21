@@ -1,9 +1,10 @@
 """Offline CSV provenance, gaps, and fail-closed validation."""
+
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
@@ -58,14 +59,37 @@ class CsvImportTests(unittest.TestCase):
     def test_cli_writes_valid_fixture_without_replacing_csv(self):
         source = self.csv.read_bytes()
         output = self.root / "paper.json"
-        self.assertEqual(0, main([str(self.csv), "--symbol", "BTC/USDT", "--timeframe", "1h", "--output", str(output)]))
+        self.assertEqual(
+            0,
+            main(
+                [
+                    str(self.csv),
+                    "--symbol",
+                    "BTC/USDT",
+                    "--timeframe",
+                    "1h",
+                    "--output",
+                    str(output),
+                ]
+            ),
+        )
         self.assertEqual(source, self.csv.read_bytes())
         fixture = json.loads(output.read_text())
         self.assertEqual(fixture["mode"], "paper")
 
     def test_cli_rejects_input_output_collision(self):
         with self.assertRaises(SystemExit) as err:
-            main([str(self.csv), "--symbol", "BTC/USDT", "--timeframe", "1h", "--output", str(self.csv)])
+            main(
+                [
+                    str(self.csv),
+                    "--symbol",
+                    "BTC/USDT",
+                    "--timeframe",
+                    "1h",
+                    "--output",
+                    str(self.csv),
+                ]
+            )
         self.assertEqual(err.exception.code, 2)
 
 

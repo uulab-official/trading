@@ -6,7 +6,6 @@ import unittest
 from decimal import Decimal, localcontext
 from unittest.mock import patch
 
-
 D = Decimal
 
 
@@ -20,8 +19,12 @@ class OfflineDataTestCase(unittest.TestCase):
 
     def candle(self, timestamp=0, close="10", **overrides):
         values = dict(
-            timestamp=timestamp, open=D("10"), high=D("12"), low=D("8"),
-            close=close, volume=D("2"),
+            timestamp=timestamp,
+            open=D("10"),
+            high=D("12"),
+            low=D("8"),
+            close=close,
+            volume=D("2"),
         )
         values.update(overrides)
         return self.data.Candle(**values)
@@ -63,6 +66,7 @@ class CandleTests(OfflineDataTestCase):
 
     def test_candle_is_immutable_after_validation(self):
         from dataclasses import FrozenInstanceError
+
         candle = self.candle()
         with self.assertRaises(FrozenInstanceError):
             candle.close = D("0")
@@ -70,7 +74,14 @@ class CandleTests(OfflineDataTestCase):
 
 class CandleBufferTests(OfflineDataTestCase):
     def test_duration_ms_exposes_validated_fixed_timeframe_and_is_read_only(self):
-        for timeframe, duration in (("1ms", 1), ("2s", 2000), ("1m", 60000), ("1h", 3600000), ("1d", 86400000), ("1w", 604800000)):
+        for timeframe, duration in (
+            ("1ms", 1),
+            ("2s", 2000),
+            ("1m", 60000),
+            ("1h", 3600000),
+            ("1d", 86400000),
+            ("1w", 604800000),
+        ):
             with self.subTest(timeframe=timeframe):
                 buffer = self.data.CandleBuffer(timeframe=timeframe)
                 self.assertEqual(getattr(buffer, "duration_ms", None), duration)
@@ -83,7 +94,13 @@ class CandleBufferTests(OfflineDataTestCase):
         self.assertEqual(buffer.timeframe, "1h")
         self.assertEqual(buffer.count, 0)
         self.assertIsNone(buffer.current)
-        for getter in (buffer.get_price_history, buffer.get_all_candles, buffer.get_highs, buffer.get_lows, buffer.get_volumes):
+        for getter in (
+            buffer.get_price_history,
+            buffer.get_all_candles,
+            buffer.get_highs,
+            buffer.get_lows,
+            buffer.get_volumes,
+        ):
             self.assertEqual(getter(), [])
 
     def test_buffer_appends_candle_and_six_element_ohlcv_in_order(self):
@@ -131,7 +148,13 @@ class CandleBufferTests(OfflineDataTestCase):
     def test_history_lists_are_defensive_copies(self):
         buffer = self.data.CandleBuffer()
         buffer.add_candle(self.candle())
-        for getter in (buffer.get_price_history, buffer.get_all_candles, buffer.get_highs, buffer.get_lows, buffer.get_volumes):
+        for getter in (
+            buffer.get_price_history,
+            buffer.get_all_candles,
+            buffer.get_highs,
+            buffer.get_lows,
+            buffer.get_volumes,
+        ):
             getter().clear()
             self.assertEqual(len(getter()), 1)
 
@@ -157,7 +180,9 @@ class CandleBufferTests(OfflineDataTestCase):
         self.assertIsNone(buffer.add_tick(timestamp=3000, price=D("9"), volume=D("3")))
         self.assertIsNone(buffer.current)
         completed = buffer.add_tick(timestamp=61000, price=D("11"), volume=D("4"))
-        self.assertEqual(completed, self.candle(timestamp=0, high=D("12"), low=D("9"), close="9", volume=D("6")))
+        self.assertEqual(
+            completed, self.candle(timestamp=0, high=D("12"), low=D("9"), close="9", volume=D("6"))
+        )
         self.assertEqual(buffer.count, 0)
         buffer.add_candle(completed)
         self.assertEqual(buffer.current, completed)
@@ -194,7 +219,11 @@ class CandleBufferTests(OfflineDataTestCase):
     def test_invalid_tick_cannot_change_pending_candle(self):
         buffer = self.data.CandleBuffer(timeframe="1m")
         buffer.add_tick(timestamp=1000, price=D("10"), volume=D("1"))
-        for values in ({"timestamp": -1, "price": D("10")}, {"timestamp": 2000, "price": D("0")}, {"timestamp": 2000, "price": D("10"), "volume": D("-1")}):
+        for values in (
+            {"timestamp": -1, "price": D("10")},
+            {"timestamp": 2000, "price": D("0")},
+            {"timestamp": 2000, "price": D("10"), "volume": D("-1")},
+        ):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 buffer.add_tick(**values)
         completed = buffer.add_tick(timestamp=60000, price=D("12"))
@@ -240,14 +269,25 @@ class IndicatorTests(OfflineDataTestCase):
     def test_price_indicators_reject_insufficient_or_invalid_inputs(self):
         for name, period, minimum in (("SMA", 3, 3), ("EMA", 3, 3), ("RSI", 3, 4)):
             indicator = getattr(self.data, name)(period)
-            for prices in ([], [D("1")] * (minimum - 1), [D("NaN")] + [D("1")] * minimum, [D("0")] * minimum, [True] * minimum):
+            for prices in (
+                [],
+                [D("1")] * (minimum - 1),
+                [D("NaN")] + [D("1")] * minimum,
+                [D("0")] * minimum,
+                [True] * minimum,
+            ):
                 with self.subTest(name=name, prices=prices), self.assertRaises(ValueError):
                     indicator.calculate(prices)
 
     def test_rsi_wilder_seed_and_recursive_average_match_known_small_series(self):
         rsi = self.data.RSI(3)
-        self.assertAlmostEqual(rsi.calculate([D("1"), D("2"), D("3"), D("2")]), D("66.66666666666666666666666667"))
-        self.assertAlmostEqual(rsi.calculate([D("1"), D("2"), D("3"), D("2"), D("4")]), D("83.33333333333333333333333333"))
+        self.assertAlmostEqual(
+            rsi.calculate([D("1"), D("2"), D("3"), D("2")]), D("66.66666666666666666666666667")
+        )
+        self.assertAlmostEqual(
+            rsi.calculate([D("1"), D("2"), D("3"), D("2"), D("4")]),
+            D("83.33333333333333333333333333"),
+        )
 
     def test_rsi_flat_up_only_and_down_only_have_neutral_or_extreme_values(self):
         rsi = self.data.RSI(3)
@@ -259,8 +299,18 @@ class IndicatorTests(OfflineDataTestCase):
         rsi = self.data.RSI(3, oversold=20, overbought=80)
         self.assertEqual(rsi.oversold, D("20"))
         self.assertEqual(rsi.overbought, D("80"))
-        for oversold, overbought in ((-1, 70), (30, 101), (70, 30), (50, 50), ("NaN", 70), (True, 70)):
-            with self.subTest(oversold=oversold, overbought=overbought), self.assertRaises(ValueError):
+        for oversold, overbought in (
+            (-1, 70),
+            (30, 101),
+            (70, 30),
+            (50, 50),
+            ("NaN", 70),
+            (True, 70),
+        ):
+            with (
+                self.subTest(oversold=oversold, overbought=overbought),
+                self.assertRaises(ValueError),
+            ):
                 self.data.RSI(3, oversold=oversold, overbought=overbought)
 
     def test_atr_accounts_for_price_gaps_and_wilder_smoothing(self):
@@ -269,7 +319,10 @@ class IndicatorTests(OfflineDataTestCase):
         closes = [D("9"), D("12"), D("17")]
         self.assertEqual(self.data.ATR(2).calculate(highs[:2], lows[:2], closes[:2]), D("3"))
         self.assertEqual(self.data.ATR(2).calculate(highs, lows, closes), D("4.5"))
-        self.assertEqual(self.data.ATR(1).calculate([D("10"), D("13")], [D("10"), D("13")], [D("10"), D("13")]), D("3"))
+        self.assertEqual(
+            self.data.ATR(1).calculate([D("10"), D("13")], [D("10"), D("13")], [D("10"), D("13")]),
+            D("3"),
+        )
 
     def test_price_histories_reject_scalar_text_and_mapping_inputs(self):
         for name in ("SMA", "EMA", "RSI"):
@@ -281,7 +334,15 @@ class IndicatorTests(OfflineDataTestCase):
 
     def test_atr_rejects_mismatched_insufficient_nonfinite_and_inconsistent_bars(self):
         atr = self.data.ATR(2)
-        for highs, lows, closes in (([], [], []), ([12], [8], [10]), ([12, 13], [8], [10, 11]), ([12, "NaN"], [8, 9], [10, 11]), ([7, 13], [8, 9], [10, 11]), ([12, 13], [8, 9], [14, 11]), ([12, 13], [0, 9], [10, 11])):
+        for highs, lows, closes in (
+            ([], [], []),
+            ([12], [8], [10]),
+            ([12, 13], [8], [10, 11]),
+            ([12, "NaN"], [8, 9], [10, 11]),
+            ([7, 13], [8, 9], [10, 11]),
+            ([12, 13], [8, 9], [14, 11]),
+            ([12, 13], [0, 9], [10, 11]),
+        ):
             with self.subTest(highs=highs, lows=lows, closes=closes), self.assertRaises(ValueError):
                 atr.calculate(highs, lows, closes)
 
@@ -289,26 +350,41 @@ class IndicatorTests(OfflineDataTestCase):
         prices = [D("1"), D("2"), D("3"), D("2"), D("4")]
         indicators = (self.data.SMA(3), self.data.EMA(3), self.data.RSI(3))
         expected = [indicator.calculate(prices) for indicator in indicators]
-        expected_atr = self.data.ATR(3).calculate([D("12")] * 4, [D("9"), D("8"), D("7"), D("8")], [D("10")] * 4)
+        expected_atr = self.data.ATR(3).calculate(
+            [D("12")] * 4, [D("9"), D("8"), D("7"), D("8")], [D("10")] * 4
+        )
         with localcontext() as context:
             context.prec = 3
             for indicator, value in zip(indicators, expected):
                 self.assertEqual(indicator.calculate(prices), value)
                 self.assertIsInstance(value, Decimal)
-            self.assertEqual(self.data.ATR(3).calculate([D("12")] * 4, [D("9"), D("8"), D("7"), D("8")], [D("10")] * 4), expected_atr)
+            self.assertEqual(
+                self.data.ATR(3).calculate(
+                    [D("12")] * 4, [D("9"), D("8"), D("7"), D("8")], [D("10")] * 4
+                ),
+                expected_atr,
+            )
 
 
 class OfflineBoundaryTests(OfflineDataTestCase):
     def test_websocket_stub_fails_before_credentials_or_network_are_used(self):
-        with patch("os.getenv", side_effect=AssertionError("credential access forbidden")), patch("socket.socket", side_effect=AssertionError("network forbidden")):
-            with self.assertRaisesRegex(RuntimeError, "(?i)live market-data adapter.*unavailable.*offline"):
+        with (
+            patch("os.getenv", side_effect=AssertionError("credential access forbidden")),
+            patch("socket.socket", side_effect=AssertionError("network forbidden")),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "(?i)live market-data adapter.*unavailable.*offline"
+            ):
                 self.data.BinanceWebSocket(testnet=True)
 
     def test_websocket_connect_also_fails_closed(self):
         import asyncio
+
         websocket = object.__new__(self.data.BinanceWebSocket)
         with patch("socket.socket.connect", side_effect=AssertionError("network forbidden")):
-            with self.assertRaisesRegex(RuntimeError, "(?i)live market-data adapter.*unavailable.*offline"):
+            with self.assertRaisesRegex(
+                RuntimeError, "(?i)live market-data adapter.*unavailable.*offline"
+            ):
                 asyncio.run(websocket.connect())
 
 

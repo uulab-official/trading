@@ -2,12 +2,12 @@
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -20,10 +20,16 @@ class OfflineTrialLauncherTests(unittest.TestCase):
         self.repo = self.workspace / "repository with spaces"
         self.repo.mkdir()
         for package in ("packages/core", "packages/data", "packages/strategy", "apps/server"):
-            shutil.copytree(ROOT / package, self.repo / package,
-                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info"))
+            shutil.copytree(
+                ROOT / package,
+                self.repo / package,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info"),
+            )
         (self.repo / "config/examples").mkdir(parents=True)
-        shutil.copy2(ROOT / "config/examples/offline_fixture.json", self.repo / "config/examples/offline_fixture.json")
+        shutil.copy2(
+            ROOT / "config/examples/offline_fixture.json",
+            self.repo / "config/examples/offline_fixture.json",
+        )
         shutil.copy2(ROOT / "test-trading.sh", self.repo / "test-trading.sh")
         self.cwd = self.workspace / "caller with spaces"
         self.cwd.mkdir()
@@ -36,29 +42,46 @@ class OfflineTrialLauncherTests(unittest.TestCase):
         self.forbidden = self.workspace / "forbidden.txt"
         for name in ("docker", "docker-compose", "curl", "wget", "pip", "pip3"):
             executable = self.bin / name
-            executable.write_text("#!/bin/sh\nprintf '%s\\n' '" + name + "' >> '" + str(self.forbidden) + "'\nexit 99\n")
+            executable.write_text(
+                "#!/bin/sh\nprintf '%s\\n' '"
+                + name
+                + "' >> '"
+                + str(self.forbidden)
+                + "'\nexit 99\n"
+            )
             executable.chmod(0o755)
-        self.env = {"PATH": str(self.bin) + os.pathsep + os.defpath,
-                    "PYTHONPATH": str(self.guard)}
+        self.env = {"PATH": str(self.bin) + os.pathsep + os.defpath, "PYTHONPATH": str(self.guard)}
 
     def configure_guard(self, extra=""):
         (self.guard / "sitecustomize.py").write_text(
             "from unittest.mock import patch\n"
             "for target in ('socket.socket.connect','socket.create_connection','socket.getaddrinfo'):\n"
-            " patch(target,side_effect=AssertionError('Offline launcher forbids network')).start()\n" + extra)
+            " patch(target,side_effect=AssertionError('Offline launcher forbids network')).start()\n"
+            + extra
+        )
 
     def launch(self, *args):
-        result = subprocess.run(["/bin/bash", str(self.repo / "test-trading.sh"), *map(str, args)],
-                                cwd=self.cwd, env=self.env, capture_output=True, text=True, timeout=10)
-        self.assertFalse(self.forbidden.exists(), "The launcher cannot start Docker, downloads, or installers")
+        result = subprocess.run(
+            ["/bin/bash", str(self.repo / "test-trading.sh"), *map(str, args)],
+            cwd=self.cwd,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertFalse(
+            self.forbidden.exists(), "The launcher cannot start Docker, downloads, or installers"
+        )
         return result
 
     def test_default_launch_works_from_other_directory_and_preserves_resume(self):
         first = self.launch()
         self.assertEqual(first.returncode, 0, first.stderr)
         payload = json.loads(first.stdout)
-        self.assertEqual((payload["mode"], payload["status"], payload["bars_processed"]),
-                         ("paper", "fixture_complete", 90))
+        self.assertEqual(
+            (payload["mode"], payload["status"], payload["bars_processed"]),
+            ("paper", "fixture_complete", 90),
+        )
         self.assertEqual(len(payload["trades"]), 2)
         self.assertIn("synthetic", first.stderr.lower())
         self.assertIn("offline", first.stderr.lower())
@@ -73,7 +96,9 @@ class OfflineTrialLauncherTests(unittest.TestCase):
     def test_caller_relative_fixture_and_checkpoint_paths_with_spaces(self):
         fixture = self.cwd / "local data.json"
         shutil.copy2(self.repo / "config/examples/offline_fixture.json", fixture)
-        result = self.launch("--fixture", fixture.name, "--checkpoint", "trial output/paper state.json")
+        result = self.launch(
+            "--fixture", fixture.name, "--checkpoint", "trial output/paper state.json"
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["bars_processed"], 90)
         self.assertTrue((self.cwd / "trial output/paper state.json").is_file())
@@ -106,11 +131,13 @@ class OfflineTrialLauncherTests(unittest.TestCase):
         self.assertFalse((self.repo / "caller paper.json").exists())
 
     def test_missing_yaml_reports_small_setup_without_installing(self):
-        self.configure_guard("import builtins\noriginal_import=builtins.__import__\n"
-                             "def blocked_import(name,*args,**kwargs):\n"
-                             " if name=='yaml': raise ModuleNotFoundError('missing test dependency')\n"
-                             " return original_import(name,*args,**kwargs)\n"
-                             "builtins.__import__=blocked_import\n")
+        self.configure_guard(
+            "import builtins\noriginal_import=builtins.__import__\n"
+            "def blocked_import(name,*args,**kwargs):\n"
+            " if name=='yaml': raise ModuleNotFoundError('missing test dependency')\n"
+            " return original_import(name,*args,**kwargs)\n"
+            "builtins.__import__=blocked_import\n"
+        )
         result = self.launch()
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("PyYAML", result.stderr)
@@ -130,11 +157,15 @@ class OfflineTrialLauncherTests(unittest.TestCase):
     def test_checkpoint_permission_error_has_cli_exit_without_saved_state(self):
         checkpoint = self.cwd / "cannot save/paper.json"
         lock = checkpoint.parent / ".paper.json.lock"
-        self.configure_guard("import os\noriginal_open=os.open\n"
-                             "def denied_open(path,*args,**kwargs):\n"
-                             " if str(path)==" + repr(str(lock)) + ": raise PermissionError('simulated checkpoint permission denial')\n"
-                             " return original_open(path,*args,**kwargs)\n"
-                             "os.open=denied_open\n")
+        self.configure_guard(
+            "import os\noriginal_open=os.open\n"
+            "def denied_open(path,*args,**kwargs):\n"
+            " if str(path)=="
+            + repr(str(lock))
+            + ": raise PermissionError('simulated checkpoint permission denial')\n"
+            " return original_open(path,*args,**kwargs)\n"
+            "os.open=denied_open\n"
+        )
         result = self.launch("--checkpoint", checkpoint)
         self.assertEqual(result.returncode, 4, result.stderr)
         self.assertIn("permissions", result.stderr)

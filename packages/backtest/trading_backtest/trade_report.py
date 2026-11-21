@@ -3,7 +3,7 @@
 from collections import defaultdict, deque
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
-from decimal import Context, Decimal, ROUND_HALF_EVEN, localcontext
+from decimal import ROUND_HALF_EVEN, Context, Decimal, localcontext
 from typing import Any, Optional, Tuple
 
 REPORT_CONTEXT = Context(prec=28, rounding=ROUND_HALF_EVEN)
@@ -89,6 +89,7 @@ class TradeReport:
 
     def to_dict(self):
         """Exact Decimal strings keep report amounts and percentages lossless."""
+
         def encode(value):
             if isinstance(value, Decimal):
                 return str(value)
@@ -123,13 +124,17 @@ def _quantity_difference(left, right):
 
 def _reconcile_inventory(symbol_lots, recorded_holding):
     """Apply only the recorded broker rounding residue, retaining all cost/fees."""
-    residue = _quantity_difference(recorded_holding, _quantity_sum(lot.amount for lot in symbol_lots))
+    residue = _quantity_difference(
+        recorded_holding, _quantity_sum(lot.amount for lot in symbol_lots)
+    )
     if not residue:
         return
     if not symbol_lots:
         raise ValueError("Recorded inventory has no successful buy cost basis")
     if residue > ZERO:
-        symbol_lots[-1] = replace(symbol_lots[-1], amount=_quantity_sum((symbol_lots[-1].amount, residue)))
+        symbol_lots[-1] = replace(
+            symbol_lots[-1], amount=_quantity_sum((symbol_lots[-1].amount, residue))
+        )
     else:
         deficit = residue.copy_negate()
         for index in range(len(symbol_lots) - 1, -1, -1):
@@ -147,7 +152,9 @@ def build_trade_report(fills: Tuple[FillRecord, ...]) -> TradeReport:
     """Match by symbol without mutating fills or treating open lots as realized."""
     quotes = {fill.symbol.rpartition("/")[2] if "/" in fill.symbol else None for fill in fills}
     if len(quotes) > 1:
-        raise ValueError("Trade reporting requires a single quote currency; no FX conversion is modeled")
+        raise ValueError(
+            "Trade reporting requires a single quote currency; no FX conversion is modeled"
+        )
     quote = next(iter(quotes), None)
     lots = defaultdict(deque)
     exits = []
@@ -159,11 +166,21 @@ def build_trade_report(fills: Tuple[FillRecord, ...]) -> TradeReport:
             expected_delta = fill.amount if fill.side == "buy" else fill.amount.copy_negate()
             residue = _quantity_difference(actual_delta, expected_delta)
             if residue:
-                rounding.append(InventoryRounding(fill.order_id, fill.symbol, fill.holding_before,
-                    fill.holding_after, expected_delta, actual_delta, residue))
+                rounding.append(
+                    InventoryRounding(
+                        fill.order_id,
+                        fill.symbol,
+                        fill.holding_before,
+                        fill.holding_after,
+                        expected_delta,
+                        actual_delta,
+                        residue,
+                    )
+                )
             if fill.side == "buy":
-                lots[fill.symbol].append(OpenLot(fill.order_id, fill.symbol, fill.amount,
-                                                fill.notional, fill.fee))
+                lots[fill.symbol].append(
+                    OpenLot(fill.order_id, fill.symbol, fill.amount, fill.notional, fill.fee)
+                )
                 _reconcile_inventory(lots[fill.symbol], fill.holding_after)
                 continue
             # The known final close consumes all retained cost/fees, including
@@ -175,15 +192,23 @@ def build_trade_report(fills: Tuple[FillRecord, ...]) -> TradeReport:
                 if not lots[fill.symbol]:
                     raise ValueError("A successful sell cannot be matched to prior spot buys")
                 lot = lots[fill.symbol].popleft()
-                amount = lot.amount if full_close and remaining <= ZERO else min(remaining, lot.amount)
+                amount = (
+                    lot.amount if full_close and remaining <= ZERO else min(remaining, lot.amount)
+                )
                 if amount == lot.amount:
                     notional, fee = lot.entry_notional, lot.entry_fee
                 else:
                     notional = lot.entry_notional * amount / lot.amount
                     fee = lot.entry_fee * amount / lot.amount
                     # Allocate the final residue to the final matched portion.
-                    lots[fill.symbol].appendleft(replace(lot, amount=_quantity_difference(lot.amount, amount),
-                        entry_notional=lot.entry_notional - notional, entry_fee=lot.entry_fee - fee))
+                    lots[fill.symbol].appendleft(
+                        replace(
+                            lot,
+                            amount=_quantity_difference(lot.amount, amount),
+                            entry_notional=lot.entry_notional - notional,
+                            entry_fee=lot.entry_fee - fee,
+                        )
+                    )
                 matches.append(LotMatch(lot.entry_order_id, amount, notional, fee))
                 remaining = _quantity_difference(remaining, amount)
             _reconcile_inventory(lots[fill.symbol], fill.holding_after)
@@ -192,8 +217,22 @@ def build_trade_report(fills: Tuple[FillRecord, ...]) -> TradeReport:
             gross = fill.notional - entry_notional
             net = gross - entry_fees - fill.fee
             net_return = net / (entry_notional + entry_fees) * 100
-            exits.append(ClosedExit(fill.order_id, fill.symbol, fill.amount, entry_notional,
-                entry_fees, fill.notional, fill.fee, gross, net, net_return, tuple(matches), deepcopy(fill.timestamp)))
+            exits.append(
+                ClosedExit(
+                    fill.order_id,
+                    fill.symbol,
+                    fill.amount,
+                    entry_notional,
+                    entry_fees,
+                    fill.notional,
+                    fill.fee,
+                    gross,
+                    net,
+                    net_return,
+                    tuple(matches),
+                    deepcopy(fill.timestamp),
+                )
+            )
 
         winners = [exit for exit in exits if exit.net_pnl > ZERO]
         losers = [exit for exit in exits if exit.net_pnl < ZERO]
@@ -204,12 +243,27 @@ def build_trade_report(fills: Tuple[FillRecord, ...]) -> TradeReport:
         profit_factor = positive_pnl / negative_pnl if negative_pnl else None
 
         def mean(items):
-            return sum((item.net_return_pct for item in items), ZERO) / len(items) if items else ZERO
+            return (
+                sum((item.net_return_pct for item in items), ZERO) / len(items) if items else ZERO
+            )
 
         average = mean(exits)
-        return TradeReport(len(fills), quote, tuple(exits),
+        return TradeReport(
+            len(fills),
+            quote,
+            tuple(exits),
             tuple(lot for symbol_lots in lots.values() for lot in symbol_lots),
-            count, len(winners), len(losers), count - len(winners) - len(losers),
-            win_rate, profit_factor, mean(winners), mean(losers), average, average,
-            sum((exit.gross_pnl for exit in exits), ZERO), sum((exit.net_pnl for exit in exits), ZERO),
-            tuple(rounding))
+            count,
+            len(winners),
+            len(losers),
+            count - len(winners) - len(losers),
+            win_rate,
+            profit_factor,
+            mean(winners),
+            mean(losers),
+            average,
+            average,
+            sum((exit.gross_pnl for exit in exits), ZERO),
+            sum((exit.net_pnl for exit in exits), ZERO),
+            tuple(rounding),
+        )

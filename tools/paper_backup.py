@@ -3,24 +3,31 @@
 No broker, credentials, network, restore, or live-trading function exists here.
 Backups are immutable new directories, never overwritten.
 """
+
 import argparse
-from contextlib import ExitStack
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import sys
 import tempfile
+from contextlib import ExitStack
+from datetime import datetime, timezone
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-for source in (ROOT, ROOT / "packages/core", ROOT / "packages/data",
-               ROOT / "packages/strategy", ROOT / "apps/server"):
+for source in (
+    ROOT,
+    ROOT / "packages/core",
+    ROOT / "packages/data",
+    ROOT / "packages/strategy",
+    ROOT / "apps/server",
+):
     sys.path.insert(0, str(source))
 
+from trading_bot.paper_checkpoint import CheckpointInUseError, locked_checkpoint
+
 from tools.paper_checkpoint_audit import audit
-from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
 
 MAX_ARCHIVE_BYTES = 32_000_000
 MAX_CHECKPOINT_BYTES = 32_000_000
@@ -36,7 +43,9 @@ def _read_bounded(path, maximum):
 
 def backup_pair(archive: Path, checkpoint: Path, destination: Path):
     """Snapshot only while the local paper supervisor is stopped."""
-    archive, checkpoint, destination = (Path(v).resolve() for v in (archive, checkpoint, destination))
+    archive, checkpoint, destination = (
+        Path(v).resolve() for v in (archive, checkpoint, destination)
+    )
     if len({archive, checkpoint, destination}) != 3:
         raise ValueError("Backup, archive and checkpoint paths must differ")
     owner = checkpoint.with_name(checkpoint.name + ".supervisor")
@@ -46,7 +55,9 @@ def backup_pair(archive: Path, checkpoint: Path, destination: Path):
 
 def _backup_pair_stopped(archive: Path, checkpoint: Path, destination: Path):
     """Snapshot a fully verified pair; refuse concurrent or mismatched state."""
-    archive, checkpoint, destination = (Path(v).resolve() for v in (archive, checkpoint, destination))
+    archive, checkpoint, destination = (
+        Path(v).resolve() for v in (archive, checkpoint, destination)
+    )
     if len({archive, checkpoint, destination}) != 3:
         raise ValueError("Backup, archive and checkpoint paths must differ")
     if destination.exists():
@@ -116,7 +127,12 @@ def verify_backup(directory: Path, *, deep=False):
     """Check bytes against the manifest; does not restore or trust profitability."""
     directory = Path(directory)
     manifest = json.loads(_read_bounded(directory / "manifest.json", 65536))
-    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1 or manifest.get("type") != "offline_paper_pair_backup" or manifest.get("live_orders_enabled") is not False:
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != 1
+        or manifest.get("type") != "offline_paper_pair_backup"
+        or manifest.get("live_orders_enabled") is not False
+    ):
         raise ValueError("Invalid offline-paper backup manifest")
     verified_bytes = {}
     for name, key, maximum in (
@@ -136,16 +152,22 @@ def verify_backup(directory: Path, *, deep=False):
             for name, content in verified_bytes.items():
                 (isolated / name).write_bytes(content)
             verification = audit(isolated / "archive.json", isolated / "checkpoint.json")
-        if (verification["fixture_sha256"] != manifest["archive_sha256"]
-                or verification["checkpoint_sha256"] != manifest["checkpoint_sha256"]
-                or verification["processed_bars"] != manifest["processed_bars"]
-                or verification["symbol"] != manifest["market"]):
+        if (
+            verification["fixture_sha256"] != manifest["archive_sha256"]
+            or verification["checkpoint_sha256"] != manifest["checkpoint_sha256"]
+            or verification["processed_bars"] != manifest["processed_bars"]
+            or verification["symbol"] != manifest["market"]
+        ):
             raise ValueError("Deep backup replay does not match signed-off manifest fields")
-    return {"status": "backup_deep_verified" if deep else "backup_bytes_verified",
-            "mode": "paper", "live_orders_enabled": False, "market": manifest["market"],
-            "processed_bars": manifest["processed_bars"],
-            "economic_replay_verified": bool(deep),
-            "note": "Even deep replay does not validate real exchange orders or profitability"}
+    return {
+        "status": "backup_deep_verified" if deep else "backup_bytes_verified",
+        "mode": "paper",
+        "live_orders_enabled": False,
+        "market": manifest["market"],
+        "processed_bars": manifest["processed_bars"],
+        "economic_replay_verified": bool(deep),
+        "note": "Even deep replay does not validate real exchange orders or profitability",
+    }
 
 
 def main(argv=None):
@@ -157,8 +179,9 @@ def main(argv=None):
     create.add_argument("--destination", type=Path, required=True)
     verify = sub.add_parser("verify")
     verify.add_argument("directory", type=Path)
-    verify.add_argument("--deep", action="store_true",
-                        help="Independently replay backed-up paper economic state")
+    verify.add_argument(
+        "--deep", action="store_true", help="Independently replay backed-up paper economic state"
+    )
     args = parser.parse_args(argv)
     try:
         if args.action == "create":
@@ -166,7 +189,10 @@ def main(argv=None):
         else:
             result = verify_backup(args.directory, deep=args.deep)
     except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError, CheckpointInUseError):
-        print("Paper backup refused invalid or changing state; no source files modified.", file=sys.stderr)
+        print(
+            "Paper backup refused invalid or changing state; no source files modified.",
+            file=sys.stderr,
+        )
         return 2
     print(json.dumps(result, sort_keys=True, allow_nan=False))
     return 0

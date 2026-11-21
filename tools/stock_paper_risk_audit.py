@@ -4,27 +4,33 @@ No broker, network, trading service, or file mutation. Uses only a complete
 Toss-normalized 1m paper fixture and a verified existing SQLite strategy.
 Drawdown is on hypothetical bar-close equity, not a real-account risk limit.
 """
+
 import argparse
-from decimal import Decimal, Context, localcontext
 import json
-from pathlib import Path
 import sqlite3
 import sys
+from decimal import Context, Decimal, localcontext
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 for location in (ROOT, ROOT / "packages/core", ROOT / "packages/data"):
     sys.path.insert(0, str(location))
 from trading_core.stock_paper import StockPaperBook, _amount
+
 from tools.stock_paper_backtest import run_backtest
 from tools.stock_paper_forward import audit_forward
 
 
-def stock_risk_audit(fixture, database, *, initial_cash, fee_pct="0.1",
-                     fast=5, slow=20, allocation_pct="20"):
+def stock_risk_audit(
+    fixture, database, *, initial_cash, fee_pct="0.1", fast=5, slow=20, allocation_pct="20"
+):
     """Reconstruct every paper bar-close equity from recorded strategy fills."""
     params = {
-        "initial_cash": initial_cash, "fee_pct": fee_pct, "fast": fast,
-        "slow": slow, "allocation_pct": allocation_pct,
+        "initial_cash": initial_cash,
+        "fee_pct": fee_pct,
+        "fast": fast,
+        "slow": slow,
+        "allocation_pct": allocation_pct,
     }
     verified = audit_forward(fixture, database, **params)
     outcome = run_backtest(fixture, **params)
@@ -54,8 +60,11 @@ def stock_risk_audit(fixture, database, *, initial_cash, fee_pct="0.1",
             if index in by_bar:
                 fill = by_bar[index]
                 actual = book.execute(
-                    fill["client_id"], fill["symbol"], fill["side"],
-                    fill["shares"], price=fill["price"],
+                    fill["client_id"],
+                    fill["symbol"],
+                    fill["side"],
+                    fill["shares"],
+                    price=fill["price"],
                 )
                 if actual != fill:
                     raise ValueError("Paper fill state differs from strategy replay")
@@ -74,7 +83,8 @@ def stock_risk_audit(fixture, database, *, initial_cash, fee_pct="0.1",
             raise ValueError("Paper final equity differs from audited ledger")
         return {
             "status": "stock_paper_risk_metrics_audited",
-            "mode": "paper", "live_orders_enabled": False,
+            "mode": "paper",
+            "live_orders_enabled": False,
             "symbol": outcome["symbol"],
             "quote_currency": outcome["quote_currency"],
             "bars": len(fixture["candles"]),
@@ -105,13 +115,23 @@ def main(argv=None):
         if len(content) > 10_000_000:
             raise ValueError("Paper source file too large")
         result = stock_risk_audit(
-            json.loads(content), args.database,
-            initial_cash=args.initial_cash, fee_pct=args.fee_pct,
-            fast=args.fast, slow=args.slow,
+            json.loads(content),
+            args.database,
+            initial_cash=args.initial_cash,
+            fee_pct=args.fee_pct,
+            fast=args.fast,
+            slow=args.slow,
             allocation_pct=args.allocation_pct,
         )
-    except (ValueError, TypeError, OSError, KeyError, ArithmeticError,
-            sqlite3.Error, json.JSONDecodeError):
+    except (
+        ValueError,
+        TypeError,
+        OSError,
+        KeyError,
+        ArithmeticError,
+        sqlite3.Error,
+        json.JSONDecodeError,
+    ):
         print("Stock risk audit refused invalid paper state; no orders placed.", file=sys.stderr)
         return 2
     print(json.dumps(result, sort_keys=True, allow_nan=False))

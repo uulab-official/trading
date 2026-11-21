@@ -7,16 +7,15 @@ not individual executions, reconciled balances, or inferred lifecycle events.
 """
 
 import argparse
-from datetime import date, datetime, timedelta, timezone
 import json
 import math
 import os
-from pathlib import Path
 import re
 import sys
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
-
 
 VTS_BASE = "https://openapivts.koreainvestment.com:29443"
 ORDER_PATH = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
@@ -42,12 +41,16 @@ def _open_vts_readonly(request, *, timeout):
 
 
 def _matches(value, pattern, maximum):
-    return (isinstance(value, str) and 0 < len(value) <= maximum
-            and re.fullmatch(pattern, value) is not None)
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= maximum
+        and re.fullmatch(pattern, value) is not None
+    )
 
 
-def _validate_inputs(inquiry_date, account_ref, token, appkey, appsecret,
-                     cano, acnt_prdt_cd, max_pages, now):
+def _validate_inputs(
+    inquiry_date, account_ref, token, appkey, appsecret, cano, acnt_prdt_cd, max_pages, now
+):
     if not _matches(account_ref, r"[A-Za-z][A-Za-z0-9._-]*", 64):
         raise ValueError("Invalid local account alias")
     if type(max_pages) is not int or not 1 <= max_pages <= 20:
@@ -67,8 +70,11 @@ def _validate_inputs(inquiry_date, account_ref, token, appkey, appsecret,
         raise ValueError("Invalid inquiry date")
     selected = date.fromisoformat(inquiry_date)
     observed = datetime.now(timezone.utc) if now is None else now()
-    if (not isinstance(observed, datetime) or observed.tzinfo is None
-            or observed.utcoffset() is None):
+    if (
+        not isinstance(observed, datetime)
+        or observed.tzinfo is None
+        or observed.utcoffset() is None
+    ):
         raise ValueError("Observation time must be timezone aware")
     observed_utc = observed.astimezone(timezone.utc)
     today_kst = observed.astimezone(KST).date()
@@ -135,9 +141,13 @@ def _read_page(request, opener):
         raw = response.read(MAX_RESPONSE_BYTES + 1)
     if not isinstance(raw, bytes) or len(raw) > MAX_RESPONSE_BYTES:
         raise ValueError("KIS VTS inquiry response size refused")
-    body = json.loads(raw.decode("utf-8"), object_pairs_hook=_json_object,
-                      parse_constant=_reject_json_constant,
-                      parse_int=_json_integer, parse_float=_json_float)
+    body = json.loads(
+        raw.decode("utf-8"),
+        object_pairs_hook=_json_object,
+        parse_constant=_reject_json_constant,
+        parse_int=_json_integer,
+        parse_float=_json_float,
+    )
     if not isinstance(body, dict) or body.get("rt_cd") != "0":
         raise ValueError("KIS VTS did not confirm successful inquiry")
     rows = body.get("output1")
@@ -200,8 +210,7 @@ def _normalize_row(row, inquiry_day):
     order_time = row.get("ord_tmd")
     if not _matches(order_time, r"[0-9]{6}", 6):
         raise ValueError("Malformed order time")
-    if (int(order_time[:2]) > 23 or int(order_time[2:4]) > 59
-            or int(order_time[4:]) > 59):
+    if int(order_time[:2]) > 23 or int(order_time[2:4]) > 59 or int(order_time[4:]) > 59:
         raise ValueError("Invalid order time")
     result["ord_tmd"] = order_time
     # The portal's older response example omits this newer field. Do not invent
@@ -220,9 +229,19 @@ def _cursor(value):
     return value
 
 
-def fetch_order_snapshot(inquiry_date, *, account_ref, token, appkey, appsecret,
-                         cano, acnt_prdt_cd, max_pages=20, opener=_open_vts_readonly,
-                         now=None):
+def fetch_order_snapshot(
+    inquiry_date,
+    *,
+    account_ref,
+    token,
+    appkey,
+    appsecret,
+    cano,
+    acnt_prdt_cd,
+    max_pages=20,
+    opener=_open_vts_readonly,
+    now=None,
+):
     """Return complete allowlisted observations, or raise a static ValueError.
 
     ``now`` is an optional callable returning an aware datetime. ``opener`` is
@@ -233,27 +252,50 @@ def fetch_order_snapshot(inquiry_date, *, account_ref, token, appkey, appsecret,
     """
     try:
         inquiry_day, observed_at = _validate_inputs(
-            inquiry_date, account_ref, token, appkey, appsecret,
-            cano, acnt_prdt_cd, max_pages, now,
+            inquiry_date,
+            account_ref,
+            token,
+            appkey,
+            appsecret,
+            cano,
+            acnt_prdt_cd,
+            max_pages,
+            now,
         )
         parameters = {
-            "CANO": cano, "ACNT_PRDT_CD": acnt_prdt_cd,
-            "INQR_STRT_DT": inquiry_day, "INQR_END_DT": inquiry_day,
-            "SLL_BUY_DVSN_CD": "00", "PDNO": "", "ORD_GNO_BRNO": "", "ODNO": "",
-            "CCLD_DVSN": "00", "INQR_DVSN": "00", "INQR_DVSN_1": "", "INQR_DVSN_3": "00",
-            "EXCG_ID_DVSN_CD": "KRX", "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
+            "CANO": cano,
+            "ACNT_PRDT_CD": acnt_prdt_cd,
+            "INQR_STRT_DT": inquiry_day,
+            "INQR_END_DT": inquiry_day,
+            "SLL_BUY_DVSN_CD": "00",
+            "PDNO": "",
+            "ORD_GNO_BRNO": "",
+            "ODNO": "",
+            "CCLD_DVSN": "00",
+            "INQR_DVSN": "00",
+            "INQR_DVSN_1": "",
+            "INQR_DVSN_3": "00",
+            "EXCG_ID_DVSN_CD": "KRX",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": "",
         }
         headers = {
-            "content-type": "application/json; charset=utf-8", "accept": "application/json",
-            "authorization": "Bearer " + token, "appkey": appkey, "appsecret": appsecret,
-            "tr_id": ORDER_TR_ID, "custtype": "P", "tr_cont": "",
+            "content-type": "application/json; charset=utf-8",
+            "accept": "application/json",
+            "authorization": "Bearer " + token,
+            "appkey": appkey,
+            "appsecret": appsecret,
+            "tr_id": ORDER_TR_ID,
+            "custtype": "P",
+            "tr_cont": "",
         }
         observations = []
         identities = set()
         cursors = set()
         for page_index in range(max_pages):
-            request = Request(VTS_BASE + ORDER_PATH + "?" + urlencode(parameters),
-                              headers=headers, method="GET")
+            request = Request(
+                VTS_BASE + ORDER_PATH + "?" + urlencode(parameters), headers=headers, method="GET"
+            )
             body, rows, continuation = _read_page(request, opener)
             for raw_row in rows:
                 row = _normalize_row(raw_row, inquiry_day)
@@ -266,14 +308,22 @@ def fetch_order_snapshot(inquiry_date, *, account_ref, token, appkey, appsecret,
                 raise ValueError("Total observation bound exceeded")
             if continuation in ("D", "E"):
                 return {
-                    "schema_version": 1, "mode": "paper", "live_orders_enabled": False,
-                    "provider": "kis_vts_readonly_order_snapshot", "market": "KRX",
-                    "currency": "KRW", "account_ref": account_ref,
-                    "account_binding_verified": False, "inquiry_date": inquiry_date,
-                    "observed_at_utc": observed_at, "pagination_complete": True,
-                    "pages_fetched": page_index + 1, "row_count": len(observations),
+                    "schema_version": 1,
+                    "mode": "paper",
+                    "live_orders_enabled": False,
+                    "provider": "kis_vts_readonly_order_snapshot",
+                    "market": "KRX",
+                    "currency": "KRW",
+                    "account_ref": account_ref,
+                    "account_binding_verified": False,
+                    "inquiry_date": inquiry_date,
+                    "observed_at_utc": observed_at,
+                    "pagination_complete": True,
+                    "pages_fetched": page_index + 1,
+                    "row_count": len(observations),
                     "atomic_snapshot_verified": False,
-                    "economic_reconciliation_verified": False, "rows": observations,
+                    "economic_reconciliation_verified": False,
+                    "rows": observations,
                 }
             pair = (_cursor(body.get("ctx_area_fk100")), _cursor(body.get("ctx_area_nk100")))
             if pair in cursors:
@@ -324,8 +374,9 @@ def main(argv=None):
     parser.add_argument("--date", required=True, dest="inquiry_date")
     parser.add_argument("--account-ref", required=True)
     parser.add_argument("--max-pages", default=20, type=_page_limit)
-    parser.add_argument("--output", required=True, type=Path,
-                        help="New private JSON file in an existing directory")
+    parser.add_argument(
+        "--output", required=True, type=Path, help="New private JSON file in an existing directory"
+    )
     try:
         args = parser.parse_args(argv)
         if not args.allow_vts_readonly:
@@ -335,13 +386,17 @@ def main(argv=None):
         # paths, collisions and non-directory ancestors without account access.
         target = args.output.parent.resolve(strict=True) / args.output.name
         descriptor = os.open(
-            target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600,
+            target,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
         )
         identity = os.fstat(descriptor)
         try:
             os.fchmod(descriptor, 0o600)
             result = fetch_order_snapshot(
-                args.inquiry_date, account_ref=args.account_ref, max_pages=args.max_pages,
+                args.inquiry_date,
+                account_ref=args.account_ref,
+                max_pages=args.max_pages,
                 token=os.environ.get("KIS_VTS_ACCESS_TOKEN"),
                 appkey=os.environ.get("KIS_VTS_APPKEY"),
                 appsecret=os.environ.get("KIS_VTS_APPSECRET"),

@@ -7,16 +7,17 @@ be held in the operator's process environment; no token issuance or disk cache.
 This is a current-price observation, NOT a completed OHLCV bar. It must
 never be fed directly into historical or forward candle strategies.
 """
+
 import argparse
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 import json
 import os
-from pathlib import Path
 import re
 import sys
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from urllib.parse import urlencode
-from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 VTS_BASE = "https://openapivts.koreainvestment.com:29443"
 QUOTE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-price"
@@ -42,9 +43,7 @@ def _text(label, value):
     return value
 
 
-def fetch_quote(symbol, *, token, appkey, appsecret,
-                market="J", opener=_open_vts_quote,
-                now=None):
+def fetch_quote(symbol, *, token, appkey, appsecret, market="J", opener=_open_vts_quote, now=None):
     if not isinstance(symbol, str) or not re.fullmatch(r"[0-9]{6}", symbol):
         raise ValueError("KIS stock symbol must be a 6-digit domestic code")
     if market != "J":
@@ -53,10 +52,12 @@ def fetch_quote(symbol, *, token, appkey, appsecret,
     token = _text("VTS access token", token)
     appkey = _text("VTS appkey", appkey)
     appsecret = _text("VTS appsecret", appsecret)
-    query = urlencode({
-        "FID_COND_MRKT_DIV_CODE": market,
-        "FID_INPUT_ISCD": symbol,
-    })
+    query = urlencode(
+        {
+            "FID_COND_MRKT_DIV_CODE": market,
+            "FID_INPUT_ISCD": symbol,
+        }
+    )
     request = Request(
         VTS_BASE + QUOTE_PATH + "?" + query,
         headers={
@@ -65,7 +66,8 @@ def fetch_quote(symbol, *, token, appkey, appsecret,
             "appkey": appkey,
             "appsecret": appsecret,
             "tr_id": QUOTE_TR_ID,
-        }, method="GET",
+        },
+        method="GET",
     )
     with opener(request, timeout=10) as response:
         if response.status != 200:
@@ -93,10 +95,13 @@ def fetch_quote(symbol, *, token, appkey, appsecret,
     ):
         raise ValueError("Observation time must be timezone aware")
     return {
-        "mode": "paper", "live_orders_enabled": False,
+        "mode": "paper",
+        "live_orders_enabled": False,
         "provider": "kis_vts_readonly_quote",
-        "market": "KRX", "symbol": symbol,
-        "quote_currency": "KRW", "price": str(price),
+        "market": "KRX",
+        "symbol": symbol,
+        "quote_currency": "KRW",
+        "price": str(price),
         "observed_at_utc": observed.astimezone(timezone.utc).isoformat(),
         "quote_type": "current_spot_not_completed_candle",
         "validated_completed_bars": False,
@@ -118,13 +123,15 @@ def main(argv=None):
         parser.error("Output already exists; refusing to replace quote evidence")
     try:
         result = fetch_quote(
-            args.symbol, token=os.environ.get("KIS_VTS_ACCESS_TOKEN"),
+            args.symbol,
+            token=os.environ.get("KIS_VTS_ACCESS_TOKEN"),
             appkey=os.environ.get("KIS_VTS_APPKEY"),
             appsecret=os.environ.get("KIS_VTS_APPSECRET"),
         )
         target.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                     getattr(os, "O_NOFOLLOW", 0), 0o600)
+        fd = os.open(
+            target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as output:
                 json.dump(result, output, sort_keys=True, allow_nan=False)

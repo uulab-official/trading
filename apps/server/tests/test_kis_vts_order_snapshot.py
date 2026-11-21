@@ -1,23 +1,22 @@
 """KIS daily-order inquiry contracts, using fake HTTP and forbidden sockets."""
 
-from contextlib import redirect_stderr, redirect_stdout
-from datetime import datetime, timedelta, timezone
-from email.message import Message
 import importlib
-from io import BytesIO, StringIO
 import json
 import os
-from pathlib import Path
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timedelta, timezone
+from email.message import Message
+from io import BytesIO, StringIO
+from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import HTTPRedirectHandler
-
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "tools/kis_vts_order_snapshot.py"
@@ -31,8 +30,7 @@ AUTH = {
     "cano": "87654321",
     "acnt_prdt_cd": "01",
 }
-ENV = {"KIS_VTS_" + key.upper(): value for key, value in AUTH.items()
-       if key != "token"}
+ENV = {"KIS_VTS_" + key.upper(): value for key, value in AUTH.items() if key != "token"}
 ENV["KIS_VTS_ACCESS_TOKEN"] = AUTH["token"]
 
 
@@ -40,14 +38,28 @@ def order_row(**changes):
     # Synthetic values follow the public portal's field names. A rejected
     # order can have zero remaining quantity without any execution.
     row = {
-        "ord_dt": "20261121", "ord_gno_brno": "06010", "odno": "0000001234",
-        "orgn_odno": "", "pdno": "005930", "sll_buy_dvsn_cd": "02",
-        "ord_dvsn_cd": "00", "ord_qty": "10", "ord_unpr": "70000",
-        "tot_ccld_qty": "0", "tot_ccld_amt": "0", "avg_prvs": "0",
-        "rmn_qty": "0", "cncl_cfrm_qty": "0", "rjct_qty": "10",
-        "cncl_yn": "", "ord_tmd": "090001", "excg_id_dvsn_Cd": "KRX",
-        "ctac_tlno": "SYNTHETIC-PRIVATE-PHONE", "inqr_ip_addr": "PRIVATE-IP",
-        "ordr_empno": "PRIVATE-EMPLOYEE", "prdt_name": "UNNEEDED-NAME",
+        "ord_dt": "20261121",
+        "ord_gno_brno": "06010",
+        "odno": "0000001234",
+        "orgn_odno": "",
+        "pdno": "005930",
+        "sll_buy_dvsn_cd": "02",
+        "ord_dvsn_cd": "00",
+        "ord_qty": "10",
+        "ord_unpr": "70000",
+        "tot_ccld_qty": "0",
+        "tot_ccld_amt": "0",
+        "avg_prvs": "0",
+        "rmn_qty": "0",
+        "cncl_cfrm_qty": "0",
+        "rjct_qty": "10",
+        "cncl_yn": "",
+        "ord_tmd": "090001",
+        "excg_id_dvsn_Cd": "KRX",
+        "ctac_tlno": "SYNTHETIC-PRIVATE-PHONE",
+        "inqr_ip_addr": "PRIVATE-IP",
+        "ordr_empno": "PRIVATE-EMPLOYEE",
+        "prdt_name": "UNNEEDED-NAME",
     }
     row.update(changes)
     return row
@@ -55,8 +67,11 @@ def order_row(**changes):
 
 def page(rows=None, **changes):
     body = {
-        "rt_cd": "0", "msg_cd": "KIOK0510", "msg1": "PRIVATE-MESSAGE",
-        "ctx_area_fk100": "", "ctx_area_nk100": "",
+        "rt_cd": "0",
+        "msg_cd": "KIOK0510",
+        "msg1": "PRIVATE-MESSAGE",
+        "ctx_area_fk100": "",
+        "ctx_area_nk100": "",
         "output1": [order_row()] if rows is None else rows,
         "output2": {"tot_ord_qty": "999999", "tot_ccld_amt": "PRIVATE-SUMMARY"},
     }
@@ -122,9 +137,13 @@ class _ObserverTestCase(unittest.TestCase):
         return opened
 
     def fetch(self, responses=None, **changes):
-        values = dict(AUTH, account_ref="paper-vts", max_pages=20,
-                      now=lambda: NOW, opener=self.open_pages(
-                          [Response(page())] if responses is None else responses))
+        values = dict(
+            AUTH,
+            account_ref="paper-vts",
+            max_pages=20,
+            now=lambda: NOW,
+            opener=self.open_pages([Response(page())] if responses is None else responses),
+        )
         values.update(changes)
         inquiry_date = values.pop("inquiry_date", DATE)
         return self.observer.fetch_order_snapshot(inquiry_date, **values)
@@ -141,14 +160,26 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
         self.assertEqual(url.path, "/uapi/domestic-stock/v1/trading/inquire-daily-ccld")
         self.assertEqual(request.get_method(), "GET")
         self.assertIsNone(request.data)
-        self.assertEqual(parse_qs(url.query, keep_blank_values=True), {
-            "CANO": ["87654321"], "ACNT_PRDT_CD": ["01"],
-            "INQR_STRT_DT": ["20261121"], "INQR_END_DT": ["20261121"],
-            "SLL_BUY_DVSN_CD": ["00"], "PDNO": [""], "ORD_GNO_BRNO": [""],
-            "ODNO": [""], "CCLD_DVSN": ["00"], "INQR_DVSN": ["00"],
-            "INQR_DVSN_1": [""], "INQR_DVSN_3": ["00"],
-            "EXCG_ID_DVSN_CD": ["KRX"], "CTX_AREA_FK100": [""], "CTX_AREA_NK100": [""],
-        })
+        self.assertEqual(
+            parse_qs(url.query, keep_blank_values=True),
+            {
+                "CANO": ["87654321"],
+                "ACNT_PRDT_CD": ["01"],
+                "INQR_STRT_DT": ["20261121"],
+                "INQR_END_DT": ["20261121"],
+                "SLL_BUY_DVSN_CD": ["00"],
+                "PDNO": [""],
+                "ORD_GNO_BRNO": [""],
+                "ODNO": [""],
+                "CCLD_DVSN": ["00"],
+                "INQR_DVSN": ["00"],
+                "INQR_DVSN_1": [""],
+                "INQR_DVSN_3": ["00"],
+                "EXCG_ID_DVSN_CD": ["KRX"],
+                "CTX_AREA_FK100": [""],
+                "CTX_AREA_NK100": [""],
+            },
+        )
         self.assertEqual(request.get_header("Authorization"), "Bearer SYNTHETIC-ACCESS-TOKEN")
         self.assertEqual(request.get_header("Appkey"), "SYNTHETIC-APPKEY")
         self.assertEqual(request.get_header("Appsecret"), "SYNTHETIC-APPSECRET")
@@ -166,14 +197,31 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
         self.assertEqual(result["pages_fetched"], 1)
         self.assertEqual(result["row_count"], 1)
         self.assertEqual(result["observed_at_utc"], "2026-11-21T01:00:00+00:00")
-        self.assertEqual(result["rows"], [{
-            "ord_dt": "20261121", "ord_gno_brno": "06010", "odno": "0000001234",
-            "orgn_odno": "", "pdno": "005930", "sll_buy_dvsn_cd": "02",
-            "ord_dvsn_cd": "00", "ord_qty": "10", "ord_unpr": "70000",
-            "tot_ccld_qty": "0", "tot_ccld_amt": "0", "avg_prvs": "0",
-            "rmn_qty": "0", "cncl_cfrm_qty": "0", "rjct_qty": "10",
-            "cncl_yn": "", "ord_tmd": "090001", "excg_id_dvsn_cd": "KRX",
-        }])
+        self.assertEqual(
+            result["rows"],
+            [
+                {
+                    "ord_dt": "20261121",
+                    "ord_gno_brno": "06010",
+                    "odno": "0000001234",
+                    "orgn_odno": "",
+                    "pdno": "005930",
+                    "sll_buy_dvsn_cd": "02",
+                    "ord_dvsn_cd": "00",
+                    "ord_qty": "10",
+                    "ord_unpr": "70000",
+                    "tot_ccld_qty": "0",
+                    "tot_ccld_amt": "0",
+                    "avg_prvs": "0",
+                    "rmn_qty": "0",
+                    "cncl_cfrm_qty": "0",
+                    "rjct_qty": "10",
+                    "cncl_yn": "",
+                    "ord_tmd": "090001",
+                    "excg_id_dvsn_cd": "KRX",
+                }
+            ],
+        )
         serialized = json.dumps(result)
         for private in ("87654321", "SYNTHETIC-", "PRIVATE-", "UNNEEDED-", "999999"):
             self.assertNotIn(private, serialized)
@@ -182,21 +230,31 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
 
     def test_pagination_carries_exact_both_cursors_and_never_sums_linked_history(self):
         responses = [
-            Response(page(ctx_area_fk100="87654321 01 CONTEXT  ",
-                          ctx_area_nk100="  NEXT-KEY  "), continuation="M"),
-            Response(page([order_row(odno="0000001235", orgn_odno="0000001234")],
-                          ctx_area_fk100="SECOND-CONTEXT", ctx_area_nk100="SECOND-KEY"),
-                     continuation="F"),
-            Response(page([order_row(odno="0000001236", orgn_odno="0000001234")]),
-                     continuation="E"),
+            Response(
+                page(ctx_area_fk100="87654321 01 CONTEXT  ", ctx_area_nk100="  NEXT-KEY  "),
+                continuation="M",
+            ),
+            Response(
+                page(
+                    [order_row(odno="0000001235", orgn_odno="0000001234")],
+                    ctx_area_fk100="SECOND-CONTEXT",
+                    ctx_area_nk100="SECOND-KEY",
+                ),
+                continuation="F",
+            ),
+            Response(
+                page([order_row(odno="0000001236", orgn_odno="0000001234")]), continuation="E"
+            ),
         ]
         result = self.fetch(responses)
         self.assertEqual(result["pages_fetched"], 3)
         self.assertEqual(result["row_count"], 3)
-        self.assertEqual([row["odno"] for row in result["rows"]],
-                         ["0000001234", "0000001235", "0000001236"])
-        self.assertEqual([request.get_header("Tr_cont") for request in self.requests],
-                         ["", "N", "N"])
+        self.assertEqual(
+            [row["odno"] for row in result["rows"]], ["0000001234", "0000001235", "0000001236"]
+        )
+        self.assertEqual(
+            [request.get_header("Tr_cont") for request in self.requests], ["", "N", "N"]
+        )
         second = parse_qs(urlsplit(self.requests[1].full_url).query, keep_blank_values=True)
         third = parse_qs(urlsplit(self.requests[2].full_url).query, keep_blank_values=True)
         self.assertEqual(second["CTX_AREA_FK100"], ["87654321 01 CONTEXT  "])
@@ -219,8 +277,11 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
         body["OUTPUT1"] = [{key.upper(): value for key, value in order_row().items()}]
         response = Response(body, continuation=None, headers=(("TR_CONT", "D"),))
         self.assertEqual(self.fetch([response])["rows"][0]["odno"], "0000001234")
-        bad = [Response(page(RT_CD="1")), Response(page([order_row(ODNO="0000007777")])),
-               Response(page(), headers=(("TR_CONT", "M"),))]
+        bad = [
+            Response(page(RT_CD="1")),
+            Response(page([order_row(ODNO="0000007777")])),
+            Response(page(), headers=(("TR_CONT", "M"),)),
+        ]
         for response in bad:
             with self.subTest(response=response), self.assertRaises(ValueError):
                 self.fetch([response])
@@ -230,14 +291,17 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
             b'{"rt_cd":"0","rt_cd":"1","output1":[]}',
             b'{"rt_cd":"0","output1":[],"private":{"x":1,"x":1}}',
             b'{"rt_cd":"0","output1":[],"private":NaN}',
-            b'{"rt_cd":"0","output1":[],"private":Infinity}', b'[]', b'null', b'{',
+            b'{"rt_cd":"0","output1":[],"private":Infinity}',
+            b"[]",
+            b"null",
+            b"{",
         ):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 self.fetch([Response(raw)])
 
     def test_json_numeric_literals_are_bounded_on_python_310_and_finite(self):
         for number in ("9" * 129, "1e999", "-1e999", "1." + "0" * 129):
-            raw = ('{"rt_cd":"0","output1":[],"private":' + number + '}').encode()
+            raw = ('{"rt_cd":"0","output1":[],"private":' + number + "}").encode()
             with self.subTest(size=len(number)), self.assertRaises(ValueError):
                 self.fetch([Response(raw)])
 
@@ -266,8 +330,9 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
                 self.fetch([Response(body, continuation="F")])
 
     def test_cursor_loops_and_page_limit_refuse_without_an_extra_request(self):
-        first = Response(page([], ctx_area_fk100="CONTEXT", ctx_area_nk100="NEXT"),
-                         continuation="M")
+        first = Response(
+            page([], ctx_area_fk100="CONTEXT", ctx_area_nk100="NEXT"), continuation="M"
+        )
         for responses, limit, calls in (([first], 1, 1), ([first, first], 20, 2)):
             self.requests.clear()
             with self.subTest(limit=limit), self.assertRaises(ValueError):
@@ -280,9 +345,16 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
         responses = []
         for index in range(20):
             rows = [order_row(odno=str(index * 15 + offset + 1)) for offset in range(15)]
-            responses.append(Response(page(rows, ctx_area_fk100="CONTEXT-" + str(index),
-                                           ctx_area_nk100="NEXT-" + str(index)),
-                                      continuation="D" if index == 19 else "M"))
+            responses.append(
+                Response(
+                    page(
+                        rows,
+                        ctx_area_fk100="CONTEXT-" + str(index),
+                        ctx_area_nk100="NEXT-" + str(index),
+                    ),
+                    continuation="D" if index == 19 else "M",
+                )
+            )
         result = self.fetch(responses)
         self.assertEqual(result["pages_fetched"], 20)
         self.assertEqual(result["row_count"], 300)
@@ -293,22 +365,39 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
         self.assertEqual(len(self.requests), 20)
 
     def test_duplicate_identity_refuses_same_and_changed_rows_across_pages(self):
-        for repeated in (order_row(), order_row(tot_ccld_qty="5"),
-                         order_row(odno="1234", ord_gno_brno="6010")):
+        for repeated in (
+            order_row(),
+            order_row(tot_ccld_qty="5"),
+            order_row(odno="1234", ord_gno_brno="6010"),
+        ):
             with self.subTest(changed=repeated["tot_ccld_qty"]):
                 with self.assertRaises(ValueError):
                     self.fetch([Response(page([order_row(), repeated]))])
                 with self.assertRaises(ValueError):
-                    self.fetch([
-                        Response(page(ctx_area_fk100="CONTEXT", ctx_area_nk100="NEXT"),
-                                 continuation="M"), Response(page([repeated])),
-                    ])
+                    self.fetch(
+                        [
+                            Response(
+                                page(ctx_area_fk100="CONTEXT", ctx_area_nk100="NEXT"),
+                                continuation="M",
+                            ),
+                            Response(page([repeated])),
+                        ]
+                    )
         # A different branch/order is distinct; an original-order relationship
         # does not make two broker records the same row.
-        result = self.fetch([Response(page([
-            order_row(), order_row(ord_gno_brno="06011"),
-            order_row(odno="0000001235", orgn_odno="0000001234"),
-        ]))])
+        result = self.fetch(
+            [
+                Response(
+                    page(
+                        [
+                            order_row(),
+                            order_row(ord_gno_brno="06011"),
+                            order_row(odno="0000001235", orgn_odno="0000001234"),
+                        ]
+                    )
+                )
+            ]
+        )
         self.assertEqual(result["row_count"], 3)
 
     def test_wrong_date_invalid_identity_and_malformed_numeric_observations_refuse(self):
@@ -322,7 +411,9 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
             "ord_dvsn_cd": ("", "000", "ZZ", 0),
             "ord_qty": ("-1", "1.5", "1e2", "1" * 11, True, 10),
             "tot_ccld_qty": ("NaN", " 1", "１", None),
-            "rmn_qty": ("+1", "1\n"), "cncl_cfrm_qty": (None,), "rjct_qty": ([],),
+            "rmn_qty": ("+1", "1\n"),
+            "cncl_cfrm_qty": (None,),
+            "rjct_qty": ([],),
             "ord_unpr": ("-1", "1e3", "1" * 20, None),
             "tot_ccld_amt": ("NaN", "Infinity", "1" * 20, True),
             "avg_prvs": ("-0.1", "1e3", "NaN", ".5", "1.", "1" * 20),
@@ -337,9 +428,23 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
 
     def test_required_observation_fields_cannot_be_silently_dropped_or_misspelled(self):
         required = (
-            "ord_dt", "ord_gno_brno", "odno", "orgn_odno", "pdno", "sll_buy_dvsn_cd",
-            "ord_dvsn_cd", "ord_qty", "ord_unpr", "tot_ccld_qty", "tot_ccld_amt",
-            "avg_prvs", "rmn_qty", "cncl_cfrm_qty", "rjct_qty", "cncl_yn", "ord_tmd",
+            "ord_dt",
+            "ord_gno_brno",
+            "odno",
+            "orgn_odno",
+            "pdno",
+            "sll_buy_dvsn_cd",
+            "ord_dvsn_cd",
+            "ord_qty",
+            "ord_unpr",
+            "tot_ccld_qty",
+            "tot_ccld_amt",
+            "avg_prvs",
+            "rmn_qty",
+            "cncl_cfrm_qty",
+            "rjct_qty",
+            "cncl_yn",
+            "ord_tmd",
         )
         for field in required:
             row = order_row()
@@ -354,9 +459,15 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
         self.assertNotIn("excg_id_dvsn_cd", self.fetch([Response(page([row]))])["rows"][0])
 
     def test_observation_values_remain_exact_and_do_not_infer_economic_consistency(self):
-        row = order_row(ord_qty="9999999999", tot_ccld_qty="0000000002",
-                        ord_unpr="9999999999999999999", tot_ccld_amt="9999999999999999998",
-                        avg_prvs="123.5000", rmn_qty="9999999999", cncl_yn="N")
+        row = order_row(
+            ord_qty="9999999999",
+            tot_ccld_qty="0000000002",
+            ord_unpr="9999999999999999999",
+            tot_ccld_amt="9999999999999999998",
+            avg_prvs="123.5000",
+            rmn_qty="9999999999",
+            cncl_yn="N",
+        )
         normalized = self.fetch([Response(page([row]))])["rows"][0]
         self.assertEqual(normalized["ord_qty"], "9999999999")
         self.assertEqual(normalized["tot_ccld_qty"], "2")
@@ -372,24 +483,49 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
             body = page([order_row(ord_dt=inquiry_date.replace("-", ""))])
             self.fetch([Response(body)], inquiry_date=inquiry_date, now=lambda: at_midnight_kst)
         self.requests.clear()
-        for inquiry_date in ("2026-10-22", "2026-11-22", "20261121", "2026-2-3",
-                             "2026-02-30", None, 20261121, "２０２６-１１-２１"):
+        for inquiry_date in (
+            "2026-10-22",
+            "2026-11-22",
+            "20261121",
+            "2026-2-3",
+            "2026-02-30",
+            None,
+            20261121,
+            "２０２６-１１-２１",
+        ):
             with self.subTest(inquiry_date=inquiry_date), self.assertRaises(ValueError):
                 self.fetch(inquiry_date=inquiry_date, now=lambda: at_midnight_kst)
         self.assertEqual(self.requests, [])
 
     def test_invalid_configuration_and_credentials_never_reach_http(self):
         cases = (
-            ("account_ref", ""), ("account_ref", "1account"), ("account_ref", "한글"),
-            ("account_ref", "a" * 65), ("account_ref", "paper\n"),
-            ("max_pages", 0), ("max_pages", 21), ("max_pages", True), ("max_pages", "1"),
-            ("cano", "1234567"), ("cano", "１２３４５６７８"), ("cano", 12345678),
-            ("acnt_prdt_cd", "1"), ("acnt_prdt_cd", "01\n"),
-            ("token", None), ("token", ""), ("token", "Bearer token"),
-            ("token", "abc:def"), ("token", "a\r\nheader"), ("token", "a" * 4097),
-            ("appkey", None), ("appkey", "a\x00"), ("appkey", "é"),
-            ("appsecret", "a\t"), ("appsecret", "a" * 4097),
-            ("now", lambda: datetime(2026, 11, 21)), ("now", lambda: "not-a-time"),
+            ("account_ref", ""),
+            ("account_ref", "1account"),
+            ("account_ref", "한글"),
+            ("account_ref", "a" * 65),
+            ("account_ref", "paper\n"),
+            ("max_pages", 0),
+            ("max_pages", 21),
+            ("max_pages", True),
+            ("max_pages", "1"),
+            ("cano", "1234567"),
+            ("cano", "１２３４５６７８"),
+            ("cano", 12345678),
+            ("acnt_prdt_cd", "1"),
+            ("acnt_prdt_cd", "01\n"),
+            ("token", None),
+            ("token", ""),
+            ("token", "Bearer token"),
+            ("token", "abc:def"),
+            ("token", "a\r\nheader"),
+            ("token", "a" * 4097),
+            ("appkey", None),
+            ("appkey", "a\x00"),
+            ("appkey", "é"),
+            ("appsecret", "a\t"),
+            ("appsecret", "a" * 4097),
+            ("now", lambda: datetime(2026, 11, 21)),
+            ("now", lambda: "not-a-time"),
         )
         for field, value in cases:
             with self.subTest(field=field, value_type=type(value).__name__):
@@ -398,17 +534,25 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
         self.assertEqual(self.requests, [])
 
     def test_alias_cannot_copy_an_account_number_or_credential_into_output(self):
-        for alias in ("paper-87654321", "SYNTHETIC-ACCESS-TOKEN",
-                      "SYNTHETIC-APPKEY", "SYNTHETIC-APPSECRET"):
+        for alias in (
+            "paper-87654321",
+            "SYNTHETIC-ACCESS-TOKEN",
+            "SYNTHETIC-APPKEY",
+            "SYNTHETIC-APPSECRET",
+        ):
             with self.subTest(alias=alias), self.assertRaises(ValueError):
                 self.fetch(account_ref=alias)
         self.assertEqual(self.requests, [])
 
     def test_non_200_broker_errors_and_oversized_or_malformed_pages_fail_once(self):
         responses = [Response(page(), status=status) for status in (201, 301, 401, 429, 500)]
-        responses += [Response(page(rt_cd="1")), Response(page(rt_cd=0)),
-                      Response(page(output1={})), Response(page(output1=[None])),
-                      Response(b"x" * 2_000_001)]
+        responses += [
+            Response(page(rt_cd="1")),
+            Response(page(rt_cd=0)),
+            Response(page(output1={})),
+            Response(page(output1=[None])),
+            Response(b"x" * 2_000_001),
+        ]
         for response in responses:
             self.requests.clear()
             with self.subTest(status=response.status, size=len(response.data)):
@@ -440,17 +584,29 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
             self.requests.append(request)
             return Response(page())
 
-        with patch.dict(os.environ, {
-            "HTTPS_PROXY": "http://proxy.invalid:3128", "https_proxy": "http://proxy.invalid:3128",
-            "NO_PROXY": "", "no_proxy": "",
-        }, clear=True), patch("urllib.request.HTTPSHandler.https_open", https_open):
-            self.observer.fetch_order_snapshot(DATE, account_ref="paper-vts", now=lambda: NOW, **AUTH)
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "HTTPS_PROXY": "http://proxy.invalid:3128",
+                    "https_proxy": "http://proxy.invalid:3128",
+                    "NO_PROXY": "",
+                    "no_proxy": "",
+                },
+                clear=True,
+            ),
+            patch("urllib.request.HTTPSHandler.https_open", https_open),
+        ):
+            self.observer.fetch_order_snapshot(
+                DATE, account_ref="paper-vts", now=lambda: NOW, **AUTH
+            )
         self.assertEqual(destinations, [("openapivts.koreainvestment.com:29443", None)])
 
     def test_real_default_transport_refuses_all_redirects_without_followup(self):
         for status in (301, 302, 303, 307, 308):
             for destination in (
-                "https://openapivts.koreainvestment.com:29443/other", "https://steal.invalid/",
+                "https://openapivts.koreainvestment.com:29443/other",
+                "https://steal.invalid/",
             ):
                 self.requests.clear()
 
@@ -462,7 +618,8 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
                     with patch("urllib.request.HTTPSHandler.https_open", redirected):
                         with self.assertRaises(ValueError):
                             self.observer.fetch_order_snapshot(
-                                DATE, account_ref="paper-vts", now=lambda: NOW, **AUTH)
+                                DATE, account_ref="paper-vts", now=lambda: NOW, **AUTH
+                            )
                     self.assertEqual(len(self.requests), 1)
 
     def test_http_308_is_denied_on_python_310_without_inherited_handler(self):
@@ -471,6 +628,7 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
         if inherited is not absent:
             delattr(HTTPRedirectHandler, "http_error_308")
         try:
+
             def redirected(handler, request):
                 self.requests.append(request)
                 return Response({}, status=308, location="https://steal.invalid/")
@@ -478,7 +636,8 @@ class KisVtsOrderSnapshotTests(_ObserverTestCase):
             with patch("urllib.request.HTTPSHandler.https_open", redirected):
                 with self.assertRaises(ValueError):
                     self.observer.fetch_order_snapshot(
-                        DATE, account_ref="paper-vts", now=lambda: NOW, **AUTH)
+                        DATE, account_ref="paper-vts", now=lambda: NOW, **AUTH
+                    )
             self.assertEqual(len(self.requests), 1)
         finally:
             if inherited is not absent:
@@ -493,22 +652,38 @@ class KisVtsOrderSnapshotCliTests(_ObserverTestCase):
         self.directory = Path(temporary.name)
         self.target = self.directory / "new-snapshot.json"
         self.today = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
-        self.arguments = ["--mode", "paper", "--allow-vts-readonly", "--date", self.today,
-                          "--account-ref", "paper-vts", "--max-pages", "20",
-                          "--output", str(self.target)]
+        self.arguments = [
+            "--mode",
+            "paper",
+            "--allow-vts-readonly",
+            "--date",
+            self.today,
+            "--account-ref",
+            "paper-vts",
+            "--max-pages",
+            "20",
+            "--output",
+            str(self.target),
+        ]
 
     def invoke(self, arguments=None, *, responses=None):
         stdout, stderr = StringIO(), StringIO()
-        pending = iter([Response(page([order_row(ord_dt=self.today.replace("-", ""))]))]
-                       if responses is None else responses)
+        pending = iter(
+            [Response(page([order_row(ord_dt=self.today.replace("-", ""))]))]
+            if responses is None
+            else responses
+        )
 
         def https_open(handler, request):
             self.requests.append(request)
             return next(pending)
 
-        with patch.dict(os.environ, ENV, clear=True), \
-                patch("urllib.request.HTTPSHandler.https_open", https_open), \
-                redirect_stdout(stdout), redirect_stderr(stderr):
+        with (
+            patch.dict(os.environ, ENV, clear=True),
+            patch("urllib.request.HTTPSHandler.https_open", https_open),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
             result = self.observer.main(self.arguments if arguments is None else arguments)
         return result, stdout.getvalue(), stderr.getvalue()
 
@@ -541,11 +716,17 @@ class KisVtsOrderSnapshotCliTests(_ObserverTestCase):
             self.assertNotIn(private, self.target.read_text() + stdout + stderr)
 
     def test_cli_failures_never_retain_partial_results_or_private_error_text(self):
-        first = page([order_row(ord_dt=self.today.replace("-", ""))],
-                     ctx_area_fk100="PRIVATE-CURSOR", ctx_area_nk100="PRIVATE-NEXT")
-        code, stdout, stderr = self.invoke(responses=[
-            Response(first, continuation="M"), Response(page(rt_cd="1", msg1=AUTH["token"])),
-        ])
+        first = page(
+            [order_row(ord_dt=self.today.replace("-", ""))],
+            ctx_area_fk100="PRIVATE-CURSOR",
+            ctx_area_nk100="PRIVATE-NEXT",
+        )
+        code, stdout, stderr = self.invoke(
+            responses=[
+                Response(first, continuation="M"),
+                Response(page(rt_cd="1", msg1=AUTH["token"])),
+            ]
+        )
         self.assertEqual(code, 2)
         self.assertEqual(stdout, "")
         self.assertNotIn("PRIVATE-", stderr)
@@ -564,8 +745,11 @@ class KisVtsOrderSnapshotCliTests(_ObserverTestCase):
         self.assertEqual(self.target.stat().st_mtime_ns, before.st_mtime_ns)
         self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o640)
         self.assertEqual(self.requests, [])
-        for destination in (self.directory / "missing" / "snapshot.json",
-                            self.target / "snapshot.json", self.directory / ("a" * 256)):
+        for destination in (
+            self.directory / "missing" / "snapshot.json",
+            self.target / "snapshot.json",
+            self.directory / ("a" * 256),
+        ):
             with self.subTest(destination=destination.name):
                 code, stdout, stderr = self.invoke(self.changed("--output", str(destination)))
                 self.assertEqual(code, 2)
@@ -588,15 +772,18 @@ class KisVtsOrderSnapshotCliTests(_ObserverTestCase):
             self.target.unlink()
 
     def test_cli_requires_explicit_mode_optin_date_and_alias_without_echoing_arguments(self):
-        cases = [self.changed("--mode", "live"), self.changed("--date", "2000-01-01"),
-                 self.changed("--account-ref", "PRIVATE-SECRET\n"),
-                 self.changed("--max-pages", "9" * 100000),
-                 self.arguments + ["--PRIVATE-SECRET"],
-                 self.changed("--output", str(self.directory / "PRIVATE-SECRET" / "out.json"))]
+        cases = [
+            self.changed("--mode", "live"),
+            self.changed("--date", "2000-01-01"),
+            self.changed("--account-ref", "PRIVATE-SECRET\n"),
+            self.changed("--max-pages", "9" * 100000),
+            self.arguments + ["--PRIVATE-SECRET"],
+            self.changed("--output", str(self.directory / "PRIVATE-SECRET" / "out.json")),
+        ]
         for option in ("--mode", "--allow-vts-readonly", "--date", "--account-ref", "--output"):
             arguments = self.arguments.copy()
             start = arguments.index(option)
-            del arguments[start:start + (1 if option == "--allow-vts-readonly" else 2)]
+            del arguments[start : start + (1 if option == "--allow-vts-readonly" else 2)]
             cases.append(arguments)
         for arguments in cases:
             with self.subTest(argument_count=len(arguments)):
@@ -667,7 +854,11 @@ class KisVtsOrderSnapshotCliTests(_ObserverTestCase):
         environment = dict(ENV, PATH=os.defpath, HTTPS_PROXY="http://proxy.invalid:3128")
         result = subprocess.run(
             [sys.executable, "-B", "-S", "-c", guard, str(SCRIPT), *self.arguments],
-            cwd=self.directory, env=environment, capture_output=True, text=True, timeout=10,
+            cwd=self.directory,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")

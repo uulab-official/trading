@@ -1,14 +1,14 @@
 """Strategy package - 전략 베이스 및 구현"""
 
 from trading_strategy.base import (
-    Strategy, 
-    Signal, 
+    Signal,
     SignalType,
+    Strategy,
     StrategyConfig,
 )
-from trading_strategy.rsi_strategy import RSIStrategy
-from trading_strategy.ma_strategy import MAStrategy, MACrossStrategy
 from trading_strategy.breakout_strategy import BreakoutStrategy
+from trading_strategy.ma_strategy import MACrossStrategy, MAStrategy
+from trading_strategy.rsi_strategy import RSIStrategy
 
 __all__ = [
     # Base

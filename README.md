@@ -580,7 +580,7 @@ pip install -e packages/strategy
 pip install -e packages/backtest
 pip install -e packages/monitor
 pip install -e apps/server
-pip install pytest pytest-asyncio pytest-cov
+pip install -r requirements-test.txt
 
 # 테스트
 pytest packages/ apps/server/tests/ -v
@@ -588,6 +588,32 @@ pytest packages/ apps/server/tests/ -v
 # 전체 합성 모의 실험
 python tools/paper_lab.py
 ```
+
+테스트 도구 버전은 `requirements-test.txt`로 고정합니다. pytest는 이 프로젝트에서
+사용하는 asyncio·coverage 플러그인만 명시적으로 불러오며, 폐기 예정인
+`datetime.utcnow()`·`utcfromtimestamp()` 호출은 테스트 실패로 처리합니다.
+
+포맷 검사는 Python 3.11 이상에서 다음과 같이 실행합니다. CI에서도 같은 버전과
+범위로 검사하며 Black·isort 실패 시 Docker 검증 단계로 넘어가지 않습니다.
+
+```bash
+python -m pip install -r requirements-lint.txt
+
+# 코드 정리
+isort packages/ apps/ tools/
+black packages/ apps/ tools/
+
+# CI와 같은 필수 검사
+flake8 packages/ apps/ tools/ --count --select=E9,F63,F7,F82 --show-source --statistics
+black --check packages/ apps/ tools/
+isort --check-only packages/ apps/ tools/
+```
+
+거래 실행 환경은 계속 Python 3.10 이상을 지원합니다. 기존 주문·포지션의 naïve UTC
+타임스탬프와 체크포인트 저장 형식은 유지하며, 과거 시세 조회의 epoch 변환은
+서버의 현지 시간대에 영향을 받지 않도록 명시적인 UTC 시간을 사용합니다.
+
+자세한 수정 범위와 실행 결과는 [포맷·UTC 검증 기록](docs/QUALITY_UTC_VERIFICATION_2026_11_21.md)에 정리했습니다.
 
 ---
 

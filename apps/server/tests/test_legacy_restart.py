@@ -3,14 +3,15 @@
 Each test uses
 two fresh Python processes, a new temporary SQLite DB, and actual paper orders.
 """
+
 import json
 import os
-from pathlib import Path
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 EVIDENCE = None
@@ -33,10 +34,21 @@ strategies:
 
 def child(directory, phase, scenario):
     # Deliberately do not inherit credentials or unrelated environment settings.
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": directory,
-           "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1", "TZ": "UTC"}
-    result = subprocess.run([sys.executable, str(HERE / "legacy_restart_worker.py"), phase, scenario],
-                            cwd=directory, env=env, text=True, capture_output=True, timeout=30)
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": directory,
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TZ": "UTC",
+    }
+    result = subprocess.run(
+        [sys.executable, str(HERE / "legacy_restart_worker.py"), phase, scenario],
+        cwd=directory,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
     if result.returncode:
         raise AssertionError(f"Fixture process failed: {result.stdout}\n{result.stderr}")
     return json.loads(result.stdout), result.stderr
@@ -54,20 +66,27 @@ class ActualLegacyRestartTests(unittest.TestCase):
             if scenario in ("missing_baseline", "corrupt_state"):
                 with sqlite3.connect(Path(temp) / "data/paper_bot_state.db") as conn:
                     if scenario == "missing_baseline":
-                        raw, = conn.execute("SELECT data FROM state WHERE key='bot:restart-audit:legacy_checkpoint:v1'").fetchone()
+                        (raw,) = conn.execute(
+                            "SELECT data FROM state WHERE key='bot:restart-audit:legacy_checkpoint:v1'"
+                        ).fetchone()
                         state = json.loads(raw)
                         del state["accounting"]["daily_start_value"]
                         replacement = json.dumps(state)
                     else:
                         replacement = '{"version":'
-                    conn.execute("UPDATE state SET data=? WHERE key='bot:restart-audit:legacy_checkpoint:v1'", (replacement,))
+                    conn.execute(
+                        "UPDATE state SET data=? WHERE key='bot:restart-audit:legacy_checkpoint:v1'",
+                        (replacement,),
+                    )
                     conn.commit()
             after, after_log = child(temp, "resume", scenario)
-            self.assertFalse(after["new_buy_filled"],
+            self.assertFalse(
+                after["new_buy_filled"],
                 f"{scenario}: fresh process filled a new BUY; before={before['before_stop']['buy_reason']}; "
                 f"restored={after['after_initialize']['buy_reason']}; "
                 f"PnL={after['after_initialize']['daily_pnl_pct']}%; "
-                f"daily_trades={after['after_initialize']['risk']['daily_trades']}")
+                f"daily_trades={after['after_initialize']['risk']['daily_trades']}",
+            )
 
     def test_circuit_survives_graceful_restart(self):
         self.exercise("circuit", "Circuit breaker")

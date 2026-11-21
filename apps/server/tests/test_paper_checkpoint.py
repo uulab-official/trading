@@ -1,21 +1,21 @@
 """Local checkpoint exclusion, cancellation and crash-recovery contracts."""
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import importlib
 import json
-from pathlib import Path
 import select
 import subprocess
 import sys
 import tempfile
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from unittest.mock import patch
 
 import trading_bot.paper_runner as runner_module
-from trading_bot.paper_runner import PaperRunner
 from test_paper_runner import rows, scripted
+from trading_bot.paper_runner import PaperRunner
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = rows([(100, 100), (110, 120), (130, 130), (125, 125)])
@@ -33,8 +33,10 @@ class PaperCheckpointTests(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(guard.stop)
 
     def lock(self):
-        self.assertTrue(hasattr(runner_module, "locked_checkpoint"),
-                        "Paper checkpoint runs require exclusive writer ownership")
+        self.assertTrue(
+            hasattr(runner_module, "locked_checkpoint"),
+            "Paper checkpoint runs require exclusive writer ownership",
+        )
         return runner_module.locked_checkpoint
 
     async def test_concurrent_writer_cannot_roll_checkpoint_progress_backward(self):
@@ -51,9 +53,13 @@ class PaperCheckpointTests(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "paper.json"
-            with ThreadPoolExecutor(max_workers=1) as pool, \
-                 patch.object(runner_module, "_atomic_checkpoint", side_effect=delayed_write):
-                first = pool.submit(asyncio.run, runner().run(FIXTURE, checkpoint_path=path, stop_after=1))
+            with (
+                ThreadPoolExecutor(max_workers=1) as pool,
+                patch.object(runner_module, "_atomic_checkpoint", side_effect=delayed_write),
+            ):
+                first = pool.submit(
+                    asyncio.run, runner().run(FIXTURE, checkpoint_path=path, stop_after=1)
+                )
                 try:
                     self.assertTrue(entered.wait(5), "First writer must hold its checkpoint")
                     with self.assertRaisesRegex(RuntimeError, "already in use"):
@@ -73,7 +79,14 @@ class PaperCheckpointTests(unittest.IsolatedAsyncioTestCase):
             path = Path(directory) / "paper.json"
             alias = Path(directory) / "alias.json"
             alias.symlink_to(path)
-            with self.lock()(path), patch.object(runner_module, "PaperExchange", side_effect=AssertionError("Rejected writer must not start exchange")):
+            with (
+                self.lock()(path),
+                patch.object(
+                    runner_module,
+                    "PaperExchange",
+                    side_effect=AssertionError("Rejected writer must not start exchange"),
+                ),
+            ):
                 with self.assertRaisesRegex(RuntimeError, "already in use"):
                     await runner().run(FIXTURE, checkpoint_path=alias)
             result = await runner().run(FIXTURE, checkpoint_path=alias)
@@ -86,11 +99,15 @@ class PaperCheckpointTests(unittest.IsolatedAsyncioTestCase):
             path = Path(directory) / "paper.json"
             await runner().run(FIXTURE, checkpoint_path=path, stop_after=1)
             before = path.read_bytes()
-            with patch.object(runner_module, "_atomic_checkpoint", side_effect=OSError("simulated write failure")):
+            with patch.object(
+                runner_module, "_atomic_checkpoint", side_effect=OSError("simulated write failure")
+            ):
                 with self.assertRaisesRegex(OSError, "write failure"):
                     await runner().run(FIXTURE, checkpoint_path=path)
             self.assertEqual(path.read_bytes(), before)
-            self.assertEqual(await runner().run(FIXTURE, checkpoint_path=path), await runner().run(FIXTURE))
+            self.assertEqual(
+                await runner().run(FIXTURE, checkpoint_path=path), await runner().run(FIXTURE)
+            )
 
     async def test_cancellation_releases_lock_before_next_resume(self):
         entered = asyncio.Event()
@@ -114,7 +131,9 @@ class PaperCheckpointTests(unittest.IsolatedAsyncioTestCase):
                     task.cancel()
                     with self.assertRaises(asyncio.CancelledError):
                         await task
-            self.assertEqual(await runner().run(FIXTURE, checkpoint_path=path), await runner().run(FIXTURE))
+            self.assertEqual(
+                await runner().run(FIXTURE, checkpoint_path=path), await runner().run(FIXTURE)
+            )
 
     def test_process_death_releases_persistent_lock_file(self):
         lock = self.lock()
@@ -129,11 +148,18 @@ with patch('socket.socket.connect',side_effect=AssertionError('No network')), pa
 """
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "paper.json"
-            process = subprocess.Popen([sys.executable, "-u", "-c", script, str(ROOT / "apps/server"), str(path)],
-                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                       text=True, env={})
+            process = subprocess.Popen(
+                [sys.executable, "-u", "-c", script, str(ROOT / "apps/server"), str(path)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env={},
+            )
             try:
-                self.assertTrue(select.select([process.stdout], [], [], 5)[0], "Child must acquire its lock")
+                self.assertTrue(
+                    select.select([process.stdout], [], [], 5)[0], "Child must acquire its lock"
+                )
                 self.assertEqual(process.stdout.readline().strip(), "locked")
                 with self.assertRaisesRegex(RuntimeError, "already in use"):
                     with lock(path):
@@ -146,7 +172,9 @@ with patch('socket.socket.connect',side_effect=AssertionError('No network')), pa
                 if process.poll() is None:
                     process.terminate()
                     process.communicate(timeout=5)
-            self.assertTrue(path.with_name(".paper.json.lock").exists(), "The shared lock inode must remain")
+            self.assertTrue(
+                path.with_name(".paper.json.lock").exists(), "The shared lock inode must remain"
+            )
 
     async def test_symlink_lock_file_is_rejected_without_touching_target(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -163,14 +191,23 @@ with patch('socket.socket.connect',side_effect=AssertionError('No network')), pa
         self.lock()
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "new" / "paper.json"
-            with patch.dict(sys.modules, {"fcntl": None}), \
-                 patch.object(runner_module, "PaperExchange", side_effect=AssertionError("No exchange startup")):
+            with (
+                patch.dict(sys.modules, {"fcntl": None}),
+                patch.object(
+                    runner_module,
+                    "PaperExchange",
+                    side_effect=AssertionError("No exchange startup"),
+                ),
+            ):
                 with self.assertRaisesRegex(RuntimeError, "POSIX"):
                     await runner().run(FIXTURE, checkpoint_path=path)
             self.assertFalse(path.parent.exists())
 
     async def test_memory_replay_needs_no_lock_file_or_posix_dependency(self):
-        with patch.dict(sys.modules, {"fcntl": None}), patch("os.open", side_effect=AssertionError("Memory replay needs no file lock")):
+        with (
+            patch.dict(sys.modules, {"fcntl": None}),
+            patch("os.open", side_effect=AssertionError("Memory replay needs no file lock")),
+        ):
             result = await runner().run(FIXTURE)
         self.assertEqual(result["bars_processed"], 4)
 

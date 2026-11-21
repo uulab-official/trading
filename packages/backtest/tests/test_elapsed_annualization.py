@@ -1,22 +1,20 @@
 """Elapsed-time annualization contracts for the existing offline engine."""
 
+import importlib.util
+import json
+import math
+import unittest
 from argparse import Namespace
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from decimal import Decimal, localcontext
 from io import StringIO
-import importlib.util
-import json
-import math
 from pathlib import Path
-import unittest
 from unittest.mock import patch
 
 import pandas as pd
-
 from trading_backtest import BacktestConfig, BacktestEngine
 from trading_strategy import Signal, SignalType, Strategy, StrategyConfig
-
 
 START = 1704067200000
 YEAR_MS = 31557600000  # Explicit fixed 365.25-day year.
@@ -31,23 +29,42 @@ class TimedSchedule(Strategy):
     def analyze(self, candles):
         candle = candles.current
         index = (candle.timestamp - START) // self.step
-        return Signal(self.schedule.get(index, SignalType.HOLD), self.symbol, candle.close,
-                      datetime.fromtimestamp(candle.timestamp / 1000, timezone.utc), confidence=1)
+        return Signal(
+            self.schedule.get(index, SignalType.HOLD),
+            self.symbol,
+            candle.close,
+            datetime.fromtimestamp(candle.timestamp / 1000, timezone.utc),
+            confidence=1,
+        )
 
 
 def candles(step=60000, size=55, exit_price=100):
-    return pd.DataFrame([{"timestamp": START + index * step, "open": 100 if index < 52 else exit_price,
-                         "high": 100 if index < 52 else exit_price,
-                         "low": 100 if index < 52 else exit_price,
-                         "close": 100 if index < 52 else exit_price, "volume": 2000}
-                        for index in range(size)])
+    return pd.DataFrame(
+        [
+            {
+                "timestamp": START + index * step,
+                "open": 100 if index < 52 else exit_price,
+                "high": 100 if index < 52 else exit_price,
+                "low": 100 if index < 52 else exit_price,
+                "close": 100 if index < 52 else exit_price,
+                "volume": 2000,
+            }
+            for index in range(size)
+        ]
+    )
 
 
 def run(step=60000, timeframe="1m", data=None, fee="1", slippage="0.5"):
-    config = BacktestConfig(initial_balance=Decimal("1000"), position_size_pct=Decimal("10"),
-                            commission_pct=Decimal(fee), slippage_pct=Decimal(slippage))
+    config = BacktestConfig(
+        initial_balance=Decimal("1000"),
+        position_size_pct=Decimal("10"),
+        commission_pct=Decimal(fee),
+        slippage_pct=Decimal(slippage),
+    )
     engine = BacktestEngine(config)  # Config's default 1h must not override strategy timeframe.
-    return engine, engine.run(TimedSchedule(timeframe, step), data if data is not None else candles(step))
+    return engine, engine.run(
+        TimedSchedule(timeframe, step), data if data is not None else candles(step)
+    )
 
 
 class TestElapsedAnnualization(unittest.TestCase):
@@ -86,17 +103,23 @@ class TestElapsedAnnualization(unittest.TestCase):
         self.assertEqual(result.annualization["elapsed_ms"], 58 * 60000)
 
     def test_more_than_one_year_uses_elapsed_seconds(self):
-        _, result = run(10 * 86400000, "1d", fee="0", slippage="0",
-                        data=candles(10 * 86400000, exit_price=110))
+        _, result = run(
+            10 * 86400000, "1d", fee="0", slippage="0", data=candles(10 * 86400000, exit_price=110)
+        )
         elapsed_ms = (54 * 10 + 1) * 86400000  # Last bar spans 1d despite 10d gaps.
         expected = math.expm1(math.log(1.01) * YEAR_MS / elapsed_ms) * 100
         self.assertAlmostEqual(float(result.cagr), expected, places=10)
         self.assertEqual(result.annualization["elapsed_ms"], elapsed_ms)
 
     def test_open_holdings_annualize_marked_equity_instead_of_cash(self):
-        engine = BacktestEngine(BacktestConfig(initial_balance=Decimal("1000"),
-                                position_size_pct=Decimal("10"), commission_pct=Decimal("0"),
-                                slippage_pct=Decimal("0")))
+        engine = BacktestEngine(
+            BacktestConfig(
+                initial_balance=Decimal("1000"),
+                position_size_pct=Decimal("10"),
+                commission_pct=Decimal("0"),
+                slippage_pct=Decimal("0"),
+            )
+        )
         strategy = TimedSchedule("1d", 86400000, {49: SignalType.BUY})
         result = engine.run(strategy, candles(86400000, exit_price=110))
         self.assertEqual(result.final_balance, Decimal("900"))
@@ -105,8 +128,10 @@ class TestElapsedAnnualization(unittest.TestCase):
         self.assertAlmostEqual(float(result.cagr), expected, places=10)
 
     def annualize(self, initial, final, duration):
-        self.assertTrue(hasattr(BacktestEngine, "_annualized_return"),
-                        "The result needs a finite/undefined elapsed-time calculation")
+        self.assertTrue(
+            hasattr(BacktestEngine, "_annualized_return"),
+            "The result needs a finite/undefined elapsed-time calculation",
+        )
         return BacktestEngine._annualized_return(Decimal(initial), Decimal(final), duration)
 
     def test_exact_one_year_returns_net_growth_percent(self):
@@ -169,10 +194,15 @@ class TestElapsedAnnualization(unittest.TestCase):
         self.assertGreater(value, 0)
 
     def test_invalid_durations_and_equities_are_explicitly_undefined(self):
-        for initial, final, duration in (("1000", "1000", 0), ("1000", "1000", -1),
-                                         ("1000", "-1", YEAR_MS), ("0", "1000", YEAR_MS),
-                                         ("-1", "1000", YEAR_MS), ("NaN", "1", YEAR_MS),
-                                         ("1", "Infinity", YEAR_MS)):
+        for initial, final, duration in (
+            ("1000", "1000", 0),
+            ("1000", "1000", -1),
+            ("1000", "-1", YEAR_MS),
+            ("0", "1000", YEAR_MS),
+            ("-1", "1000", YEAR_MS),
+            ("NaN", "1", YEAR_MS),
+            ("1", "Infinity", YEAR_MS),
+        ):
             with self.subTest(initial=initial, final=final, duration=duration):
                 value, reason = self.annualize(initial, final, duration)
                 self.assertIsNone(value)
@@ -188,7 +218,10 @@ class TestElapsedAnnualization(unittest.TestCase):
         self.assertIsNone(payload["annualized_return"])
         self.assertEqual(payload["annualization"]["status"], "undefined")
         self.assertIn("range", payload["annualization"]["undefined_reason"])
-        json.dumps({key: payload[key] for key in ("cagr", "annualized_return", "annualization")}, allow_nan=False)
+        json.dumps(
+            {key: payload[key] for key in ("cagr", "annualized_return", "annualization")},
+            allow_nan=False,
+        )
 
     def test_short_period_warns_about_extrapolation_and_not_future_returns(self):
         _, result = run()
@@ -205,18 +238,36 @@ class TestElapsedAnnualization(unittest.TestCase):
 
     def test_cli_formats_undefined_cagr_and_prints_duration_and_warning(self):
         from trading_backtest.cli import run_backtest
-        args = Namespace(symbol="BTC/USDT", strategy="ma_cross", timeframe="1m", data_dir="unused",
-                         fast_period=3, slow_period=5, balance=1000, commission=0, slippage=0,
-                         position_size=10, output=None, plot=False)
+
+        args = Namespace(
+            symbol="BTC/USDT",
+            strategy="ma_cross",
+            timeframe="1m",
+            data_dir="unused",
+            fast_period=3,
+            slow_period=5,
+            balance=1000,
+            commission=0,
+            slippage=0,
+            position_size=10,
+            output=None,
+            plot=False,
+        )
         # The existing real MA strategy crosses on this supplied local shape.
         from test_engine_accounting import fixture
+
         data = fixture(55)
         data.loc[:, "timestamp"] = START + data.index * 60000
         data.loc[54, ["open", "high", "low", "close"]] = 80
         output = StringIO()
-        with patch("trading_backtest.cli.HistoricalDataLoader.load_from_csv", return_value=data), \
-             patch("trading_backtest.cli.HistoricalDataLoader.fetch_from_exchange", side_effect=AssertionError("No exchange")), \
-             redirect_stdout(output):
+        with (
+            patch("trading_backtest.cli.HistoricalDataLoader.load_from_csv", return_value=data),
+            patch(
+                "trading_backtest.cli.HistoricalDataLoader.fetch_from_exchange",
+                side_effect=AssertionError("No exchange"),
+            ),
+            redirect_stdout(output),
+        ):
             run_backtest(args)
         text = output.getvalue()
         self.assertIn("CAGR:            N/A", text)
@@ -228,7 +279,9 @@ class TestElapsedAnnualization(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("elapsed_report", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        payload = json.loads(json.dumps(module.build_fixture_report(module.DEFAULT_FIXTURE), allow_nan=False))
+        payload = json.loads(
+            json.dumps(module.build_fixture_report(module.DEFAULT_FIXTURE), allow_nan=False)
+        )
         self.assertIn("annualization", payload)
         self.assertIn("cagr_pct", payload)
         self.assertIn("future returns", payload["annualization"]["warning"])

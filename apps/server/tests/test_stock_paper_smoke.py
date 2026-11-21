@@ -1,15 +1,16 @@
 """End-to-end synthetic paper smoke needs neither network nor credentials."""
-from contextlib import closing, redirect_stderr, redirect_stdout
-from io import StringIO
+
 import json
 import os
-from pathlib import Path
 import sqlite3
 import stat
 import subprocess
 import sys
-from tempfile import TemporaryDirectory
 import unittest
+from contextlib import closing, redirect_stderr, redirect_stdout
+from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -18,12 +19,21 @@ from tools.stock_paper_backup import verify_backup
 from tools.stock_paper_forward import audit_forward, replay_forward
 from tools.stock_paper_smoke import main, run_smoke
 
-
 SETTINGS = {
-    "KRW": {"initial_cash": "1000000", "fee_pct": "0.1", "fast": 5,
-            "slow": 20, "allocation_pct": "20"},
-    "USD": {"initial_cash": "10000", "fee_pct": "0.1", "fast": 5,
-            "slow": 20, "allocation_pct": "20"},
+    "KRW": {
+        "initial_cash": "1000000",
+        "fee_pct": "0.1",
+        "fast": 5,
+        "slow": 20,
+        "allocation_pct": "20",
+    },
+    "USD": {
+        "initial_cash": "10000",
+        "fee_pct": "0.1",
+        "fast": 5,
+        "slow": 20,
+        "allocation_pct": "20",
+    },
 }
 
 
@@ -34,8 +44,10 @@ class SyntheticStockPaperSmokeTests(unittest.TestCase):
         self.root = Path(temporary.name)
 
     def test_synthetic_pipeline_including_backup_deep_verification(self):
-        with patch("socket.socket.connect", side_effect=AssertionError("network forbidden")), \
-             patch("socket.getaddrinfo", side_effect=AssertionError("DNS forbidden")):
+        with (
+            patch("socket.socket.connect", side_effect=AssertionError("network forbidden")),
+            patch("socket.getaddrinfo", side_effect=AssertionError("DNS forbidden")),
+        ):
             outcome = run_smoke()
         self.assertEqual("synthetic_stock_paper_smoke_verified", outcome["status"])
         self.assertEqual("paper", outcome["mode"])
@@ -69,16 +81,24 @@ class SyntheticStockPaperSmokeTests(unittest.TestCase):
         for currency, symbol in (("KRW", "005930"), ("USD", "DEMO")):
             with self.subTest(currency=currency):
                 destination = self.root / currency
-                with patch("socket.socket.connect", side_effect=AssertionError("network forbidden")), \
-                     patch("socket.getaddrinfo", side_effect=AssertionError("DNS forbidden")):
+                with (
+                    patch("socket.socket.connect", side_effect=AssertionError("network forbidden")),
+                    patch("socket.getaddrinfo", side_effect=AssertionError("DNS forbidden")),
+                ):
                     outcome = run_smoke(destination, currency=currency)
                 self.assertTrue(outcome["artifacts_retained"])
                 self.assertEqual(currency, outcome["quote_currency"])
                 self.assertEqual(symbol, outcome["symbol"])
                 self.assertEqual(SETTINGS[currency], outcome["settings"])
                 self.assertEqual(
-                    {"candles.json", "strategy.sqlite", "audit.json", "report.html",
-                     "smoke.json", "backup"},
+                    {
+                        "candles.json",
+                        "strategy.sqlite",
+                        "audit.json",
+                        "report.html",
+                        "smoke.json",
+                        "backup",
+                    },
                     {item.name for item in destination.iterdir()},
                 )
                 fixture = json.loads((destination / "candles.json").read_text())
@@ -134,8 +154,9 @@ class SyntheticStockPaperSmokeTests(unittest.TestCase):
         run_smoke(destination, currency="USD")
         self.assertEqual(0o700, stat.S_IMODE(destination.stat().st_mode))
         for item in destination.rglob("*"):
-            self.assertEqual(0o700 if item.is_dir() else 0o600,
-                             stat.S_IMODE(item.stat().st_mode), str(item))
+            self.assertEqual(
+                0o700 if item.is_dir() else 0o600, stat.S_IMODE(item.stat().st_mode), str(item)
+            )
 
     def test_existing_files_directories_and_symlinks_are_never_replaced(self):
         existing_file = self.root / "existing.json"
@@ -151,7 +172,10 @@ class SyntheticStockPaperSmokeTests(unittest.TestCase):
         dangling.symlink_to(dangling_target, target_is_directory=True)
         before = {path.name for path in self.root.iterdir()}
         for destination in (existing_file, existing_directory, symlink, dangling):
-            with self.subTest(destination=destination.name), self.assertRaises((ValueError, OSError)):
+            with (
+                self.subTest(destination=destination.name),
+                self.assertRaises((ValueError, OSError)),
+            ):
                 run_smoke(destination, currency="USD")
         self.assertEqual(b"preserve-file", existing_file.read_bytes())
         self.assertEqual(b"preserve-directory", marker.read_bytes())
@@ -176,8 +200,14 @@ class SyntheticStockPaperSmokeTests(unittest.TestCase):
 
     def test_cli_retains_usd_evidence_and_refuses_repeated_destination(self):
         destination = self.root / "cli-usd"
-        command = [sys.executable, str(ROOT / "tools/stock_paper_smoke.py"),
-                   "--currency", "USD", "--output-dir", str(destination)]
+        command = [
+            sys.executable,
+            str(ROOT / "tools/stock_paper_smoke.py"),
+            "--currency",
+            "USD",
+            "--output-dir",
+            str(destination),
+        ]
         first = subprocess.run(command, cwd=self.root, capture_output=True, text=True, timeout=20)
         self.assertEqual(0, first.returncode, first.stderr)
         self.assertEqual("", first.stderr)
@@ -185,9 +215,13 @@ class SyntheticStockPaperSmokeTests(unittest.TestCase):
         self.assertEqual("USD", outcome["quote_currency"])
         self.assertTrue(outcome["artifacts_retained"])
         self.assertEqual(outcome, json.loads((destination / "smoke.json").read_text()))
-        self.assertTrue(verify_backup(destination / "backup", deep=True)["economic_replay_verified"])
+        self.assertTrue(
+            verify_backup(destination / "backup", deep=True)["economic_replay_verified"]
+        )
         saved_summary = (destination / "smoke.json").read_bytes()
-        repeated = subprocess.run(command, cwd=self.root, capture_output=True, text=True, timeout=20)
+        repeated = subprocess.run(
+            command, cwd=self.root, capture_output=True, text=True, timeout=20
+        )
         self.assertEqual(2, repeated.returncode)
         self.assertEqual("", repeated.stdout)
         self.assertNotIn(str(destination), repeated.stderr)
@@ -196,8 +230,11 @@ class SyntheticStockPaperSmokeTests(unittest.TestCase):
     def test_cli_failure_keeps_partial_evidence_without_success_summary(self):
         destination = self.root / "partial"
         output, errors = StringIO(), StringIO()
-        with patch("tools.stock_paper_smoke.generate", side_effect=RuntimeError("PRIVATE-FAILURE")), \
-             redirect_stdout(output), redirect_stderr(errors):
+        with (
+            patch("tools.stock_paper_smoke.generate", side_effect=RuntimeError("PRIVATE-FAILURE")),
+            redirect_stdout(output),
+            redirect_stderr(errors),
+        ):
             status = main(["--output-dir", str(destination), "--currency", "USD"])
         self.assertEqual(2, status)
         self.assertEqual("", output.getvalue())
@@ -229,8 +266,11 @@ class SyntheticStockPaperSmokeTests(unittest.TestCase):
             return real_fsync(descriptor)
 
         output, errors = StringIO(), StringIO()
-        with patch("tools.stock_paper_smoke.os.fsync", fail_completion_sync), \
-             redirect_stdout(output), redirect_stderr(errors):
+        with (
+            patch("tools.stock_paper_smoke.os.fsync", fail_completion_sync),
+            redirect_stdout(output),
+            redirect_stderr(errors),
+        ):
             status = main(["--output-dir", str(destination)])
         self.assertEqual(2, status)
         self.assertEqual("", output.getvalue())

@@ -6,15 +6,16 @@ and no supplied access token. A failed request never retries or refreshes.
 No account identifiers, holdings access, private order endpoints, or trading.
 Credentials must be provided via environment, never CLI flags or saved files.
 """
+
 import argparse
-from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import re
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlencode
-from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages/data"))
@@ -42,16 +43,22 @@ def _open_no_redirect(request, *, timeout):
 
 def _bearer_token(value):
     # RFC 6750 section 2.1 b64token; padding is permitted only at the end.
-    if (not isinstance(value, str) or not 1 <= len(value) <= MAX_TOKEN_LENGTH
-            or not re.fullmatch(r"[-A-Za-z0-9._~+/]+=*", value)):
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= MAX_TOKEN_LENGTH
+        or not re.fullmatch(r"[-A-Za-z0-9._~+/]+=*", value)
+    ):
         raise ValueError("A bounded, valid Bearer token is required")
     return value
 
 
 def _credential(value):
-    if (not isinstance(value, str) or not value.strip()
-            or len(value) > MAX_CREDENTIAL_LENGTH
-            or any(not 32 <= ord(character) <= 126 for character in value)):
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > MAX_CREDENTIAL_LENGTH
+        or any(not 32 <= ord(character) <= 126 for character in value)
+    ):
         raise ValueError("Toss OAuth credentials must be bounded printable ASCII strings")
     return value
 
@@ -59,8 +66,7 @@ def _credential(value):
 def _observation_time(value):
     if value is None:
         return None
-    if (not isinstance(value, datetime) or value.tzinfo is None
-            or value.utcoffset() is None):
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("Observation time must be timezone aware")
     try:
         return value.astimezone(timezone.utc)
@@ -82,10 +88,19 @@ def _read_json(request, opener):
     return parsed
 
 
-def fetch_readonly_minute(symbol, currency, *, count=100, adjusted=True,
-                          client_id=None, client_secret=None,
-                          access_token=None, issue_token=False,
-                          opener=_open_no_redirect, observed_at=None):
+def fetch_readonly_minute(
+    symbol,
+    currency,
+    *,
+    count=100,
+    adjusted=True,
+    client_id=None,
+    client_secret=None,
+    access_token=None,
+    issue_token=False,
+    opener=_open_no_redirect,
+    observed_at=None,
+):
     if not isinstance(symbol, str) or not re.fullmatch(r"[A-Za-z0-9.-]{1,20}", symbol):
         raise ValueError("Invalid symbol")
     if currency not in ("KRW", "USD"):
@@ -107,34 +122,43 @@ def fetch_readonly_minute(symbol, currency, *, count=100, adjusted=True,
         client_secret = _credential(client_secret)
         token_request = Request(
             HOST + "/oauth2/token",
-            data=urlencode({
-                "grant_type": "client_credentials",
-                "client_id": client_id,
-                "client_secret": client_secret,
-            }).encode("utf-8"),
-            headers={"Accept": "application/json",
-                     "Content-Type": "application/x-www-form-urlencoded"},
+            data=urlencode(
+                {
+                    "grant_type": "client_credentials",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                }
+            ).encode("utf-8"),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
             method="POST",
         )
         issued = _read_json(token_request, opener)
         if issued.get("token_type") != "Bearer":
             raise ValueError("Toss did not issue a valid Bearer token")
         token = _bearer_token(issued.get("access_token"))
-    query = urlencode({
-        "symbol": symbol, "interval": "1m", "count": count,
-        "adjusted": str(adjusted).lower(),
-    })
+    query = urlencode(
+        {
+            "symbol": symbol,
+            "interval": "1m",
+            "count": count,
+            "adjusted": str(adjusted).lower(),
+        }
+    )
     # Do not supply X-Tossinvest-Account: market data has no account scope.
     candle_request = Request(
         HOST + "/api/v1/candles?" + query,
-        headers={"Accept": "application/json",
-                 "Authorization": "Bearer " + token},
+        headers={"Accept": "application/json", "Authorization": "Bearer " + token},
         method="GET",
     )
     page = _read_json(candle_request, opener)
     now = observed if observed is not None else datetime.now(timezone.utc)
     normalized = parse_toss_minute_candles(
-        page, symbol=symbol, quote_currency=currency,
+        page,
+        symbol=symbol,
+        quote_currency=currency,
         observed_at=now,
     )
     normalized["source"] = "toss_readonly_authenticated_quote"
@@ -149,11 +173,17 @@ def fetch_readonly_minute(symbol, currency, *, count=100, adjusted=True,
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("paper",), required=True)
-    parser.add_argument("--allow-network-readonly", action="store_true",
-                        help="Explicitly authorize read-only market-data network access")
-    parser.add_argument("--issue-token", action="store_true",
-                        help="Allow new OAuth issuance if no access token is supplied; "
-                             "this invalidates the client's previous token")
+    parser.add_argument(
+        "--allow-network-readonly",
+        action="store_true",
+        help="Explicitly authorize read-only market-data network access",
+    )
+    parser.add_argument(
+        "--issue-token",
+        action="store_true",
+        help="Allow new OAuth issuance if no access token is supplied; "
+        "this invalidates the client's previous token",
+    )
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--currency", required=True, choices=("KRW", "USD"))
     parser.add_argument("--count", type=int, default=100)
@@ -174,7 +204,9 @@ def main(argv=None):
                     parser.error("Output ancestors must be directories")
                 break
         snapshot = fetch_readonly_minute(
-            args.symbol, args.currency, count=args.count,
+            args.symbol,
+            args.currency,
+            count=args.count,
             adjusted=args.adjusted == "true",
             client_id=os.environ.get("TOSS_CLIENT_ID"),
             client_secret=os.environ.get("TOSS_CLIENT_SECRET"),
@@ -195,8 +227,7 @@ def main(argv=None):
     except Exception:
         # Never print OAuth client ID/secret, access tokens, request bodies,
         # URL headers, or upstream response text.
-        print("Read-only Toss market snapshot failed; no order API was called.",
-              file=sys.stderr)
+        print("Read-only Toss market snapshot failed; no order API was called.", file=sys.stderr)
         return 2
     print(str(target))
     return 0

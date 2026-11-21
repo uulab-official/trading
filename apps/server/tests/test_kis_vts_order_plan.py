@@ -1,16 +1,16 @@
 """Offline CLI isolation, exclusive output, permissions, and secret suppression."""
 
-from contextlib import redirect_stderr, redirect_stdout
 import importlib
-from io import StringIO
 import json
 import os
-from pathlib import Path
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -31,18 +31,33 @@ class KisVtsOrderPlanCliTests(unittest.TestCase):
         self.directory = Path(temporary.name)
         self.target = self.directory / "new plan.json"
         self.arguments = [
-            "--mode", "paper", "--client-order-id", "local-stock-001",
-            "--symbol", "005930", "--side", "buy", "--quantity", "2",
-            "--limit-price", "70100", "--max-notional", "140200",
-            "--output", str(self.target),
+            "--mode",
+            "paper",
+            "--client-order-id",
+            "local-stock-001",
+            "--symbol",
+            "005930",
+            "--side",
+            "buy",
+            "--quantity",
+            "2",
+            "--limit-price",
+            "70100",
+            "--max-notional",
+            "140200",
+            "--output",
+            str(self.target),
         ]
 
     def invoke(self, arguments=None):
         stdout, stderr = StringIO(), StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr), \
-                patch("socket.socket.connect", side_effect=AssertionError("No socket")), \
-                patch("socket.create_connection", side_effect=AssertionError("No connection")), \
-                patch("socket.getaddrinfo", side_effect=AssertionError("No DNS")):
+        with (
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+            patch("socket.socket.connect", side_effect=AssertionError("No socket")),
+            patch("socket.create_connection", side_effect=AssertionError("No connection")),
+            patch("socket.getaddrinfo", side_effect=AssertionError("No DNS")),
+        ):
             code = self.cli.main(self.arguments if arguments is None else arguments)
         return code, stdout.getvalue(), stderr.getvalue()
 
@@ -98,7 +113,11 @@ class KisVtsOrderPlanCliTests(unittest.TestCase):
         }
         result = subprocess.run(
             [sys.executable, "-B", "-S", "-c", guard, str(SCRIPT), *self.arguments],
-            cwd=self.directory, env=environment, capture_output=True, text=True, timeout=10,
+            cwd=self.directory,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
@@ -137,10 +156,16 @@ class KisVtsOrderPlanCliTests(unittest.TestCase):
 
     def test_invalid_inputs_do_not_create_a_plan(self):
         cases = (
-            ("--mode", "live"), ("--symbol", "005930\n"), ("--side", "short"),
-            ("--quantity", "0"), ("--quantity", "1.5"), ("--quantity", "True"),
-            ("--quantity", "9" * 100000), ("--limit-price", "01"),
-            ("--limit-price", "NaN"), ("--max-notional", "140199"),
+            ("--mode", "live"),
+            ("--symbol", "005930\n"),
+            ("--side", "short"),
+            ("--quantity", "0"),
+            ("--quantity", "1.5"),
+            ("--quantity", "True"),
+            ("--quantity", "9" * 100000),
+            ("--limit-price", "01"),
+            ("--limit-price", "NaN"),
+            ("--max-notional", "140199"),
             ("--client-order-id", "invalid\nclient"),
         )
         for option, value in cases:
@@ -155,7 +180,7 @@ class KisVtsOrderPlanCliTests(unittest.TestCase):
         for option in ("--mode", "--max-notional", "--client-order-id", "--output"):
             arguments = self.arguments.copy()
             index = arguments.index(option)
-            del arguments[index:index + 2]
+            del arguments[index : index + 2]
             with self.subTest(option=option):
                 code, stdout, stderr = self.invoke(arguments)
                 self.assertEqual(code, 2)
@@ -166,7 +191,8 @@ class KisVtsOrderPlanCliTests(unittest.TestCase):
     def test_argument_errors_do_not_echo_hostile_values_or_secret_paths(self):
         secret = "FAKE_SECRET_DO_NOT_ECHO"
         cases = (
-            self.changed("--mode", secret), self.changed("--quantity", secret),
+            self.changed("--mode", secret),
+            self.changed("--quantity", secret),
             self.arguments + ["--" + secret],
             self.changed("--output", str(self.directory / secret / "plan.json")),
         )
@@ -180,7 +206,9 @@ class KisVtsOrderPlanCliTests(unittest.TestCase):
                 self.assertEqual(list(self.directory.iterdir()), [])
 
     def test_missing_parent_directory_is_not_created_on_failure(self):
-        code, stdout, stderr = self.invoke(self.changed("--output", str(self.directory / "missing/plan.json")))
+        code, stdout, stderr = self.invoke(
+            self.changed("--output", str(self.directory / "missing/plan.json"))
+        )
         self.assertEqual(code, 2)
         self.assertEqual(stdout, "")
         self.assertNotIn("Traceback", stderr)

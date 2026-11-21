@@ -1,15 +1,17 @@
 """Sandbox broker fault cases run fully offline without actual orders."""
-from decimal import Decimal
-from pathlib import Path
+
 import sys
 import tempfile
 import unittest
+from decimal import Decimal
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "packages/core"))
 from trading_core.order_intent_journal import OrderIntentJournal
 from trading_core.sandbox_order_emulator import (
-    SandboxOrderEmulator, SimulatedLostAcknowledgment,
+    SandboxOrderEmulator,
+    SimulatedLostAcknowledgment,
 )
 
 
@@ -36,8 +38,7 @@ class SandboxOrderEmulatorTests(unittest.TestCase):
     def test_ambiguous_ack_does_not_resubmit_and_blocks_other_intents(self):
         self.journal.reserve("intent-001", "BTC/KRW", "buy", "1")
         with self.assertRaises(SimulatedLostAcknowledgment):
-            self.broker.submit_once("intent-001", "BTC/KRW", "buy", "1",
-                                    lose_ack=True)
+            self.broker.submit_once("intent-001", "BTC/KRW", "buy", "1", lose_ack=True)
         self.journal.mark_uncertain("intent-001")
         self.assertEqual(1, len(self.broker.orders))
         with self.assertRaises(ValueError):
@@ -73,8 +74,9 @@ class SandboxOrderEmulatorTests(unittest.TestCase):
         marker = self.broker.evidence(evidence)
         self.assertTrue(marker.startswith("sim-"))
         self.assertEqual(marker, self.broker.evidence(evidence))
-        self.assertNotEqual(marker, self.broker.evidence(
-            self.broker.fill("intent-001", "1", price="100")))
+        self.assertNotEqual(
+            marker, self.broker.evidence(self.broker.fill("intent-001", "1", price="100"))
+        )
 
 
 if __name__ == "__main__":

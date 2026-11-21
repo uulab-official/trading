@@ -1,15 +1,17 @@
 """Read-only recovery candidate review; no network or broker calls."""
+
 import asyncio
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
+from trading_bot.paper_runner import PaperRunConfig, PaperRunner
+
 from tools.review_paper_backfill import review_candidate
-from trading_bot.paper_runner import PaperRunner, PaperRunConfig
 
 
 class PaperCandidateReviewTests(unittest.TestCase):
@@ -22,13 +24,12 @@ class PaperCandidateReviewTests(unittest.TestCase):
         self.candidate = self.folder / "candidate.json"
         self.base = json.loads((ROOT / "config/examples/offline_fixture.json").read_text())
         self.archive.write_text(json.dumps(self.base))
-        asyncio.run(PaperRunner(PaperRunConfig()).run(
-            self.base["candles"], checkpoint_path=self.checkpoint))
+        asyncio.run(
+            PaperRunner(PaperRunConfig()).run(self.base["candles"], checkpoint_path=self.checkpoint)
+        )
         self.proposed = json.loads(json.dumps(self.base))
         last = self.proposed["candles"][-1]
-        self.proposed["candles"].append([
-            last[0] + 3600000, "34", "34", "34", "34", "1000"
-        ])
+        self.proposed["candles"].append([last[0] + 3600000, "34", "34", "34", "34", "1000"])
         self.proposed["backfill_review"] = {
             "appended_bars": 1,
             "manual_promotion_required": True,
@@ -47,15 +48,21 @@ class PaperCandidateReviewTests(unittest.TestCase):
         self.assertEqual(before_checkpoint, self.checkpoint.read_bytes())
 
     def test_active_supervisor_denies_manual_candidate_review(self):
-        from trading_bot.paper_checkpoint import locked_checkpoint, CheckpointInUseError
+        from trading_bot.paper_checkpoint import CheckpointInUseError, locked_checkpoint
+
         owner = self.checkpoint.with_name(self.checkpoint.name + ".supervisor")
-        before = self.archive.read_bytes(), self.checkpoint.read_bytes(), self.candidate.read_bytes()
+        before = (
+            self.archive.read_bytes(),
+            self.checkpoint.read_bytes(),
+            self.candidate.read_bytes(),
+        )
         with locked_checkpoint(owner):
             with self.assertRaises(CheckpointInUseError):
                 review_candidate(self.archive, self.checkpoint, self.candidate)
-        self.assertEqual(before, (self.archive.read_bytes(),
-                                  self.checkpoint.read_bytes(),
-                                  self.candidate.read_bytes()))
+        self.assertEqual(
+            before,
+            (self.archive.read_bytes(), self.checkpoint.read_bytes(), self.candidate.read_bytes()),
+        )
 
     def test_changed_history_rejected(self):
         changed = json.loads(self.candidate.read_text())

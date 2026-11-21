@@ -1,11 +1,12 @@
 """Durable stock paper ledger: restart, concurrency, tampering, and valuation."""
-from concurrent.futures import ThreadPoolExecutor
-from decimal import Decimal
-from pathlib import Path
+
 import sqlite3
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "packages/core"))
@@ -28,8 +29,9 @@ class StockPaperLedgerTests(unittest.TestCase):
         )
         self.assertEqual(buy, reopened.execute("buy-1", "005930", "buy", 2, price="10000"))
         self.assertEqual(1, reopened.report(marks={"005930": "12000"})["simulated_fills"])
-        self.assertEqual(Decimal("103980"), Decimal(
-            reopened.report(marks={"005930": "12000"})["marked_equity"]))
+        self.assertEqual(
+            Decimal("103980"), Decimal(reopened.report(marks={"005930": "12000"})["marked_equity"])
+        )
 
     def test_restarted_sell_keeps_cash_and_holdings_exact(self):
         self.ledger.execute("b1", "005930", "buy", 2, price="10000")
@@ -66,8 +68,9 @@ class StockPaperLedgerTests(unittest.TestCase):
             ("KRW", "100000", "0.2"),
         ):
             with self.assertRaises(ValueError):
-                StockPaperLedger(self.path, quote_currency=currency,
-                                 initial_cash=balance, fee_pct=fee)
+                StockPaperLedger(
+                    self.path, quote_currency=currency, initial_cash=balance, fee_pct=fee
+                )
 
     def test_open_instance_refuses_metadata_mutation_after_initialization(self):
         self.ledger.execute("b1", "005930", "buy", 1, price="10000")
@@ -87,6 +90,7 @@ class StockPaperLedgerTests(unittest.TestCase):
                 return True
             except ValueError:
                 return False
+
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(attempt, ("buy-1", "buy-2")))
         self.assertEqual(1, sum(results))
@@ -101,39 +105,62 @@ class StockPaperLedgerTests(unittest.TestCase):
 
     def test_strategy_prefix_replay_preserves_opaque_client_ids_across_restart(self):
         buy = {
-            "mode": "paper", "client_id": "request:alpha", "symbol": "005930",
-            "side": "buy", "shares": 1, "price": "10000", "gross": "10000",
-            "fee": "10.0", "quote_currency": "KRW", "status": "simulated_fill",
+            "mode": "paper",
+            "client_id": "request:alpha",
+            "symbol": "005930",
+            "side": "buy",
+            "shares": 1,
+            "price": "10000",
+            "gross": "10000",
+            "fee": "10.0",
+            "quote_currency": "KRW",
+            "status": "simulated_fill",
         }
         sell = {
-            "mode": "paper", "client_id": "request:omega", "symbol": "005930",
-            "side": "sell", "shares": 1, "price": "12000", "gross": "12000",
-            "fee": "12.0", "quote_currency": "KRW", "status": "simulated_fill",
+            "mode": "paper",
+            "client_id": "request:omega",
+            "symbol": "005930",
+            "side": "sell",
+            "shares": 1,
+            "price": "12000",
+            "gross": "12000",
+            "fee": "12.0",
+            "quote_currency": "KRW",
+            "status": "simulated_fill",
         }
         first_bar = [0, "10000", "10000", "10000", "10000", "100"]
         next_bar = [60000, "12000", "12000", "12000", "12000", "100"]
         committed_fills = {1: [buy], 2: [buy, sell]}
         identity = {"strategy": "opaque-order-identifiers"}
         first = self.ledger.apply_strategy_replay(
-            {"mode": "paper", "candles": [first_bar]}, identity=identity,
-            expected_fills=[buy], expected_fills_for_prefix=committed_fills.__getitem__,
-            marks={"005930": "10000"}, expected_equity="99990",
+            {"mode": "paper", "candles": [first_bar]},
+            identity=identity,
+            expected_fills=[buy],
+            expected_fills_for_prefix=committed_fills.__getitem__,
+            marks={"005930": "10000"},
+            expected_equity="99990",
         )
         self.assertEqual(1, first["new_simulated_fills"])
         full_fixture = {"mode": "paper", "candles": [first_bar, next_bar]}
         appended = self.ledger.apply_strategy_replay(
-            full_fixture, identity=identity, expected_fills=[buy, sell],
+            full_fixture,
+            identity=identity,
+            expected_fills=[buy, sell],
             expected_fills_for_prefix=committed_fills.__getitem__,
-            marks={"005930": "12000"}, expected_equity="101978",
+            marks={"005930": "12000"},
+            expected_equity="101978",
         )
         self.assertEqual(1, appended["new_simulated_fills"])
         reopened = StockPaperLedger(
             self.path, quote_currency="KRW", initial_cash="100000", fee_pct="0.1"
         )
         repeated = reopened.apply_strategy_replay(
-            full_fixture, identity=identity, expected_fills=[buy, sell],
+            full_fixture,
+            identity=identity,
+            expected_fills=[buy, sell],
             expected_fills_for_prefix=committed_fills.__getitem__,
-            marks={"005930": "12000"}, expected_equity="101978",
+            marks={"005930": "12000"},
+            expected_equity="101978",
         )
         self.assertEqual(0, repeated["new_simulated_fills"])
         self.assertEqual(0, repeated["appended_bars"])

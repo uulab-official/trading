@@ -4,15 +4,16 @@ This is separate from PaperRunner's fixture checkpoint. No credentials, complete
 configuration, network client, real exchange, or automatic order replay belongs
 here. Invalid prior state is inspectable but never a fresh funded simulation.
 """
-from copy import deepcopy
-from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation
+
 import errno
 import json
 import os
 import sqlite3
 import stat
 import uuid
+from copy import deepcopy
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 
 from trading_core.order_manager import Order, OrderManager, OrderSide, OrderStatus, OrderType
 from trading_core.paper_exchange import PaperExchange
@@ -25,19 +26,82 @@ class CheckpointError(RuntimeError):
     """Recovery requires attention; orders must not guess what happened."""
 
 
-TOP_KEYS = {"version", "mode", "bot_id", "quote_asset", "risk_config", "generation",
-            "last_observed_at", "portfolio", "accounting", "risk", "exchange", "orders", "intent"}
-RISK_FIELDS = ("max_position_size_pct", "max_positions", "risk_per_trade_pct",
-               "max_daily_loss_pct", "max_daily_trades", "max_leverage",
-               "default_stop_loss_pct", "default_take_profit_pct",
-               "circuit_breaker_loss_pct", "cooldown_minutes_after_loss")
-PORTFOLIO_KEYS = {"initial_balance", "cash_balance", "positions", "trades", "total_pnl", "win_count", "loss_count"}
-POSITION_KEYS = {"symbol", "side", "size", "entry_price", "current_price", "stop_loss_price",
-                 "take_profit_price", "opened_at", "order_id", "strategy_id"}
-TRADE_KEYS = {"symbol", "side", "size", "entry_price", "exit_price", "pnl", "pnl_pct",
-              "opened_at", "closed_at", "strategy_id", "accounting_date"}
-ORDER_KEYS = {"client_order_id", "symbol", "side", "order_type", "amount", "price", "status",
-              "filled", "remaining", "exchange_order_id", "created_at", "updated_at", "strategy_id"}
+TOP_KEYS = {
+    "version",
+    "mode",
+    "bot_id",
+    "quote_asset",
+    "risk_config",
+    "generation",
+    "last_observed_at",
+    "portfolio",
+    "accounting",
+    "risk",
+    "exchange",
+    "orders",
+    "intent",
+}
+RISK_FIELDS = (
+    "max_position_size_pct",
+    "max_positions",
+    "risk_per_trade_pct",
+    "max_daily_loss_pct",
+    "max_daily_trades",
+    "max_leverage",
+    "default_stop_loss_pct",
+    "default_take_profit_pct",
+    "circuit_breaker_loss_pct",
+    "cooldown_minutes_after_loss",
+)
+PORTFOLIO_KEYS = {
+    "initial_balance",
+    "cash_balance",
+    "positions",
+    "trades",
+    "total_pnl",
+    "win_count",
+    "loss_count",
+}
+POSITION_KEYS = {
+    "symbol",
+    "side",
+    "size",
+    "entry_price",
+    "current_price",
+    "stop_loss_price",
+    "take_profit_price",
+    "opened_at",
+    "order_id",
+    "strategy_id",
+}
+TRADE_KEYS = {
+    "symbol",
+    "side",
+    "size",
+    "entry_price",
+    "exit_price",
+    "pnl",
+    "pnl_pct",
+    "opened_at",
+    "closed_at",
+    "strategy_id",
+    "accounting_date",
+}
+ORDER_KEYS = {
+    "client_order_id",
+    "symbol",
+    "side",
+    "order_type",
+    "amount",
+    "price",
+    "status",
+    "filled",
+    "remaining",
+    "exchange_order_id",
+    "created_at",
+    "updated_at",
+    "strategy_id",
+}
 ACCOUNTING_KEYS = {"date", "daily_start_value", "daily_pnl"}
 RISK_KEYS = {"date", "total_pnl", "trade_count", "loss_count", "circuit_breaker", "cooldown_until"}
 
@@ -98,8 +162,14 @@ def _iso(value):
 
 def risk_identity(config):
     """Explicit allowlist: never serialize an application's entire config."""
-    return {name: str(getattr(config, name)) if isinstance(getattr(config, name), Decimal)
-            else getattr(config, name) for name in RISK_FIELDS}
+    return {
+        name: (
+            str(getattr(config, name))
+            if isinstance(getattr(config, name), Decimal)
+            else getattr(config, name)
+        )
+        for name in RISK_FIELDS
+    }
 
 
 def is_legacy_paper_symbol(symbol):
@@ -107,21 +177,35 @@ def is_legacy_paper_symbol(symbol):
     if not isinstance(symbol, str):
         return False
     parts = symbol.split("/")
-    return (len(parts) == 2 and parts[1] == "USDT" and bool(parts[0])
-            and parts[0] != "USDT" and parts[0] == parts[0].strip() and ":" not in parts[0])
+    return (
+        len(parts) == 2
+        and parts[1] == "USDT"
+        and bool(parts[0])
+        and parts[0] != "USDT"
+        and parts[0] == parts[0].strip()
+        and ":" not in parts[0]
+    )
 
 
 def _portfolio_snapshot(portfolio):
     data = portfolio.to_dict()
     data.pop("daily_start_value")
-    data["trades"] = [{
-        "symbol": trade.symbol, "side": trade.side, "size": str(trade.size),
-        "entry_price": str(trade.entry_price), "exit_price": str(trade.exit_price),
-        "pnl": str(trade.pnl), "pnl_pct": str(trade.pnl_pct),
-        "opened_at": _iso(trade.opened_at), "closed_at": _iso(trade.closed_at),
-        "strategy_id": trade.strategy_id,
-        "accounting_date": trade.accounting_date.isoformat() if trade.accounting_date else None,
-    } for trade in portfolio._trades]
+    data["trades"] = [
+        {
+            "symbol": trade.symbol,
+            "side": trade.side,
+            "size": str(trade.size),
+            "entry_price": str(trade.entry_price),
+            "exit_price": str(trade.exit_price),
+            "pnl": str(trade.pnl),
+            "pnl_pct": str(trade.pnl_pct),
+            "opened_at": _iso(trade.opened_at),
+            "closed_at": _iso(trade.closed_at),
+            "strategy_id": trade.strategy_id,
+            "accounting_date": trade.accounting_date.isoformat() if trade.accounting_date else None,
+        }
+        for trade in portfolio._trades
+    ]
     for position in data["positions"].values():
         position["opened_at"] = _iso(datetime.fromisoformat(position["opened_at"]))
     return data
@@ -154,15 +238,28 @@ def _restore_economics(data):
         _object(item, TRADE_KEYS, "trade")
         if item["side"] != "sell":
             raise CheckpointError("Invalid close side")
-        kwargs = {name: _number(item[name], positive=name in ("size", "entry_price", "exit_price"))
-                  for name in ("size", "entry_price", "exit_price", "pnl", "pnl_pct")}
+        kwargs = {
+            name: _number(item[name], positive=name in ("size", "entry_price", "exit_price"))
+            for name in ("size", "entry_price", "exit_price", "pnl", "pnl_pct")
+        }
         if kwargs["pnl"] != (kwargs["exit_price"] - kwargs["entry_price"]) * kwargs["size"]:
             raise CheckpointError("Trade PnL does not match its close")
-        if kwargs["pnl_pct"] != (kwargs["exit_price"] - kwargs["entry_price"]) / kwargs["entry_price"] * 100:
+        if (
+            kwargs["pnl_pct"]
+            != (kwargs["exit_price"] - kwargs["entry_price"]) / kwargs["entry_price"] * 100
+        ):
             raise CheckpointError("Trade PnL percentage does not match its close")
-        portfolio._trades.append(Trade(symbol=item["symbol"], side="sell", **kwargs,
-            opened_at=_time(item["opened_at"]), closed_at=_time(item["closed_at"]),
-            strategy_id=item["strategy_id"], accounting_date=_day(item["accounting_date"])))
+        portfolio._trades.append(
+            Trade(
+                symbol=item["symbol"],
+                side="sell",
+                **kwargs,
+                opened_at=_time(item["opened_at"]),
+                closed_at=_time(item["closed_at"]),
+                strategy_id=item["strategy_id"],
+                accounting_date=_day(item["accounting_date"]),
+            )
+        )
     exchange = PaperExchange.from_snapshot(data["exchange"])
     if exchange.snapshot() != data["exchange"] or exchange.fee_pct or exchange.slippage_pct:
         raise CheckpointError("Unsupported or noncanonical legacy paper ledger")
@@ -174,7 +271,9 @@ def _restore_economics(data):
         symbol = fill["symbol"]
         if not symbol.endswith("/USDT"):
             raise CheckpointError("Unsupported quote currency")
-        size, price = _number(fill["amount"], positive=True), _number(fill["average"], positive=True)
+        size, price = _number(fill["amount"], positive=True), _number(
+            fill["average"], positive=True
+        )
         if fill["side"] == "buy":
             if symbol in positions:
                 raise CheckpointError("Multiple overlapping legacy entries")
@@ -192,9 +291,15 @@ def _restore_economics(data):
             losses += int(pnl <= 0)
         if cash < 0:
             raise CheckpointError("Paper ledger overspends cash")
-    if cash != portfolio.cash_balance or total_pnl != portfolio._total_pnl or (wins, losses) != (portfolio._win_count, portfolio._loss_count):
+    if (
+        cash != portfolio.cash_balance
+        or total_pnl != portfolio._total_pnl
+        or (wins, losses) != (portfolio._win_count, portfolio._loss_count)
+    ):
         raise CheckpointError("Paper ledger and portfolio totals disagree")
-    if closes != [(t.symbol, t.size, t.entry_price, t.exit_price, t.pnl) for t in portfolio._trades]:
+    if closes != [
+        (t.symbol, t.size, t.entry_price, t.exit_price, t.pnl) for t in portfolio._trades
+    ]:
         raise CheckpointError("Paper ledger and complete close history disagree")
     if set(positions) != set(raw["positions"]):
         raise CheckpointError("Paper ledger and portfolio holdings disagree")
@@ -204,8 +309,12 @@ def _restore_economics(data):
         if (position.size, position.entry_price, position.order_id) != (size, entry, order_id):
             raise CheckpointError("Paper position cost basis disagrees")
         expected_balances[symbol.split("/")[0]] = size
-    balances = {asset: _number(value, nonnegative=True) for asset, value in ledger["balances"].items()}
-    if {k: v for k, v in balances.items() if v} != {k: v for k, v in expected_balances.items() if v}:
+    balances = {
+        asset: _number(value, nonnegative=True) for asset, value in ledger["balances"].items()
+    }
+    if {k: v for k, v in balances.items() if v} != {
+        k: v for k, v in expected_balances.items() if v
+    }:
         raise CheckpointError("Paper broker balances disagree")
     if not isinstance(data["orders"], dict) or set(data["orders"]) != set(ledger["orders"]):
         raise CheckpointError("Order manager and paper ledger identities disagree")
@@ -213,37 +322,72 @@ def _restore_economics(data):
     for key, item in data["orders"].items():
         _object(item, ORDER_KEYS, "order")
         fill = ledger["orders"][key]
-        if (item["client_order_id"], item["symbol"], item["side"], item["order_type"], item["status"], item["exchange_order_id"]) != (
-                key, fill["symbol"], fill["side"], "market", "filled", fill["id"]):
+        if (
+            item["client_order_id"],
+            item["symbol"],
+            item["side"],
+            item["order_type"],
+            item["status"],
+            item["exchange_order_id"],
+        ) != (key, fill["symbol"], fill["side"], "market", "filled", fill["id"]):
             raise CheckpointError("Order manager and paper fill disagree")
-        amount, filled, remaining = (_number(item[name], nonnegative=True) for name in ("amount", "filled", "remaining"))
-        if amount != _number(fill["amount"]) or filled != amount or remaining != 0 or item["price"] is not None:
+        amount, filled, remaining = (
+            _number(item[name], nonnegative=True) for name in ("amount", "filled", "remaining")
+        )
+        if (
+            amount != _number(fill["amount"])
+            or filled != amount
+            or remaining != 0
+            or item["price"] is not None
+        ):
             raise CheckpointError("Incomplete paper fill")
-        manager._orders[key] = Order(key, item["symbol"], OrderSide(item["side"]), OrderType.MARKET,
-            amount, status=OrderStatus.FILLED, filled=filled, remaining=remaining,
-            exchange_order_id=item["exchange_order_id"], created_at=_time(item["created_at"]),
-            updated_at=_time(item["updated_at"]), strategy_id=item["strategy_id"])
+        manager._orders[key] = Order(
+            key,
+            item["symbol"],
+            OrderSide(item["side"]),
+            OrderType.MARKET,
+            amount,
+            status=OrderStatus.FILLED,
+            filled=filled,
+            remaining=remaining,
+            exchange_order_id=item["exchange_order_id"],
+            created_at=_time(item["created_at"]),
+            updated_at=_time(item["updated_at"]),
+            strategy_id=item["strategy_id"],
+        )
     return portfolio, exchange, manager
 
 
 class LegacyPaperOrderManager(OrderManager):
     """Even direct order calls require this process's committed bounded intent."""
+
     def __init__(self, exchange, owner):
         super().__init__(exchange)
         self.owner = owner
 
-    async def place_order(self, symbol, side, order_type, amount, price=None, strategy_id=None, client_order_id=None):
+    async def place_order(
+        self, symbol, side, order_type, amount, price=None, strategy_id=None, client_order_id=None
+    ):
         owner, intent = self.owner, self.owner.intent
-        if (owner._descriptor is None or not owner._executing_intent or intent is None
-                or client_order_id != intent["id"] or symbol != intent["symbol"]
-                or side.value != intent["kind"] or order_type is not OrderType.MARKET
-                or price is not None or amount != _number(intent["amount"], positive=True)):
+        if (
+            owner._descriptor is None
+            or not owner._executing_intent
+            or intent is None
+            or client_order_id != intent["id"]
+            or symbol != intent["symbol"]
+            or side.value != intent["kind"]
+            or order_type is not OrderType.MARKET
+            or price is not None
+            or amount != _number(intent["amount"], positive=True)
+        ):
             raise CheckpointError("Order requires a matching current durable intent")
         owner.validate_quote(symbol, _number(intent["price"], positive=True))
         quote = await self.exchange.fetch_ticker(symbol)
         if quote.last != _number(intent["price"], positive=True):
             raise CheckpointError("Execution price changed after intent")
-        return await super().place_order(symbol, side, order_type, amount, price, strategy_id, client_order_id)
+        return await super().place_order(
+            symbol, side, order_type, amount, price, strategy_id, client_order_id
+        )
 
 
 class LegacyCheckpoint:
@@ -254,7 +398,7 @@ class LegacyCheckpoint:
         self.key = f"bot:{bot_id}:legacy_checkpoint:v1"
         self.portfolio = self.exchange = self.manager = self.risk = None
         self.generation = 0
-        self.last_observed = datetime.utcnow()
+        self.last_observed = datetime.now(timezone.utc).replace(tzinfo=None)
         self.intent = None
         self.recovery_reason = None
         self.risk_only_recovery = False
@@ -270,21 +414,27 @@ class LegacyCheckpoint:
             if isinstance(value, Decimal):
                 if not value.is_finite() or value <= 0:
                     raise CheckpointError("Invalid effective paper risk settings")
-            elif type(value) is not int or value < (0 if field == "cooldown_minutes_after_loss" else 1):
+            elif type(value) is not int or value < (
+                0 if field == "cooldown_minutes_after_loss" else 1
+            ):
                 raise CheckpointError("Invalid effective paper risk settings")
         if not isinstance(store, SQLiteStateStore):
-            self.recovery_reason = "Unsupported backend: legacy paper v1 requires SQLite; existing state preserved"
+            self.recovery_reason = (
+                "Unsupported backend: legacy paper v1 requires SQLite; existing state preserved"
+            )
             return
         self._acquire()
 
     def _acquire(self):
         try:
             import fcntl
+
             path = self.store.db_path.resolve()
             lock_path = path.with_name(f".{path.name}.legacy-paper.lock")
             self._prior_marker = lock_path.exists()
-            descriptor = os.open(lock_path,
-                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+            descriptor = os.open(
+                lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600
+            )
             try:
                 if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                     raise CheckpointError("Checkpoint writer lock is not a regular file")
@@ -298,11 +448,14 @@ class LegacyCheckpoint:
                 raise CheckpointError("Another checkpoint writer owns this database") from error
             raise CheckpointError("Cannot acquire checkpoint writer lock") from error
         except (ImportError, AttributeError) as error:
-            raise CheckpointError("Checkpoint writer ownership requires local POSIX SQLite") from error
+            raise CheckpointError(
+                "Checkpoint writer ownership requires local POSIX SQLite"
+            ) from error
 
     def release(self):
         if self._descriptor is not None:
             import fcntl
+
             fcntl.flock(self._descriptor, fcntl.LOCK_UN)
             os.close(self._descriptor)
             self._descriptor = None
@@ -313,16 +466,22 @@ class LegacyCheckpoint:
         try:
             if not self.store.db_path.exists():
                 if self._prior_marker or self.store.existed_at_open:
-                    raise CheckpointError("Missing database in an established workspace; explicit recovery required")
+                    raise CheckpointError(
+                        "Missing database in an established workspace; explicit recovery required"
+                    )
                 # This is the only v1 schema creation: a genuinely new database,
                 # after exclusive ownership and before any portfolio or order.
                 self.store._init_db()
-            with sqlite3.connect(self.store.db_path.resolve().as_uri() + "?mode=ro", uri=True) as conn:
+            with sqlite3.connect(
+                self.store.db_path.resolve().as_uri() + "?mode=ro", uri=True
+            ) as conn:
                 rows = conn.execute("SELECT key, data FROM state").fetchall()
             raw = dict(rows).get(self.key)
             if raw is None:
                 if rows:
-                    raise CheckpointError("Existing legacy or foreign state needs explicit recovery; no automatic migration")
+                    raise CheckpointError(
+                        "Existing legacy or foreign state needs explicit recovery; no automatic migration"
+                    )
                 if self.store.existed_at_open or self._prior_marker:
                     raise CheckpointError("Existing empty database needs explicit recovery")
                 self.portfolio = Portfolio(Decimal("10000"))
@@ -343,7 +502,9 @@ class LegacyCheckpoint:
             self.intent = deepcopy(data["intent"])
             if self.intent is not None:
                 _object(self.intent, {"id", "kind", "symbol", "amount", "price"}, "intent")
-                if self.intent["kind"] not in ("buy", "sell") or not all(isinstance(v, str) and v for v in self.intent.values()):
+                if self.intent["kind"] not in ("buy", "sell") or not all(
+                    isinstance(v, str) and v for v in self.intent.values()
+                ):
                     raise CheckpointError("Invalid transition intent")
                 _number(self.intent["amount"], positive=True)
                 _number(self.intent["price"], positive=True)
@@ -355,15 +516,27 @@ class LegacyCheckpoint:
                 self._source = raw
                 # Preserve the known processing high-water even without a
                 # recoverable baseline. Unknown daily arithmetic is never saved.
-                self.portfolio._daily_date = max(self.last_observed.date(), datetime.utcnow().date())
+                self.portfolio._daily_date = max(
+                    self.last_observed.date(),
+                    datetime.now(timezone.utc).replace(tzinfo=None).date(),
+                )
             if self.intent is not None:
-                self.recovery_reason = "Unfinished intent requires reconciliation; no automatic order replay"
+                self.recovery_reason = (
+                    "Unfinished intent requires reconciliation; no automatic order replay"
+                )
                 self.risk_only_recovery = False
-            elif self.risk is not None and datetime.utcnow() < self.last_observed:
+            elif (
+                self.risk is not None
+                and datetime.now(timezone.utc).replace(tzinfo=None) < self.last_observed
+            ):
                 self.recovery_reason = "UTC clock rollback; preserved risk state blocks new entries"
         except Exception as error:
             self.portfolio = self.exchange = self.manager = self.risk = None
-            self.recovery_reason = str(error) if isinstance(error, CheckpointError) else "Unreadable or invalid existing checkpoint; state preserved"
+            self.recovery_reason = (
+                str(error)
+                if isinstance(error, CheckpointError)
+                else "Unreadable or invalid existing checkpoint; state preserved"
+            )
 
     def _validate_identity(self, data):
         _object(data, TOP_KEYS, "checkpoint")
@@ -373,7 +546,10 @@ class LegacyCheckpoint:
             raise CheckpointError("Checkpoint bot or currency identity mismatch")
         if data["risk_config"] != risk_identity(self.config):
             raise CheckpointError("Checkpoint effective risk configuration mismatch")
-        if any(type(data["risk_config"][name]) is not type(value) for name, value in risk_identity(self.config).items()):
+        if any(
+            type(data["risk_config"][name]) is not type(value)
+            for name, value in risk_identity(self.config).items()
+        ):
             raise CheckpointError("Invalid risk configuration types")
         # Missing known risk fields can be diagnosed separately from economics.
         # Unexpected fields are never copied into a recovery snapshot/archive.
@@ -402,25 +578,49 @@ class LegacyCheckpoint:
         if day > _time(data["last_observed_at"]).date():
             raise CheckpointError("Accounting date exceeds observed UTC high-water")
         history = self.portfolio._trades
-        if (any(t.accounting_date > day or t.closed_at.date() > t.accounting_date for t in history)
-                or any(a.accounting_date > b.accounting_date for a, b in zip(history, history[1:]))):
+        if any(
+            t.accounting_date > day or t.closed_at.date() > t.accounting_date for t in history
+        ) or any(a.accounting_date > b.accounting_date for a, b in zip(history, history[1:])):
             raise CheckpointError("Close accounting chronology is inconsistent")
         daily = [t for t in self.portfolio._trades if t.accounting_date == day]
-        if (sum((t.pnl for t in daily), Decimal("0")), len(daily), sum(t.pnl < 0 for t in daily)) != (pnl, count, losses):
+        if (
+            sum((t.pnl for t in daily), Decimal("0")),
+            len(daily),
+            sum(t.pnl < 0 for t in daily),
+        ) != (pnl, count, losses):
             raise CheckpointError("Daily risk state disagrees with complete close records")
         cumulative = Decimal("0")
         for trade in daily:
             cumulative += trade.pnl
-            if -cumulative / baseline * 100 >= self.config.circuit_breaker_loss_pct and not risk["circuit_breaker"]:
+            if (
+                -cumulative / baseline * 100 >= self.config.circuit_breaker_loss_pct
+                and not risk["circuit_breaker"]
+            ):
                 raise CheckpointError("Recovered gains must not clear a prior circuit latch")
         negative = [t for t in daily if t.pnl < 0]
-        if negative and (cooldown is None or cooldown < negative[-1].closed_at + timedelta(minutes=self.config.cooldown_minutes_after_loss)):
+        if negative and (
+            cooldown is None
+            or cooldown
+            < negative[-1].closed_at + timedelta(minutes=self.config.cooldown_minutes_after_loss)
+        ):
             raise CheckpointError("Missing or shortened post-loss cooldown")
-        if -pnl / baseline * 100 >= self.config.circuit_breaker_loss_pct and not risk["circuit_breaker"]:
+        if (
+            -pnl / baseline * 100 >= self.config.circuit_breaker_loss_pct
+            and not risk["circuit_breaker"]
+        ):
             raise CheckpointError("Missing required circuit latch")
-        self.portfolio._daily_date, self.portfolio._daily_start_value, self.portfolio._daily_pnl = day, baseline, pnl
+        self.portfolio._daily_date, self.portfolio._daily_start_value, self.portfolio._daily_pnl = (
+            day,
+            baseline,
+            pnl,
+        )
         self.risk = RiskManager(self.config, self.portfolio)
-        self.risk._daily_stats = {"date": day, "total_pnl": pnl, "trade_count": count, "loss_count": losses}
+        self.risk._daily_stats = {
+            "date": day,
+            "total_pnl": pnl,
+            "trade_count": count,
+            "loss_count": losses,
+        }
         self.risk._circuit_breaker_triggered = risk["circuit_breaker"]
         self.risk._cooldown_until = cooldown
 
@@ -430,7 +630,7 @@ class LegacyCheckpoint:
     def observe_period(self):
         if self.risk is None or self.intent is not None:
             return
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         if now < self.last_observed:
             self.recovery_reason = "UTC clock rollback; preserved risk state blocks new entries"
             return
@@ -450,7 +650,10 @@ class LegacyCheckpoint:
             return False, self.recovery_reason
         if self.portfolio is None or self.risk is None:
             return False, "Recovery required"
-        if self.portfolio._daily_start_value <= 0 or not self.portfolio._daily_start_value.is_finite():
+        if (
+            self.portfolio._daily_start_value <= 0
+            or not self.portfolio._daily_start_value.is_finite()
+        ):
             self.recovery_reason = "Daily baseline is invalid; explicit recovery required"
             return False, "Daily baseline is not valid for new entries"
         return True, "OK"
@@ -458,17 +661,31 @@ class LegacyCheckpoint:
     def risk_report(self):
         """A read-only projection: diagnostic reads never roll/reset a period."""
         if self.risk is None:
-            return {"daily_pnl": None, "daily_pnl_pct": None, "daily_trades": None,
-                    "daily_losses": None, "circuit_breaker": None,
-                    "cooldown_active": None, "recovery_required": self.recovery_reason}
-        return {"daily_pnl": float(self.risk._daily_stats["total_pnl"]),
-                "daily_pnl_pct": (float(self.portfolio.get_daily_pnl_pct())
-                                  if self.portfolio._daily_start_value > 0 else None),
-                "daily_trades": self.risk._daily_stats["trade_count"],
-                "daily_losses": self.risk._daily_stats["loss_count"],
-                "circuit_breaker": self.risk._circuit_breaker_triggered,
-                "cooldown_active": bool(self.risk._cooldown_until and datetime.utcnow() < self.risk._cooldown_until),
-                "recovery_required": self.recovery_reason}
+            return {
+                "daily_pnl": None,
+                "daily_pnl_pct": None,
+                "daily_trades": None,
+                "daily_losses": None,
+                "circuit_breaker": None,
+                "cooldown_active": None,
+                "recovery_required": self.recovery_reason,
+            }
+        return {
+            "daily_pnl": float(self.risk._daily_stats["total_pnl"]),
+            "daily_pnl_pct": (
+                float(self.portfolio.get_daily_pnl_pct())
+                if self.portfolio._daily_start_value > 0
+                else None
+            ),
+            "daily_trades": self.risk._daily_stats["trade_count"],
+            "daily_losses": self.risk._daily_stats["loss_count"],
+            "circuit_breaker": self.risk._circuit_breaker_triggered,
+            "cooldown_active": bool(
+                self.risk._cooldown_until
+                and datetime.now(timezone.utc).replace(tzinfo=None) < self.risk._cooldown_until
+            ),
+            "recovery_required": self.recovery_reason,
+        }
 
     def _encode(self, generation):
         portfolio = _portfolio_snapshot(self.portfolio)
@@ -476,30 +693,54 @@ class LegacyCheckpoint:
             # Unknown prior risk stays unknown. Do not invent a baseline after an exit.
             accounting, risk = deepcopy(self._saved["accounting"]), deepcopy(self._saved["risk"])
         else:
-            accounting = {"date": self.portfolio.daily_date.isoformat(),
-                "daily_start_value": str(self.portfolio._daily_start_value), "daily_pnl": str(self.portfolio._daily_pnl)}
-            risk = {"date": self.risk._daily_stats["date"].isoformat(),
+            accounting = {
+                "date": self.portfolio.daily_date.isoformat(),
+                "daily_start_value": str(self.portfolio._daily_start_value),
+                "daily_pnl": str(self.portfolio._daily_pnl),
+            }
+            risk = {
+                "date": self.risk._daily_stats["date"].isoformat(),
                 "total_pnl": str(self.risk._daily_stats["total_pnl"]),
-                "trade_count": self.risk._daily_stats["trade_count"], "loss_count": self.risk._daily_stats["loss_count"],
+                "trade_count": self.risk._daily_stats["trade_count"],
+                "loss_count": self.risk._daily_stats["loss_count"],
                 "circuit_breaker": self.risk._circuit_breaker_triggered,
-                "cooldown_until": _iso(self.risk._cooldown_until) if self.risk._cooldown_until else None}
+                "cooldown_until": (
+                    _iso(self.risk._cooldown_until) if self.risk._cooldown_until else None
+                ),
+            }
         orders = {key: value.to_dict() for key, value in self.manager.get_all_orders().items()}
         for order in orders.values():
             for key in ("created_at", "updated_at"):
                 order[key] = _iso(datetime.fromisoformat(order[key]))
-        return {"version": 1, "mode": "paper", "bot_id": self.bot_id, "quote_asset": "USDT",
-            "risk_config": risk_identity(self.config), "generation": generation,
-            "last_observed_at": _iso(self.last_observed), "portfolio": portfolio,
-            "accounting": accounting, "risk": risk, "exchange": self.exchange.snapshot(),
-            "orders": orders, "intent": deepcopy(self.intent)}
+        return {
+            "version": 1,
+            "mode": "paper",
+            "bot_id": self.bot_id,
+            "quote_asset": "USDT",
+            "risk_config": risk_identity(self.config),
+            "generation": generation,
+            "last_observed_at": _iso(self.last_observed),
+            "portfolio": portfolio,
+            "accounting": accounting,
+            "risk": risk,
+            "exchange": self.exchange.snapshot(),
+            "orders": orders,
+            "intent": deepcopy(self.intent),
+        }
 
     def save(self, *, transition=False):
-        if self.portfolio is None or (self.recovery_reason and not transition) or (self.intent and not transition):
+        if (
+            self.portfolio is None
+            or (self.recovery_reason and not transition)
+            or (self.intent and not transition)
+        ):
             return
         if self._descriptor is None:
             raise CheckpointError("Checkpoint writer ownership is missing")
         try:
-            self.last_observed = max(self.last_observed, datetime.utcnow())
+            self.last_observed = max(
+                self.last_observed, datetime.now(timezone.utc).replace(tzinfo=None)
+            )
             data = self._encode(self.generation + 1)
             self._validate_identity(data)
             _restore_economics(data)
@@ -513,18 +754,47 @@ class LegacyCheckpoint:
                 if self._source is not None:
                     # On an explicit verified recovery exit, retain the exact original
                     # v1 source before replacing its canonical row. Never done at boot.
-                    conn.execute("INSERT OR IGNORE INTO state(key,data) VALUES (?,?)",
-                        (f"{self.key}:recovery_source:{self.generation}", self._source))
-                conn.execute("INSERT INTO state(key,data,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
-                    (self.key, encoded, _iso(self.last_observed)))
+                    conn.execute(
+                        "INSERT OR IGNORE INTO state(key,data) VALUES (?,?)",
+                        (f"{self.key}:recovery_source:{self.generation}", self._source),
+                    )
+                conn.execute(
+                    "INSERT INTO state(key,data,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
+                    (self.key, encoded, _iso(self.last_observed)),
+                )
                 # Dashboard fields are projections of this same committed generation.
-                for name, value in (("status", {"mode": "paper", "bot_id": self.bot_id,
-                    "status": "recovery_required" if self.recovery_reason else "ready", "generation": data["generation"]}),
-                    ("positions", list(portfolio for portfolio in data["portfolio"]["positions"].values())),
-                    ("risk", {"accounting": data["accounting"], "risk": data["risk"],
-                              "recovery_reason": self.recovery_reason, "generation": data["generation"]})):
-                    conn.execute("INSERT INTO state(key,data,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
-                        (f"bot:{self.bot_id}:{name}", json.dumps(value, allow_nan=False), _iso(self.last_observed)))
+                for name, value in (
+                    (
+                        "status",
+                        {
+                            "mode": "paper",
+                            "bot_id": self.bot_id,
+                            "status": "recovery_required" if self.recovery_reason else "ready",
+                            "generation": data["generation"],
+                        },
+                    ),
+                    (
+                        "positions",
+                        list(portfolio for portfolio in data["portfolio"]["positions"].values()),
+                    ),
+                    (
+                        "risk",
+                        {
+                            "accounting": data["accounting"],
+                            "risk": data["risk"],
+                            "recovery_reason": self.recovery_reason,
+                            "generation": data["generation"],
+                        },
+                    ),
+                ):
+                    conn.execute(
+                        "INSERT INTO state(key,data,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
+                        (
+                            f"bot:{self.bot_id}:{name}",
+                            json.dumps(value, allow_nan=False),
+                            _iso(self.last_observed),
+                        ),
+                    )
                 conn.commit()
             self.generation = data["generation"]
             self._saved = data
@@ -533,7 +803,11 @@ class LegacyCheckpoint:
             self._executing_intent = False
             self.risk_only_recovery = False
             self.recovery_reason = "Checkpoint save failed; new entries blocked"
-            raise CheckpointError(str(error) if isinstance(error, CheckpointError) else "Checkpoint transaction failed") from error
+            raise CheckpointError(
+                str(error)
+                if isinstance(error, CheckpointError)
+                else "Checkpoint transaction failed"
+            ) from error
 
     def begin_intent(self, kind, symbol, *, amount, price):
         if self.intent is not None:
@@ -544,9 +818,20 @@ class LegacyCheckpoint:
             raise CheckpointError("Legacy paper orders require a BASE/USDT spot symbol")
         if kind == "buy" and not self.entry_allowed()[0]:
             raise CheckpointError(self.recovery_reason or "Entry is blocked")
-        if self.recovery_reason and not self.risk_only_recovery and not self.recovery_reason.startswith("UTC clock rollback"):
+        if (
+            self.recovery_reason
+            and not self.risk_only_recovery
+            and not self.recovery_reason.startswith("UTC clock rollback")
+        ):
             raise CheckpointError(self.recovery_reason)
-        if not isinstance(amount, Decimal) or not amount.is_finite() or amount <= 0 or not isinstance(price, Decimal) or not price.is_finite() or price <= 0:
+        if (
+            not isinstance(amount, Decimal)
+            or not amount.is_finite()
+            or amount <= 0
+            or not isinstance(price, Decimal)
+            or not price.is_finite()
+            or price <= 0
+        ):
             raise CheckpointError("Invalid bounded intent amount or price")
         self.validate_quote(symbol, price)
         if kind == "buy":
@@ -557,8 +842,13 @@ class LegacyCheckpoint:
             position = self.portfolio.get_position(symbol)
             if position is None or position.size != amount:
                 raise CheckpointError("Reducing intent must match known full position")
-        self.intent = {"id": f"legacy-{uuid.uuid4().hex}", "kind": kind, "symbol": symbol,
-                       "amount": str(amount), "price": str(price)}
+        self.intent = {
+            "id": f"legacy-{uuid.uuid4().hex}",
+            "kind": kind,
+            "symbol": symbol,
+            "amount": str(amount),
+            "price": str(price),
+        }
         self.save(transition=True)
         self._executing_intent = True
         return self.intent["id"]
@@ -587,5 +877,7 @@ class LegacyCheckpoint:
 
     def fail_transition(self):
         self._executing_intent = False
-        self.recovery_reason = "Unfinished intent requires reconciliation; no automatic order replay"
+        self.recovery_reason = (
+            "Unfinished intent requires reconciliation; no automatic order replay"
+        )
         self.risk_only_recovery = False

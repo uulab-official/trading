@@ -1,18 +1,17 @@
 """Offline broker configuration checks never authenticate or expose values."""
 
-from contextlib import redirect_stderr, redirect_stdout
 import importlib
-from io import StringIO
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import traceback
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
-
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "tools/broker_readiness.py"
@@ -22,17 +21,27 @@ REQUIREMENTS = {
     "toss_market_data": ["TOSS_ACCESS_TOKEN"],
     "toss_token_issuance": ["TOSS_CLIENT_ID", "TOSS_CLIENT_SECRET"],
     "kis_vts_quote": [
-        "KIS_VTS_ACCESS_TOKEN", "KIS_VTS_APPKEY", "KIS_VTS_APPSECRET",
+        "KIS_VTS_ACCESS_TOKEN",
+        "KIS_VTS_APPKEY",
+        "KIS_VTS_APPSECRET",
     ],
     "kis_vts_order_inquiry": [
-        "KIS_VTS_ACCESS_TOKEN", "KIS_VTS_APPKEY", "KIS_VTS_APPSECRET",
-        "KIS_VTS_CANO", "KIS_VTS_ACNT_PRDT_CD",
+        "KIS_VTS_ACCESS_TOKEN",
+        "KIS_VTS_APPKEY",
+        "KIS_VTS_APPSECRET",
+        "KIS_VTS_CANO",
+        "KIS_VTS_ACNT_PRDT_CD",
     ],
 }
 VARIABLES = (
-    "TOSS_ACCESS_TOKEN", "TOSS_CLIENT_ID", "TOSS_CLIENT_SECRET",
-    "KIS_VTS_ACCESS_TOKEN", "KIS_VTS_APPKEY", "KIS_VTS_APPSECRET",
-    "KIS_VTS_CANO", "KIS_VTS_ACNT_PRDT_CD",
+    "TOSS_ACCESS_TOKEN",
+    "TOSS_CLIENT_ID",
+    "TOSS_CLIENT_SECRET",
+    "KIS_VTS_ACCESS_TOKEN",
+    "KIS_VTS_APPKEY",
+    "KIS_VTS_APPSECRET",
+    "KIS_VTS_CANO",
+    "KIS_VTS_ACNT_PRDT_CD",
 )
 SECRET = "SYNTHETIC-SECRET-MUST-NEVER-APPEAR"
 UNRELATED = "UNRELATED_PRIVATE_ENVIRONMENT_NAME"
@@ -76,29 +85,38 @@ class BrokerReadinessTests(unittest.TestCase):
             self.fail("The offline broker configuration diagnostic is not implemented")
 
     def assert_safe_report(self, report):
-        self.assertEqual(set(report), {
-            "schema_version", "mode", "live_orders_enabled", "safe_to_submit",
-            "actual_broker_requests", "capabilities",
-        })
+        self.assertEqual(
+            set(report),
+            {
+                "schema_version",
+                "mode",
+                "live_orders_enabled",
+                "safe_to_submit",
+                "actual_broker_requests",
+                "capabilities",
+            },
+        )
         self.assertEqual(report["schema_version"], 1)
         self.assertEqual(report["mode"], "paper")
         self.assertIs(report["live_orders_enabled"], False)
         self.assertIs(report["safe_to_submit"], False)
         self.assertEqual(report["actual_broker_requests"], 0)
-        self.assertEqual([item["id"] for item in report["capabilities"]],
-                         list(REQUIREMENTS))
+        self.assertEqual([item["id"] for item in report["capabilities"]], list(REQUIREMENTS))
         for item in report["capabilities"]:
             expected_fields = {
-                "id", "required_variables", "missing_variables", "variable_presence",
-                "configuration_present", "authenticated",
+                "id",
+                "required_variables",
+                "missing_variables",
+                "variable_presence",
+                "configuration_present",
+                "authenticated",
             }
             if item["id"] == "toss_token_issuance":
                 expected_fields.add("requires_explicit_opt_in")
                 self.assertIs(item["requires_explicit_opt_in"], True)
             self.assertEqual(set(item), expected_fields)
             self.assertEqual(item["required_variables"], REQUIREMENTS[item["id"]])
-            self.assertEqual(set(item["variable_presence"]),
-                             set(REQUIREMENTS[item["id"]]))
+            self.assertEqual(set(item["variable_presence"]), set(REQUIREMENTS[item["id"]]))
             self.assertIs(item["authenticated"], False)
             self.assertIs(type(item["configuration_present"]), bool)
             for present in item["variable_presence"].values():
@@ -124,9 +142,12 @@ class BrokerReadinessTests(unittest.TestCase):
         self.assertFalse(inquiry["configuration_present"])
 
     def test_client_credentials_only_prepare_explicit_token_issuance(self):
-        report = self.readiness.inspect_environment({
-            "TOSS_CLIENT_ID": SECRET, "TOSS_CLIENT_SECRET": SECRET,
-        })
+        report = self.readiness.inspect_environment(
+            {
+                "TOSS_CLIENT_ID": SECRET,
+                "TOSS_CLIENT_SECRET": SECRET,
+            }
+        )
         market, issuance = report["capabilities"][:2]
         self.assertFalse(market["configuration_present"])
         self.assertEqual(market["missing_variables"], ["TOSS_ACCESS_TOKEN"])
@@ -135,42 +156,53 @@ class BrokerReadinessTests(unittest.TestCase):
         self.assert_safe_report(report)
 
     def test_quote_configuration_does_not_establish_account_inquiry(self):
-        report = self.readiness.inspect_environment({
-            "KIS_VTS_ACCESS_TOKEN": SECRET,
-            "KIS_VTS_APPKEY": SECRET,
-            "KIS_VTS_APPSECRET": SECRET,
-        })
+        report = self.readiness.inspect_environment(
+            {
+                "KIS_VTS_ACCESS_TOKEN": SECRET,
+                "KIS_VTS_APPKEY": SECRET,
+                "KIS_VTS_APPSECRET": SECRET,
+            }
+        )
         quote, inquiry = report["capabilities"][2:]
         self.assertTrue(quote["configuration_present"])
         self.assertFalse(inquiry["configuration_present"])
-        self.assertEqual(inquiry["missing_variables"],
-                         ["KIS_VTS_CANO", "KIS_VTS_ACNT_PRDT_CD"])
+        self.assertEqual(inquiry["missing_variables"], ["KIS_VTS_CANO", "KIS_VTS_ACNT_PRDT_CD"])
 
     def test_present_values_never_mean_authenticated_or_safe_to_submit(self):
-        values = {name: SECRET + "-" + str(index)
-                  for index, name in enumerate(VARIABLES)}
+        values = {name: SECRET + "-" + str(index) for index, name in enumerate(VARIABLES)}
         values["KIS_VTS_CANO"] = "98765432"
         values["KIS_VTS_ACNT_PRDT_CD"] = "PRIVATE-ACCOUNT-PRODUCT"
         values[UNRELATED] = "UNRELATED-PRIVATE-VALUE"
         report = self.readiness.inspect_environment(values)
         self.assert_safe_report(report)
-        self.assertTrue(all(item["configuration_present"]
-                            for item in report["capabilities"]))
-        self.assertTrue(all(item["missing_variables"] == []
-                            for item in report["capabilities"]))
+        self.assertTrue(all(item["configuration_present"] for item in report["capabilities"]))
+        self.assertTrue(all(item["missing_variables"] == [] for item in report["capabilities"]))
         for output in (json.dumps(report), self.readiness.render_text(report)):
-            for forbidden in (SECRET, "98765432", "PRIVATE-ACCOUNT-PRODUCT",
-                              UNRELATED, "UNRELATED-PRIVATE-VALUE"):
+            for forbidden in (
+                SECRET,
+                "98765432",
+                "PRIVATE-ACCOUNT-PRODUCT",
+                UNRELATED,
+                "UNRELATED-PRIVATE-VALUE",
+            ):
                 self.assertNotIn(forbidden, output)
 
     def test_only_nonblank_strings_count_without_authenticity_validation(self):
         for value, expected in (
-            (None, False), (False, False), (0, False), (b"token", False),
-            ([], False), ({}, False), (OpaqueValue(), False),
-            ("", False), (" \t\r\n\v\f\u2003\u00a0", False),
+            (None, False),
+            (False, False),
+            (0, False),
+            (b"token", False),
+            ([], False),
+            ({}, False),
+            (OpaqueValue(), False),
+            ("", False),
+            (" \t\r\n\v\f\u2003\u00a0", False),
             ("\x1c\x1d\x1e\x1f", False),
-            (" token ", True), ("not-a-valid-token", True),
-            ("\x00", True), ("\r\n" + SECRET + "\x00\x1b", True),
+            (" token ", True),
+            ("not-a-valid-token", True),
+            ("\x00", True),
+            ("\r\n" + SECRET + "\x00\x1b", True),
         ):
             report = self.readiness.inspect_environment({"TOSS_ACCESS_TOKEN": value})
             item = report["capabilities"][0]
@@ -186,9 +218,11 @@ class BrokerReadinessTests(unittest.TestCase):
             def __bool__(self):
                 raise AssertionError(SECRET)
 
-        report = self.readiness.inspect_environment({
-            "TOSS_ACCESS_TOKEN": UntrustedString(" token "),
-        })
+        report = self.readiness.inspect_environment(
+            {
+                "TOSS_ACCESS_TOKEN": UntrustedString(" token "),
+            }
+        )
         self.assertTrue(report["capabilities"][0]["configuration_present"])
 
     def test_inspects_only_allowlisted_names_once_without_enumeration(self):
@@ -202,10 +236,8 @@ class BrokerReadinessTests(unittest.TestCase):
         with patch.object(self.readiness.os, "environ", environ):
             from_process = self.readiness.inspect_environment()
             from_empty = self.readiness.inspect_environment({})
-        self.assertTrue(all(item["configuration_present"]
-                            for item in from_process["capabilities"]))
-        self.assertFalse(any(item["configuration_present"]
-                             for item in from_empty["capabilities"]))
+        self.assertTrue(all(item["configuration_present"] for item in from_process["capabilities"]))
+        self.assertFalse(any(item["configuration_present"] for item in from_empty["capabilities"]))
         self.assertEqual(environ.lookups, list(VARIABLES))
 
     def test_environment_failure_has_no_raw_exception_or_context(self):
@@ -216,8 +248,7 @@ class BrokerReadinessTests(unittest.TestCase):
         try:
             self.readiness.inspect_environment(BrokenEnvironment())
         except ValueError as error:
-            output = "".join(traceback.format_exception(
-                type(error), error, error.__traceback__))
+            output = "".join(traceback.format_exception(type(error), error, error.__traceback__))
             self.assertNotIn(SECRET, output)
             self.assertNotIn(UNRELATED, output)
             self.assertIsNone(error.__cause__)
@@ -249,8 +280,9 @@ class BrokerReadinessTests(unittest.TestCase):
 
     def test_cli_failure_output_is_static_and_secret_free(self):
         stdout, stderr = StringIO(), StringIO()
-        with patch.object(self.readiness, "inspect_environment",
-                          side_effect=RuntimeError(SECRET + UNRELATED)):
+        with patch.object(
+            self.readiness, "inspect_environment", side_effect=RuntimeError(SECRET + UNRELATED)
+        ):
             with redirect_stdout(stdout), redirect_stderr(stderr):
                 status = self.readiness.main([])
         self.assertEqual(status, 2)
@@ -260,13 +292,17 @@ class BrokerReadinessTests(unittest.TestCase):
         self.assertNotIn(UNRELATED, stderr.getvalue())
 
     def run_cli(self, arguments=(), values=None, *, directory=None, guarded=False):
-        environment = {name: value for name, value in os.environ.items()
-                       if name not in VARIABLES}
+        environment = {name: value for name, value in os.environ.items() if name not in VARIABLES}
         environment.update(values or {})
         environment[UNRELATED] = SECRET
         command = [sys.executable, "-B", "-S", str(SCRIPT), *arguments]
         if guarded:
-            command = [sys.executable, "-B", "-S", "-c", r'''
+            command = [
+                sys.executable,
+                "-B",
+                "-S",
+                "-c",
+                r"""
 import builtins, io, json, os, socket, subprocess, sys
 script = sys.argv[1]
 with open(script, encoding="utf-8") as source:
@@ -290,9 +326,19 @@ try:
 finally:
     if violations:
         raise AssertionError("Diagnostic attempted a forbidden side effect")
-''', str(SCRIPT), *arguments]
-        return subprocess.run(command, cwd=directory or ROOT, env=environment,
-                              text=True, capture_output=True, check=False, timeout=10)
+""",
+                str(SCRIPT),
+                *arguments,
+            ]
+        return subprocess.run(
+            command,
+            cwd=directory or ROOT,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
 
     def test_real_site_disabled_cli_defaults_to_json_and_missing_is_success(self):
         result = self.run_cli()
@@ -300,8 +346,7 @@ finally:
         self.assertEqual(result.stderr, "")
         report = json.loads(result.stdout)
         self.assert_safe_report(report)
-        self.assertFalse(any(item["configuration_present"]
-                             for item in report["capabilities"]))
+        self.assertFalse(any(item["configuration_present"] for item in report["capabilities"]))
 
     def test_real_guarded_cli_has_no_file_network_process_or_broker_imports(self):
         result = self.run_cli(values={name: SECRET for name in VARIABLES}, guarded=True)
@@ -309,8 +354,7 @@ finally:
         self.assertEqual(result.stderr, "")
         report = json.loads(result.stdout)
         self.assert_safe_report(report)
-        self.assertTrue(all(item["configuration_present"]
-                            for item in report["capabilities"]))
+        self.assertTrue(all(item["configuration_present"] for item in report["capabilities"]))
         self.assertNotIn(SECRET, result.stdout)
         self.assertNotIn(UNRELATED, result.stdout)
 
@@ -319,8 +363,9 @@ finally:
             dotenv = Path(directory) / ".env"
             original = "\n".join(name + "=" + SECRET for name in VARIABLES)
             dotenv.write_text(original, encoding="utf-8")
-            result = self.run_cli(["--format", "text"], directory=directory,
-                                  values={"TOSS_ACCESS_TOKEN": " \r\n\t "})
+            result = self.run_cli(
+                ["--format", "text"], directory=directory, values={"TOSS_ACCESS_TOKEN": " \r\n\t "}
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stderr, "")
             self.assertIn("누락", result.stdout)
@@ -331,8 +376,12 @@ finally:
 
     def test_real_cli_rejects_invalid_arguments_without_echoing_input(self):
         for arguments in (
-            ["--format", SECRET], ["--format"], ["--mode", "live"],
-            ["--" + SECRET], ["--for", "text"], ["@" + SECRET],
+            ["--format", SECRET],
+            ["--format"],
+            ["--mode", "live"],
+            ["--" + SECRET],
+            ["--for", "text"],
+            ["@" + SECRET],
         ):
             with self.subTest(arguments=arguments):
                 result = self.run_cli(arguments)

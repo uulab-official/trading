@@ -8,33 +8,46 @@ import json
 import os
 import sys
 
-
 _VARIABLES = (
-    "TOSS_ACCESS_TOKEN", "TOSS_CLIENT_ID", "TOSS_CLIENT_SECRET",
-    "KIS_VTS_ACCESS_TOKEN", "KIS_VTS_APPKEY", "KIS_VTS_APPSECRET",
-    "KIS_VTS_CANO", "KIS_VTS_ACNT_PRDT_CD",
+    "TOSS_ACCESS_TOKEN",
+    "TOSS_CLIENT_ID",
+    "TOSS_CLIENT_SECRET",
+    "KIS_VTS_ACCESS_TOKEN",
+    "KIS_VTS_APPKEY",
+    "KIS_VTS_APPSECRET",
+    "KIS_VTS_CANO",
+    "KIS_VTS_ACNT_PRDT_CD",
 )
 _CAPABILITIES = (
     (
-        "toss_market_data", ("TOSS_ACCESS_TOKEN",),
-        "Toss 기존 토큰으로 시세 조회", "docs/STOCK_PAPER_TOSS_KIS.md",
+        "toss_market_data",
+        ("TOSS_ACCESS_TOKEN",),
+        "Toss 기존 토큰으로 시세 조회",
+        "docs/STOCK_PAPER_TOSS_KIS.md",
     ),
     (
-        "toss_token_issuance", ("TOSS_CLIENT_ID", "TOSS_CLIENT_SECRET"),
-        "Toss 명시적 토큰 발급 설정", "docs/STOCK_PAPER_TOSS_KIS.md",
+        "toss_token_issuance",
+        ("TOSS_CLIENT_ID", "TOSS_CLIENT_SECRET"),
+        "Toss 명시적 토큰 발급 설정",
+        "docs/STOCK_PAPER_TOSS_KIS.md",
     ),
     (
         "kis_vts_quote",
         ("KIS_VTS_ACCESS_TOKEN", "KIS_VTS_APPKEY", "KIS_VTS_APPSECRET"),
-        "KIS VTS 현재가 조회", "docs/KIS_VTS_READONLY_QUOTE.md",
+        "KIS VTS 현재가 조회",
+        "docs/KIS_VTS_READONLY_QUOTE.md",
     ),
     (
         "kis_vts_order_inquiry",
         (
-            "KIS_VTS_ACCESS_TOKEN", "KIS_VTS_APPKEY", "KIS_VTS_APPSECRET",
-            "KIS_VTS_CANO", "KIS_VTS_ACNT_PRDT_CD",
+            "KIS_VTS_ACCESS_TOKEN",
+            "KIS_VTS_APPKEY",
+            "KIS_VTS_APPSECRET",
+            "KIS_VTS_CANO",
+            "KIS_VTS_ACNT_PRDT_CD",
         ),
-        "KIS VTS 일별 주문내역 조회", "docs/KIS_VTS_ORDER_SNAPSHOT.md",
+        "KIS VTS 일별 주문내역 조회",
+        "docs/KIS_VTS_ORDER_SNAPSHOT.md",
     ),
 )
 _FAILURE = "Broker configuration diagnosis failed; no broker request was made."
@@ -110,26 +123,29 @@ def render_text(report):
             "",
         ]
         for capability_id, required, title, guide in _CAPABILITIES:
-            item = next(item for item in report["capabilities"]
-                        if item["id"] == capability_id)
+            item = next(item for item in report["capabilities"] if item["id"] == capability_id)
             presence = item["variable_presence"]
             missing = [name for name in required if presence.get(name) is not True]
             status = "설정 누락" if missing else "설정 존재 / 인증 미확인"
             lines.append(f"[{capability_id}] {title}: {status}")
-            lines.append("  변수: " + ", ".join(
-                name + ("=있음" if presence.get(name) is True else "=없음")
-                for name in required
-            ))
+            lines.append(
+                "  변수: "
+                + ", ".join(
+                    name + ("=있음" if presence.get(name) is True else "=없음") for name in required
+                )
+            )
             lines.append("  누락: " + (", ".join(missing) if missing else "없음"))
             lines.append("  안내: " + guide)
-        lines.extend([
-            "",
-            "다음 단계: 누락된 값은 신뢰하는 로컬 세션에서 설정한 뒤 다시 진단하세요.",
-            "실제 값은 출력하거나 공유하지 말고, 위 문서에서 별도 조회 절차를 확인하세요.",
-            "Toss 토큰 발급은 기존 수집기의 --issue-token 명시적 선택이 필요합니다.",
-            "이 진단은 토큰 발급·갱신, 인증, 네트워크 요청 또는 주문을 수행하지 않습니다.",
-            "비어 있지 않은 문자열이면 존재로 표시하므로 만료·잘못된 형식도 구분하지 않습니다.",
-        ])
+        lines.extend(
+            [
+                "",
+                "다음 단계: 누락된 값은 신뢰하는 로컬 세션에서 설정한 뒤 다시 진단하세요.",
+                "실제 값은 출력하거나 공유하지 말고, 위 문서에서 별도 조회 절차를 확인하세요.",
+                "Toss 토큰 발급은 기존 수집기의 --issue-token 명시적 선택이 필요합니다.",
+                "이 진단은 토큰 발급·갱신, 인증, 네트워크 요청 또는 주문을 수행하지 않습니다.",
+                "비어 있지 않은 문자열이면 존재로 표시하므로 만료·잘못된 형식도 구분하지 않습니다.",
+            ]
+        )
         return "\n".join(lines) + "\n"
     except Exception:
         raise ValueError(_FAILURE) from None
