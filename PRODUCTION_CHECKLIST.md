@@ -1,6 +1,6 @@
 # Production readiness gate — trading monorepo
 
-**State (2026-11-21): LIVE TRADING IS NOT APPROVED.**
+**State (2026-11-22): LIVE TRADING IS NOT APPROVED.**
 
 This project has an offline spot paper replay engine with deterministic
 accounting and checkpoint tests. The new Upbit quotation snapshot and
@@ -60,6 +60,10 @@ may automatically enable live order placement.
 
 ## Gate C — broker sandbox order lifecycle (NOT complete)
 
+- [x] Rust master/worker reject Live configuration before runtime side effects; unimplemented adapters refuse fabricated order/account/connection success
+- [x] Rust in-memory pending/order registry, UUID IDs, validated cumulative fill updates and SQLite unresolved-order restoration (not economic reconciliation)
+- [ ] Rust exact cash/fee/cost-basis accounting and worker-enforced risk limits independently verified
+- [ ] Rust public-feed connection lifecycle, exchange timestamps and reconnect behavior independently verified
 - [x] Separate offline cash-only KRW/USD stock paper book, with whole-share fills and duplicate order safeguards
 - [x] Durable SQLite stock-paper execution journal with replay, idempotence and cash protection
 - [x] Saved Toss 1m JSON parser with closing-time to opening-time conversion

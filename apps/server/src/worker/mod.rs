@@ -55,6 +55,7 @@ impl std::fmt::Debug for WorkerProcess {
 impl WorkerProcess {
     pub async fn new(config_path: String, master_socket: String) -> Result<Self> {
         let config = Config::from_file(&format!("{}/bot.toml", config_path))?;
+        config.validate()?;
 
         std::fs::create_dir_all("data")?;
         let db = Arc::new(Database::new("sqlite://data/trading.db").await?);
@@ -438,6 +439,7 @@ impl WorkerProcess {
         let open_orders = self.db.get_open_orders().await?;
         let order_count = open_orders.len();
         for order in &open_orders {
+            self.order_manager.restore_order(order.clone())?;
             info!("Restored open order: {}", order.id);
         }
 

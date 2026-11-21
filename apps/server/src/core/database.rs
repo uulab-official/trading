@@ -1,5 +1,4 @@
-use anyhow::Result;
-use chrono::Utc;
+use anyhow::{Context, Result};
 use sqlx::{migrate::MigrateDatabase, sqlite::SqlitePool, Row};
 use tracing::info;
 
@@ -159,7 +158,7 @@ impl Database {
             SELECT id, symbol, side, order_type, quantity, price, status, 
                    created_at, updated_at, exchange_order_id, filled_quantity, 
                    average_price, commission, commission_asset
-            FROM orders WHERE status IN ('Open', 'PartiallyFilled', 'Pending')
+            FROM orders WHERE status NOT IN ('Filled', 'Canceled', 'Failed')
             ORDER BY created_at DESC
             "#,
         )
@@ -289,21 +288,25 @@ impl Database {
         Ok(Order {
             id: row.try_get("id")?,
             symbol: row.try_get("symbol")?,
-            side: parse_order_side(&side_str),
-            order_type: parse_order_type(&order_type_str),
+            side: parse_order_side(&side_str)?,
+            order_type: parse_order_type(&order_type_str)?,
             quantity: row.try_get("quantity")?,
             price: row.try_get("price")?,
-            status: parse_order_status(&status_str),
+            status: parse_order_status(&status_str)?,
             created_at: row
                 .try_get::<String, _>("created_at")?
                 .parse()
-                .unwrap_or_else(|_| Utc::now()),
+                .context("Invalid stored order creation timestamp")?,
             updated_at: row
                 .try_get::<String, _>("updated_at")?
                 .parse()
-                .unwrap_or_else(|_| Utc::now()),
+                .context("Invalid stored order update timestamp")?,
             exchange_order_id: row.try_get("exchange_order_id")?,
-            filled_quantity: row.try_get("filled_quantity")?,
+            // SQLite's numeric decoder can coerce an explicit NULL to zero.
+            // Missing cumulative evidence must not become an observed zero.
+            filled_quantity: row
+                .try_get::<Option<f64>, _>("filled_quantity")?
+                .context("Missing stored filled quantity")?,
             average_price: row.try_get("average_price")?,
             commission: row.try_get("commission")?,
             commission_asset: row.try_get("commission_asset")?,
@@ -315,7 +318,7 @@ impl Database {
 
         Ok(Position {
             symbol: row.try_get("symbol")?,
-            side: parse_order_side(&side_str),
+            side: parse_order_side(&side_str)?,
             quantity: row.try_get("quantity")?,
             entry_price: row.try_get("entry_price")?,
             current_price: row.try_get("current_price")?,
@@ -324,36 +327,39 @@ impl Database {
             opened_at: row
                 .try_get::<String, _>("opened_at")?
                 .parse()
-                .unwrap_or_else(|_| Utc::now()),
+                .context("Invalid stored position opening timestamp")?,
             leverage: row.try_get("leverage")?,
         })
     }
 }
 
-fn parse_order_side(s: &str) -> OrderSide {
+fn parse_order_side(s: &str) -> Result<OrderSide> {
     match s {
-        "Buy" => OrderSide::Buy,
-        _ => OrderSide::Sell,
+        "Buy" => Ok(OrderSide::Buy),
+        "Sell" => Ok(OrderSide::Sell),
+        _ => anyhow::bail!("Unrecognized stored order side"),
     }
 }
 
-fn parse_order_type(s: &str) -> OrderType {
+fn parse_order_type(s: &str) -> Result<OrderType> {
     match s {
-        "Market" => OrderType::Market,
-        "Limit" => OrderType::Limit,
-        "StopLoss" => OrderType::StopLoss,
-        _ => OrderType::TakeProfit,
+        "Market" => Ok(OrderType::Market),
+        "Limit" => Ok(OrderType::Limit),
+        "StopLoss" => Ok(OrderType::StopLoss),
+        "TakeProfit" => Ok(OrderType::TakeProfit),
+        _ => anyhow::bail!("Unrecognized stored order type"),
     }
 }
 
-fn parse_order_status(s: &str) -> OrderStatus {
+fn parse_order_status(s: &str) -> Result<OrderStatus> {
     match s {
-        "Pending" => OrderStatus::Pending,
-        "Open" => OrderStatus::Open,
-        "PartiallyFilled" => OrderStatus::PartiallyFilled,
-        "Filled" => OrderStatus::Filled,
-        "Canceled" => OrderStatus::Canceled,
-        _ => OrderStatus::Failed,
+        "Pending" => Ok(OrderStatus::Pending),
+        "Open" => Ok(OrderStatus::Open),
+        "PartiallyFilled" => Ok(OrderStatus::PartiallyFilled),
+        "Filled" => Ok(OrderStatus::Filled),
+        "Canceled" => Ok(OrderStatus::Canceled),
+        "Failed" => Ok(OrderStatus::Failed),
+        _ => anyhow::bail!("Unrecognized stored order status"),
     }
 }
 

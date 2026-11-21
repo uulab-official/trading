@@ -14,6 +14,7 @@ COPY apps/server/Cargo.toml apps/server/Cargo.toml
 COPY apps/server/Cargo.lock apps/server/Cargo.lock
 COPY apps/server/src apps/server/src
 COPY apps/server/tests apps/server/tests
+COPY apps/server/config apps/server/config
 
 # Test and build the Rust server from the committed dependency lock.
 WORKDIR /app/apps/server

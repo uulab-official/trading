@@ -1,8 +1,6 @@
 use anyhow::Result;
-use chrono::Utc;
 use std::collections::HashMap;
 use tokio::sync::broadcast;
-use tracing::info;
 
 use crate::core::models::Order;
 use crate::exchange::{Exchange, ExchangeConfig, ExchangeEvent};
@@ -22,50 +20,38 @@ impl BithumbClient {
 #[async_trait::async_trait]
 impl Exchange for BithumbClient {
     async fn connect(&mut self) -> Result<()> {
-        info!("Connecting to Bithumb");
-        self.event_tx.send(ExchangeEvent::Connected)?;
-        Ok(())
+        Err(super::unsupported_operation("Bithumb", "connect"))
     }
 
     async fn disconnect(&mut self) -> Result<()> {
-        info!("Disconnecting from Bithumb");
-        self.event_tx.send(ExchangeEvent::Disconnected)?;
-        Ok(())
+        Err(super::unsupported_operation("Bithumb", "disconnect"))
     }
 
-    async fn subscribe_ticker(&mut self, symbol: &str) -> Result<()> {
-        info!("Subscribed to {} ticker on Bithumb", symbol);
-        Ok(())
+    async fn subscribe_ticker(&mut self, _symbol: &str) -> Result<()> {
+        Err(super::unsupported_operation("Bithumb", "subscribe_ticker"))
     }
 
-    async fn subscribe_candles(&mut self, symbol: &str, timeframe: &str) -> Result<()> {
-        info!(
-            "Subscribed to {} candles ({}) on Bithumb",
-            symbol, timeframe
-        );
-        Ok(())
+    async fn subscribe_candles(&mut self, _symbol: &str, _timeframe: &str) -> Result<()> {
+        Err(super::unsupported_operation("Bithumb", "subscribe_candles"))
     }
 
-    async fn subscribe_orderbook(&mut self, symbol: &str) -> Result<()> {
-        info!("Subscribed to {} orderbook on Bithumb", symbol);
-        Ok(())
+    async fn subscribe_orderbook(&mut self, _symbol: &str) -> Result<()> {
+        Err(super::unsupported_operation(
+            "Bithumb",
+            "subscribe_orderbook",
+        ))
     }
 
-    async fn place_order(&self, order: &Order) -> Result<String> {
-        info!("Placing order on Bithumb: {:?}", order);
-        Ok(format!("bithumb-order-{}", Utc::now().timestamp()))
+    async fn place_order(&self, _order: &Order) -> Result<String> {
+        Err(super::unsupported_operation("Bithumb", "place_order"))
     }
 
-    async fn cancel_order(&self, symbol: &str, order_id: &str) -> Result<()> {
-        info!("Cancelling order {} for {} on Bithumb", order_id, symbol);
-        Ok(())
+    async fn cancel_order(&self, _symbol: &str, _order_id: &str) -> Result<()> {
+        Err(super::unsupported_operation("Bithumb", "cancel_order"))
     }
 
     async fn get_balance(&self) -> Result<HashMap<String, f64>> {
-        let mut balance = HashMap::new();
-        balance.insert("KRW".to_string(), 10000000.0);
-        balance.insert("BTC".to_string(), 0.5);
-        Ok(balance)
+        Err(super::unsupported_operation("Bithumb", "get_balance"))
     }
 
     fn get_event_receiver(&self) -> broadcast::Receiver<ExchangeEvent> {

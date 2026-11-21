@@ -34,6 +34,9 @@ pub struct MasterProcess {
 
 impl MasterProcess {
     pub async fn new(config_path: String, web_port: u16, worker_port: u16) -> Result<Arc<Self>> {
+        let config = crate::core::config::Config::from_file(&format!("{}/bot.toml", config_path))?;
+        config.validate()?;
+
         let socket_path = PathBuf::from("/tmp/trading-master.sock");
 
         if socket_path.exists() {
@@ -222,25 +225,31 @@ async fn handle_worker_connection(
         // Convert to DashboardEvent and broadcast
         let event = match &message {
             WorkerMessage::PriceUpdate { symbol, price } => {
-                info!("Received PriceUpdate from Worker: {} = ${:.2}", symbol, price);
-                Some(DashboardEvent::PriceUpdate { symbol: symbol.clone(), price: *price })
+                info!(
+                    "Received PriceUpdate from Worker: {} = ${:.2}",
+                    symbol, price
+                );
+                Some(DashboardEvent::PriceUpdate {
+                    symbol: symbol.clone(),
+                    price: *price,
+                })
             }
-            WorkerMessage::TradeSignal { symbol, signal } => {
-                Some(DashboardEvent::TradeSignal { symbol: symbol.clone(), signal: signal.clone() })
-            }
-            WorkerMessage::OrderUpdate(order) => {
-                Some(DashboardEvent::OrderUpdate(order.clone()))
-            }
+            WorkerMessage::TradeSignal { symbol, signal } => Some(DashboardEvent::TradeSignal {
+                symbol: symbol.clone(),
+                signal: signal.clone(),
+            }),
+            WorkerMessage::OrderUpdate(order) => Some(DashboardEvent::OrderUpdate(order.clone())),
             WorkerMessage::PositionUpdate(position) => {
                 Some(DashboardEvent::PositionUpdate(position.clone()))
             }
             WorkerMessage::SystemStatus { status, message } => {
                 info!("Worker status: {} - {}", status, message);
-                Some(DashboardEvent::SystemStatus { status: status.clone(), message: message.clone() })
+                Some(DashboardEvent::SystemStatus {
+                    status: status.clone(),
+                    message: message.clone(),
+                })
             }
-            WorkerMessage::Heartbeat => {
-                None
-            }
+            WorkerMessage::Heartbeat => None,
         };
 
         if let Some(event) = event {
@@ -248,7 +257,10 @@ async fn handle_worker_connection(
             if receiver_count == 0 {
                 info!("No WebSocket clients connected for event: {:?}", event);
             } else {
-                info!("Broadcasted event to {} clients: {:?}", receiver_count, event);
+                info!(
+                    "Broadcasted event to {} clients: {:?}",
+                    receiver_count, event
+                );
             }
         }
     }

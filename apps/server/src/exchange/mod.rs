@@ -52,6 +52,10 @@ pub trait Exchange: Send + Sync {
     fn get_event_receiver(&self) -> broadcast::Receiver<ExchangeEvent>;
 }
 
+fn unsupported_operation(exchange: &'static str, operation: &'static str) -> anyhow::Error {
+    anyhow::anyhow!("{exchange} {operation} is not implemented; no broker request was made")
+}
+
 pub struct ExchangeManager {
     exchanges: Arc<RwLock<HashMap<String, Box<dyn Exchange>>>>,
     event_tx: broadcast::Sender<ExchangeEvent>,
@@ -73,10 +77,12 @@ impl ExchangeManager {
         Ok(())
     }
 
+    /// Return a passive event subscription; active transport/account methods
+    /// are unsupported and never delegate execution to the registered adapter.
     pub async fn get_exchange(&self, id: &str) -> Option<Box<dyn Exchange>> {
         let exchanges = self.exchanges.read().await;
         exchanges.get(id).map(|e| {
-            Box::new(DummyExchange {
+            Box::new(EventReceiverProxy {
                 event_rx: e.get_event_receiver(),
             }) as Box<dyn Exchange>
         })
@@ -87,35 +93,59 @@ impl ExchangeManager {
     }
 }
 
-struct DummyExchange {
+struct EventReceiverProxy {
     event_rx: broadcast::Receiver<ExchangeEvent>,
 }
 
 #[async_trait::async_trait]
-impl Exchange for DummyExchange {
+impl Exchange for EventReceiverProxy {
     async fn connect(&mut self) -> Result<()> {
-        Ok(())
+        Err(unsupported_operation(
+            "ExchangeManager event proxy",
+            "connect",
+        ))
     }
     async fn disconnect(&mut self) -> Result<()> {
-        Ok(())
+        Err(unsupported_operation(
+            "ExchangeManager event proxy",
+            "disconnect",
+        ))
     }
     async fn subscribe_ticker(&mut self, _symbol: &str) -> Result<()> {
-        Ok(())
+        Err(unsupported_operation(
+            "ExchangeManager event proxy",
+            "subscribe_ticker",
+        ))
     }
     async fn subscribe_candles(&mut self, _symbol: &str, _timeframe: &str) -> Result<()> {
-        Ok(())
+        Err(unsupported_operation(
+            "ExchangeManager event proxy",
+            "subscribe_candles",
+        ))
     }
     async fn subscribe_orderbook(&mut self, _symbol: &str) -> Result<()> {
-        Ok(())
+        Err(unsupported_operation(
+            "ExchangeManager event proxy",
+            "subscribe_orderbook",
+        ))
     }
     async fn place_order(&self, _order: &Order) -> Result<String> {
-        Ok("dummy".to_string())
+        Err(unsupported_operation(
+            "ExchangeManager event proxy",
+            "place_order",
+        ))
     }
     async fn cancel_order(&self, _symbol: &str, _order_id: &str) -> Result<()> {
-        Ok(())
+        Err(unsupported_operation(
+            "ExchangeManager event proxy",
+            "cancel_order",
+        ))
     }
     async fn get_balance(&self) -> Result<HashMap<String, f64>> {
-        Ok(HashMap::new())
+        Err(unsupported_operation(
+            "ExchangeManager event proxy",
+            "get_balance",
+        ))
     }
     fn get_event_receiver(&self) -> broadcast::Receiver<ExchangeEvent> {
         self.event_rx.resubscribe()

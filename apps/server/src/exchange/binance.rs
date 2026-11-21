@@ -419,21 +419,16 @@ impl Exchange for BinanceClient {
         Ok(())
     }
 
-    async fn place_order(&self, order: &Order) -> Result<String> {
-        info!("Placing order on Binance: {:?}", order);
-        Ok(format!("binance-order-{}", Utc::now().timestamp()))
+    async fn place_order(&self, _order: &Order) -> Result<String> {
+        Err(super::unsupported_operation("Binance", "place_order"))
     }
 
-    async fn cancel_order(&self, symbol: &str, order_id: &str) -> Result<()> {
-        info!("Cancelling order {} for {} on Binance", order_id, symbol);
-        Ok(())
+    async fn cancel_order(&self, _symbol: &str, _order_id: &str) -> Result<()> {
+        Err(super::unsupported_operation("Binance", "cancel_order"))
     }
 
     async fn get_balance(&self) -> Result<HashMap<String, f64>> {
-        let mut balance = HashMap::new();
-        balance.insert("USDT".to_string(), 10000.0);
-        balance.insert("BTC".to_string(), 0.5);
-        Ok(balance)
+        Err(super::unsupported_operation("Binance", "get_balance"))
     }
 
     fn get_event_receiver(&self) -> broadcast::Receiver<ExchangeEvent> {

@@ -35,8 +35,34 @@ commands. Docker CI runs the same five help entrypoints with networking disabled
 These checks do not start a server, execute migrations, deploy a binary, or submit
 orders.
 
-Rust's operational exchange, order, and deployment paths remain unvalidated.
-The current exchange adapters contain simulated/stub behavior. A clean build
-does not validate broker authentication, real fills, or always-on operation.
-See [Rust verification](../../docs/RUST_QUALITY_VERIFICATION_2026_11_21.md) and
+## Rust execution and order boundaries
+
+`Config::validate()` refuses `mode = "live"`, including when keys or testnet
+flags are present. Master and worker constructors validate before socket,
+directory, database or transport initialization. Paper configuration does not
+require broker credentials; it still requires at least one configured strategy.
+
+Binance's private order, cancellation and balance methods return explicit
+unsupported-operation errors. The unimplemented Bithumb adapter and the
+manager's passive event proxy also refuse active connection/subscription
+operations. They produce no invented broker order IDs, account balances or
+connection events. The manager proxy exposes an event receiver; it does not
+delegate execution to the registered adapter.
+
+The in-memory Rust order registry keeps pending orders visible, uses UUIDs,
+validates cumulative fill/fee metadata, refuses regressive or conflicting
+updates, and restores validated unresolved orders from SQLite. Repeated
+terminal observations do not reopen orders. Malformed stored enum/time values
+are refused, and unknown order statuses cannot disappear from startup loading.
+Its `f64` metadata and local
+restoration are not an exact-money ledger or authenticated broker reconciliation.
+
+The Rust worker's portfolio/cash/fee accounting, risk enforcement, market-data
+reconnect/timestamp handling and deployment paths remain unvalidated. Its
+historical paper simulation is not the independently audited Python paper
+engine. Use the Python [paper lab](../../docs/PAPER_LAB.md) for the reproducible
+offline simulation path.
+
+See [runtime verification](../../docs/RUST_RUNTIME_VERIFICATION_2026_11_22.md),
+[compiler verification](../../docs/RUST_QUALITY_VERIFICATION_2026_11_21.md), and
 the [production checklist](../../PRODUCTION_CHECKLIST.md).

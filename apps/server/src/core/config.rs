@@ -83,19 +83,26 @@ pub struct WebConfig {
 impl Config {
     pub fn from_file(path: &str) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&content)?;
+        // TOML errors render source excerpts, which can contain credentials.
+        // Discard the parser error rather than retaining it as an error cause.
+        let config: Config = toml::from_str(&content).map_err(|_| {
+            anyhow::anyhow!("Invalid TOML configuration; check the local config file")
+        })?;
         Ok(config)
     }
-    
+
     pub fn validate(&self) -> anyhow::Result<()> {
+        if matches!(self.bot.mode, TradingMode::Live) {
+            return Err(anyhow::anyhow!(
+                "Live trading is unavailable: Rust broker execution and risk controls are not validated"
+            ));
+        }
+
         if self.strategies.is_empty() {
             return Err(anyhow::anyhow!("At least one strategy must be configured"));
         }
-        
-        if self.exchange.api_key.is_none() || self.exchange.api_secret.is_none() {
-            return Err(anyhow::anyhow!("Exchange API credentials are required"));
-        }
-        
+
+        // Paper configuration does not authenticate or enable broker execution.
         Ok(())
     }
 }
