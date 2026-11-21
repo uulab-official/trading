@@ -114,6 +114,37 @@ core·data·strategy·backtest와 monitor notifier 모듈을 불러왔습니다.
 이 검토에서 직접 실행한 인터프리터는 Python 3.12.14이며, Python 3.10·3.11의
 실제 실행은 게시 커밋의 CI 행렬에서 별도로 확인합니다.
 
+## 첫 원격 실행에서 확인한 추가 정리
+
+`bd7ab91e98e246b52b99d4d1ff9b080bb2a7dee2`의
+[CI #466](https://github.com/uulab-official/trading/actions/runs/44909644792)에서
+Python 3.10·3.11·3.12 각각 **751개 테스트·1523개 subtest**와 기본 offline 검증
+**653개**가 통과했습니다. pytest와 offline 실행의 경고는 0건이었습니다.
+필수 Black·isort도 통과했고 세 coverage 산출물이 저장됐습니다.
+
+별도로 CI 인프라와 패키지 빌드 단계에서 경고가 확인되어 다음을 보완했습니다.
+
+| 확인된 원인 | 추가 변경 |
+| --- | --- |
+| 구형 액션의 Node 런타임을 runner가 강제 전환 | checkout `v5.1.0`, setup-python `v6.3.0`, cache `v5.1.0`, setup-buildx `v4.4.1`로 고정 |
+| core·strategy·backtest·monitor의 metadata가 없는 README를 참조 | 네 패키지의 역할·설치·검증 범위를 설명하는 README 추가 |
+
+네 액션의 공식 `action.yml`에서 `node24`와 사용 중인 입력 호환성을 확인했습니다.
+최초 Node24 지원 major의 유지보수 버전을 선택했으며, CI에 관측된 runner
+`2.338.2`는 요구 최소 버전 `2.327.1` 이상입니다. 액션 외부의 Buildx·BuildKit
+버전까지 고정하는 변경은 아닙니다. 기존 테스트 조건·coverage·명시적 이미지
+게시 조건은 유지합니다.
+
+첫 실행의 `punycode`·`url.parse` 경고 제거 여부는 새 커밋의 실제 로그로
+검증합니다. setuptools의 editable-install 안내는 정상적인 개발 설치 방식의
+설명이며, 경고를 숨기기 위해 설치 모드를 바꾸지 않았습니다.
+
+후속 변경의 로컬 검증에서는 CI 계약 **6개 테스트·3개 subtest**가 통과했습니다.
+`pip wheel --no-deps --no-build-isolation --no-index`로 네 패키지 wheel을 만들고,
+각 `METADATA`에 Markdown README 본문이 포함되는 것과 누락 경고가 없는 것을
+확인했습니다. 독립 검토에서도 워크플로의 버전 참조 10곳 외 모든 YAML 값이
+동일하고 README 내부 링크가 유효함을 확인했으며, 수정할 사항은 없었습니다.
+
 ## 전체 모의 실험 재실행
 
 `python tools/paper_lab.py --output-dir NEW_DIRECTORY`로 보존한 실행 시각은
@@ -136,3 +167,7 @@ USD 주식 55개 봉을 처리하고 각 포트폴리오에서 가상 체결 2�
 - [isort 릴리스 정책](https://pycqa.github.io/isort/docs/major_releases/release_policy.html)
 - [pytest 명시적 플러그인 로딩](https://docs.pytest.org/en/stable/how-to/plugins.html)
 - [pytest-asyncio 설정](https://pytest-asyncio.readthedocs.io/en/stable/reference/configuration.html)
+- [Checkout v5.1.0 실행 사양](https://github.com/actions/checkout/blob/v5.1.0/action.yml)
+- [Setup Python v6.3.0 실행 사양](https://github.com/actions/setup-python/blob/v6.3.0/action.yml)
+- [Cache v5.1.0 실행 사양](https://github.com/actions/cache/blob/v5.1.0/action.yml)
+- [Setup Buildx v4.4.1 실행 사양](https://github.com/docker/setup-buildx-action/blob/v4.4.1/action.yml)

@@ -16,3 +16,8 @@ Date: 2026-11-21 (Asia/Seoul)
    checks plus the required full verification gates.
 6. Update README and verification evidence. Publish with an expected-head lease,
    verify remote file bytes, and wait for exact-revision full CI completion.
+
+7. Address the concrete runner/runtime and missing package README warnings found
+   in the first remote run. Compare official action manifests, preserve workflow
+   behavior, verify package metadata locally and CI contract tests, and publish
+   this bounded follow-up. Require a new exact-revision full CI result.

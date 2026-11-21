@@ -41,6 +41,22 @@ the synthetic paper lab, required lint, and syntax checks. A fresh independent
 review precedes publication. Verify the exact published commit's Python matrix,
 coverage artifacts, and Docker checks before reporting completion.
 
+## Evidence-driven CI follow-up
+
+The first published revision (`bd7ab91`) passed all Python matrix and formatter
+jobs, but runner logs exposed forced Node20-to-24 migration in checkout,
+setup-python, and cache actions. Use the latest maintenance release in the first
+Node24-compatible major for the four actions used by required jobs: checkout
+v5.1.0, setup-python v6.3.0, cache v5.1.0, and setup-buildx v4.4.1. Their official
+manifests preserve the inputs consumed here. The observed hosted runner 2.338.2
+exceeds their documented minimum 2.327.1. Existing publication conditions and
+optional Codecov behavior stay intact; verify the actual final CI logs.
+
+The same run reported missing README files referenced by four package metadata
+files. Add the package READMEs rather than suppressing these warnings. Standard
+setuptools editable-install informational notices are not application warnings
+and do not justify changing the test installation mode.
+
 ## References
 
 - https://docs.python.org/3.12/library/datetime.html
