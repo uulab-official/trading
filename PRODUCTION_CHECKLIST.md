@@ -1,6 +1,6 @@
 # Production readiness gate — trading monorepo
 
-**State (2026-11-22): LIVE TRADING IS NOT APPROVED.**
+**State (2026-11-23): LIVE TRADING IS NOT APPROVED.**
 
 This project has an offline spot paper replay engine with deterministic
 accounting and checkpoint tests. The new Upbit quotation snapshot and
@@ -46,6 +46,7 @@ may automatically enable live order placement.
 - [x] Independent backfill-candidate/previous-ledger review before manual promotion
 - [x] Manual backup/candidate review excludes an active local paper supervisor
 - [x] Consecutive paper failure budget persisted atomically across process restarts
+- [x] Halt/operator STOP retained on immediate shutdown; failure count survives stopped/once/loop transitions; canonical data and derived-lock aliases rejected before ownership
 - [ ] Operator-validated complete backfill integration for live paper supervisor (not automated)
 - [ ] Crash-safe archive+strategy state orchestration and startup reconciliation
 - [ ] Circuit breaker for network instability, schema drift, data gaps, bad ticks
@@ -63,7 +64,10 @@ may automatically enable live order placement.
 - [x] Rust master/worker reject Live configuration before runtime side effects; unimplemented adapters refuse fabricated order/account/connection success
 - [x] Rust in-memory pending/order registry, UUID IDs, validated cumulative fill updates and SQLite unresolved-order restoration (not economic reconciliation)
 - [ ] Rust exact cash/fee/cost-basis accounting and worker-enforced risk limits independently verified
-- [ ] Rust public-feed connection lifecycle, exchange timestamps and reconnect behavior independently verified
+- [x] Rust raw/combined public-feed parsing, exchange open-time/interval validation, socket ownership/explicit reconnect lifecycle and immutable candle storage verified with fixtures and loopback transport
+- [x] Rust symbol/timeframe strategy isolation; duplicate/old bars do not update strategy state; public observer refuses economic execution and preserves financial records
+- [x] Rust dashboard retains generation-qualified observation state; health requires recent price and heartbeat receipts, halts remain visible, and unavailable account/order views are explicit
+- [ ] Rust automatic reconnect/backfill, source-time freshness, receive-silence watchdog and sustained real public-feed operation independently verified
 - [x] Separate offline cash-only KRW/USD stock paper book, with whole-share fills and duplicate order safeguards
 - [x] Durable SQLite stock-paper execution journal with replay, idempotence and cash protection
 - [x] Saved Toss 1m JSON parser with closing-time to opening-time conversion

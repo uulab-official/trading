@@ -1,6 +1,7 @@
 """Paper supervisor safety without sockets, accounts, or external brokers."""
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ def success_cycle(*args, **kwargs):
     return {
         "mode": "paper",
         "live_orders_enabled": False,
+        "status": "fixture_complete",
         "processed_bars": 90,
         "appended_bars": 0,
         "daily_loss_halted": False,
@@ -74,16 +76,24 @@ class PaperSupervisorTests(unittest.TestCase):
         self.assertEqual("ValueError", health["last_error_type"])
         self.assertNotIn("SECRET_FAKE_TOKEN", self.heartbeat.read_text())
 
-    def test_first_degraded_heartbeat_atomically_records_failure_budget(self):
+    def test_threshold_failure_atomically_records_halt_and_failure_budget(self):
         def failing(*args, **kwargs):
             raise RuntimeError("simulated market data outage")
 
-        with self.assertRaises(RuntimeError):
-            run_supervised_once(
-                **self.kwargs, cycle=failing, now=lambda: 1700000000, _previous_failures=2
+        self.heartbeat.write_text(
+            json.dumps(
+                {
+                    "mode": "paper",
+                    "live_orders_enabled": False,
+                    "status": "degraded",
+                    "consecutive_failures": 2,
+                }
             )
+        )
+        with self.assertRaises(RuntimeError):
+            run_supervised_once(**self.kwargs, cycle=failing, now=lambda: 1700000000)
         report = json.loads(self.heartbeat.read_text())
-        self.assertEqual("degraded", report["status"])
+        self.assertEqual("halted", report["status"])
         self.assertEqual(3, report["consecutive_failures"])
         self.assertFalse(report["live_orders_enabled"])
 
@@ -428,6 +438,335 @@ class PaperSupervisorTests(unittest.TestCase):
             run_loop(
                 **self.kwargs, cycle=success_cycle, interval_seconds=10, should_stop=lambda: True
             )
+
+    def test_initial_shutdown_cannot_clear_prior_failure_or_operator_halt(self):
+        for operator_stop, expected in ((False, 2), (True, 3)):
+            with self.subTest(operator_stop=operator_stop):
+                self.heartbeat.write_text(
+                    json.dumps(
+                        {
+                            "mode": "paper",
+                            "live_orders_enabled": False,
+                            "status": "halted",
+                            "consecutive_failures": 3,
+                            "operator_stop": operator_stop,
+                        }
+                    )
+                )
+                original = self.heartbeat.read_bytes()
+                calls = []
+
+                def forbidden(*args, **kwargs):
+                    calls.append(True)
+                    return success_cycle()
+
+                self.assertEqual(
+                    expected,
+                    run_loop(**self.kwargs, cycle=forbidden, should_stop=lambda: True),
+                )
+                self.assertEqual([], calls)
+                self.assertEqual(original, self.heartbeat.read_bytes())
+
+    def test_failures_accumulate_across_graceful_stop_and_restart(self):
+        for expected, exit_code in ((1, 0), (2, 0), (3, 2)):
+            calls = []
+
+            def failing(*args, **kwargs):
+                calls.append(True)
+                raise RuntimeError("synthetic outage")
+
+            self.assertEqual(
+                exit_code,
+                run_loop(
+                    **self.kwargs,
+                    cycle=failing,
+                    now=lambda: 1700000000,
+                    should_stop=lambda: bool(calls),
+                ),
+            )
+            saved = json.loads(self.heartbeat.read_text())
+            self.assertEqual(expected, saved["consecutive_failures"])
+            self.assertEqual("halted" if expected == 3 else "stopped", saved["status"])
+
+    def test_one_shot_and_loop_share_failure_budget_and_latch(self):
+        from tools.paper_supervisor import PaperHaltLatched
+
+        def failing(*args, **kwargs):
+            raise RuntimeError("synthetic outage")
+
+        with self.assertRaises(RuntimeError):
+            run_supervised_once(**self.kwargs, cycle=failing, now=lambda: 1700000000)
+        calls = []
+
+        def failing_loop(*args, **kwargs):
+            calls.append(True)
+            return failing()
+
+        self.assertEqual(
+            0,
+            run_loop(
+                **self.kwargs,
+                cycle=failing_loop,
+                now=lambda: 1700000000,
+                should_stop=lambda: bool(calls),
+            ),
+        )
+        with self.assertRaises(RuntimeError):
+            run_supervised_once(**self.kwargs, cycle=failing, now=lambda: 1700000000)
+        saved = json.loads(self.heartbeat.read_text())
+        self.assertEqual(3, saved["consecutive_failures"])
+        self.assertEqual("halted", saved["status"])
+        original = self.heartbeat.read_bytes()
+        with self.assertRaises(PaperHaltLatched):
+            run_supervised_once(**self.kwargs, cycle=success_cycle, now=lambda: 1700000000)
+        self.assertEqual(original, self.heartbeat.read_bytes())
+
+    def test_completed_success_resets_persisted_failure_budget(self):
+        def failing(*args, **kwargs):
+            raise RuntimeError("synthetic outage")
+
+        for _ in range(2):
+            with self.assertRaises(RuntimeError):
+                run_supervised_once(**self.kwargs, cycle=failing, now=lambda: 1700000000)
+        self.assertEqual(2, json.loads(self.heartbeat.read_text())["consecutive_failures"])
+        run_supervised_once(**self.kwargs, cycle=success_cycle, now=lambda: 1700000000)
+        self.assertEqual(0, json.loads(self.heartbeat.read_text()).get("consecutive_failures", 0))
+        with self.assertRaises(RuntimeError):
+            run_supervised_once(**self.kwargs, cycle=failing, now=lambda: 1700000000)
+        self.assertEqual(1, json.loads(self.heartbeat.read_text())["consecutive_failures"])
+
+    def test_incomplete_cycle_cannot_clear_prior_failures(self):
+        self.heartbeat.write_text(
+            json.dumps(
+                {
+                    "mode": "paper",
+                    "live_orders_enabled": False,
+                    "status": "stopped",
+                    "consecutive_failures": 1,
+                }
+            )
+        )
+
+        def incomplete(*args, **kwargs):
+            return dict(success_cycle(), status="paused")
+
+        with self.assertRaises(ValueError):
+            run_supervised_once(**self.kwargs, cycle=incomplete, now=lambda: 1700000000)
+        saved = json.loads(self.heartbeat.read_text())
+        self.assertEqual("degraded", saved["status"])
+        self.assertEqual(2, saved["consecutive_failures"])
+
+    def test_hardlinked_checkpoint_cannot_create_independent_supervisor_owner(self):
+        self.checkpoint.write_text("synthetic checkpoint placeholder")
+        alias = self.checkpoint.with_name("ledger-hardlink.json")
+        os.link(self.checkpoint, alias)
+        names = sorted(path.name for path in alias.parent.iterdir())
+        with self.assertRaises(ValueError):
+            run_supervised_once(
+                **dict(self.kwargs, checkpoint=alias),
+                cycle=success_cycle,
+                now=lambda: 1700000000,
+            )
+        self.assertEqual(names, sorted(path.name for path in alias.parent.iterdir()))
+
+    def test_stopped_invalid_failure_budget_is_preserved_and_refused(self):
+        for count in (-1, True, 1.5, "2", 11):
+            with self.subTest(count=count):
+                self.heartbeat.write_text(
+                    json.dumps(
+                        {
+                            "mode": "paper",
+                            "live_orders_enabled": False,
+                            "status": "stopped",
+                            "consecutive_failures": count,
+                        }
+                    )
+                )
+                original = self.heartbeat.read_bytes()
+                with self.assertRaises(ValueError):
+                    run_supervised_once(**self.kwargs, cycle=success_cycle, now=lambda: 1700000000)
+                self.assertEqual(original, self.heartbeat.read_bytes())
+
+    def test_stopped_budget_at_lowered_threshold_halts_before_cycle_or_shutdown(self):
+        self.heartbeat.write_text(
+            json.dumps(
+                {
+                    "mode": "paper",
+                    "live_orders_enabled": False,
+                    "status": "stopped",
+                    "consecutive_failures": 2,
+                }
+            )
+        )
+        self.assertEqual(
+            2,
+            run_loop(
+                **self.kwargs,
+                cycle=success_cycle,
+                max_failures=2,
+                should_stop=lambda: True,
+            ),
+        )
+        self.assertEqual("halted", json.loads(self.heartbeat.read_text())["status"])
+
+    def test_once_cli_applies_configured_failure_threshold(self):
+        from tools.paper_supervisor import main
+
+        with patch(
+            "tools.upbit_public_paper_snapshot._request_candles",
+            side_effect=RuntimeError("synthetic public-data outage"),
+        ):
+            code = main(
+                [
+                    "--mode",
+                    "paper",
+                    "--once",
+                    "--max-failures",
+                    "1",
+                    "--archive",
+                    str(self.archive),
+                    "--checkpoint",
+                    str(self.checkpoint),
+                    "--heartbeat",
+                    str(self.heartbeat),
+                ]
+            )
+        self.assertEqual(2, code)
+        saved = json.loads(self.heartbeat.read_text())
+        self.assertEqual("halted", saved["status"])
+        self.assertEqual(1, saved["consecutive_failures"])
+
+    def test_data_stop_and_reserved_lock_collisions_refused_before_files_created(self):
+        for field, filename in (
+            ("heartbeat", "ledger.json"),
+            ("heartbeat", ".ledger.json.lock"),
+            ("heartbeat", ".ledger.json.supervisor.lock"),
+            ("heartbeat", "..ledger.json.cycle.lock"),
+            ("heartbeat", ".candles.json.lock"),
+            ("archive", ".ledger.json.supervisor.lock"),
+            ("checkpoint", ".candles.json.lock"),
+            ("kill_switch", "ledger.json"),
+            ("kill_switch", ".ledger.json.supervisor.lock"),
+        ):
+            for operation in ("once", "loop"):
+                with self.subTest(field=field, filename=filename, operation=operation):
+                    with tempfile.TemporaryDirectory() as directory:
+                        root = Path(directory)
+                        args = dict(
+                            self.kwargs,
+                            archive=root / "candles.json",
+                            checkpoint=root / "ledger.json",
+                            heartbeat=root / "health.json",
+                        )
+                        args[field] = root / filename
+                        try:
+                            if operation == "once":
+                                run_supervised_once(**args, cycle=success_cycle)
+                            else:
+                                run_loop(**args, cycle=success_cycle, should_stop=lambda: True)
+                        except ValueError:
+                            pass
+                        except Exception as error:
+                            self.fail("Collision reached execution: " + type(error).__name__)
+                        else:
+                            self.fail("Colliding supervisor paths were accepted")
+                        self.assertEqual([], list(root.iterdir()))
+
+    def test_symlink_alias_of_reserved_lock_is_rejected_without_changes(self):
+        lock = self.checkpoint.with_name(".ledger.json.supervisor.lock")
+        lock.write_text('{"mode":"paper","live_orders_enabled":false,"status":"healthy"}')
+        self.heartbeat.symlink_to(lock)
+        original = lock.read_bytes()
+        names = sorted(path.name for path in lock.parent.iterdir())
+        with self.assertRaises(ValueError):
+            run_supervised_once(**self.kwargs, cycle=success_cycle, now=lambda: 1700000000)
+        self.assertTrue(self.heartbeat.is_symlink())
+        self.assertEqual(original, lock.read_bytes())
+        self.assertEqual(names, sorted(path.name for path in lock.parent.iterdir()))
+
+    def test_hardlinked_data_and_health_are_rejected_before_lock_creation(self):
+        self.archive.write_text("source evidence")
+        os.link(self.archive, self.heartbeat)
+        names = sorted(path.name for path in self.archive.parent.iterdir())
+        with self.assertRaises(ValueError):
+            run_supervised_once(**self.kwargs, cycle=success_cycle, now=lambda: 1700000000)
+        self.assertEqual("source evidence", self.archive.read_text())
+        self.assertEqual(names, sorted(path.name for path in self.archive.parent.iterdir()))
+
+    def test_checkpoint_symlink_alias_shares_supervisor_ownership(self):
+        from trading_bot.paper_checkpoint import CheckpointInUseError
+
+        self.checkpoint.write_text("synthetic checkpoint placeholder")
+        alias = self.checkpoint.with_name("ledger-alias.json")
+        alias.symlink_to(self.checkpoint)
+        refused = []
+
+        def while_idle(seconds):
+            try:
+                run_supervised_once(
+                    **dict(self.kwargs, checkpoint=alias),
+                    cycle=success_cycle,
+                    now=lambda: 1700000000,
+                )
+            except CheckpointInUseError:
+                refused.append(True)
+            else:
+                refused.append(False)
+
+        self.assertEqual(
+            0,
+            run_loop(
+                **self.kwargs,
+                cycle=success_cycle,
+                now=lambda: 1700000000,
+                sleep=while_idle,
+                should_stop=lambda: bool(refused),
+            ),
+        )
+        self.assertEqual([True], refused)
+
+    def test_once_cli_checkpoint_alias_observes_canonical_default_stop(self):
+        from tools.paper_supervisor import main
+
+        self.checkpoint.write_text("checkpoint must not be inspected after STOP")
+        alias = self.checkpoint.with_name("ledger-alias.json")
+        alias.symlink_to(self.checkpoint)
+        stop = self.checkpoint.with_name("ledger.json.STOP")
+        stop.write_text("operator requested stop")
+        self.assertEqual(
+            3,
+            main(
+                [
+                    "--mode",
+                    "paper",
+                    "--once",
+                    "--archive",
+                    str(self.archive),
+                    "--checkpoint",
+                    str(alias),
+                    "--heartbeat",
+                    str(self.heartbeat),
+                ]
+            ),
+        )
+        saved = json.loads(self.heartbeat.read_text())
+        self.assertEqual("halted", saved["status"])
+        self.assertTrue(saved["operator_stop"])
+        self.assertEqual("checkpoint must not be inspected after STOP", self.checkpoint.read_text())
+
+    def test_existing_reserved_heartbeat_cannot_replace_active_lock_inode(self):
+        reserved = self.checkpoint.with_name(".ledger.json.supervisor.lock")
+        reserved.write_text('{"mode":"paper","live_orders_enabled":false,"status":"healthy"}')
+        original = reserved.read_bytes()
+        inode = reserved.stat().st_ino
+        with self.assertRaises(ValueError):
+            run_supervised_once(
+                **dict(self.kwargs, heartbeat=reserved),
+                cycle=success_cycle,
+                now=lambda: 1700000000,
+            )
+        self.assertEqual(original, reserved.read_bytes())
+        self.assertEqual(inode, reserved.stat().st_ino)
 
 
 if __name__ == "__main__":

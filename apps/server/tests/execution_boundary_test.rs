@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 const KEY_SENTINEL: &str = "synthetic-key-must-not-appear-in-errors";
 const SECRET_SENTINEL: &str = "synthetic-secret-must-not-appear-in-errors";
+const ORDER_SENTINEL: &str = "synthetic-order-body-must-not-appear-in-errors";
 
 fn adapter_config() -> ExchangeConfig {
     ExchangeConfig {
@@ -26,7 +27,7 @@ fn adapter_config() -> ExchangeConfig {
 fn pending_order() -> Order {
     let now = Utc::now();
     Order {
-        id: "synthetic-order".into(),
+        id: ORDER_SENTINEL.into(),
         symbol: "BTC/USDT".into(),
         side: OrderSide::Buy,
         order_type: OrderType::Limit,
@@ -46,19 +47,20 @@ fn pending_order() -> Order {
 fn assert_unsupported<T>(result: anyhow::Result<T>, operation: &str) {
     let error = match result {
         Ok(_) => panic!("Unimplemented {operation} returned fabricated success"),
-        Err(error) => error.to_string(),
+        Err(error) => format!("{error:#}"),
     };
     assert!(error.contains("not implemented"), "{error}");
     assert!(error.contains(operation), "{error}");
     assert!(!error.contains(KEY_SENTINEL));
     assert!(!error.contains(SECRET_SENTINEL));
+    assert!(!error.contains(ORDER_SENTINEL));
 }
 
 async fn assert_private_operations_refused(exchange: &dyn Exchange) {
     let mut events = exchange.get_event_receiver();
     assert_unsupported(exchange.place_order(&pending_order()).await, "place_order");
     assert_unsupported(
-        exchange.cancel_order("BTC/USDT", "synthetic-order").await,
+        exchange.cancel_order("BTC/USDT", ORDER_SENTINEL).await,
         "cancel_order",
     );
     assert_unsupported(exchange.get_balance().await, "get_balance");
@@ -167,6 +169,89 @@ fn paper_configuration_still_requires_a_strategy() {
     let mut config = runtime_config();
     config.strategies.clear();
     assert!(config.validate().is_err());
+}
+
+#[test]
+fn public_observation_requires_a_supported_exchange_and_enabled_strategy() {
+    let mut config = runtime_config();
+    config.exchange.id = "bithumb".into();
+    assert!(config.validate().is_err());
+    let mut config = runtime_config();
+    for strategy in &mut config.strategies {
+        strategy.enabled = false;
+    }
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn enabled_strategy_rejects_ambiguous_stream_identity() {
+    for symbol in [
+        "",
+        "BTC//USDT",
+        "BTC USDT",
+        "BTC/",
+        "../BTC",
+        "BTC?token=secret",
+    ] {
+        let mut config = runtime_config();
+        config.strategies[0].symbol = symbol.into();
+        assert!(config.validate().is_err(), "accepted malformed symbol");
+    }
+    for timeframe in ["", "2m", "4H", "1m?token=secret"] {
+        let mut config = runtime_config();
+        config.strategies[0].timeframe = timeframe.into();
+        assert!(config.validate().is_err(), "accepted unsupported timeframe");
+    }
+}
+
+#[test]
+fn strategy_parameters_are_validated_before_allocating_buffers() {
+    for value in [
+        serde_json::json!(0),
+        serde_json::json!(-1),
+        serde_json::json!(1.5),
+        serde_json::json!("50"),
+        serde_json::json!(u64::MAX),
+    ] {
+        let mut config = runtime_config();
+        config.strategies[0]
+            .params
+            .insert("fast_period".into(), value);
+        assert!(config.validate().is_err());
+    }
+    let mut config = runtime_config();
+    config.strategies[0]
+        .params
+        .insert("fast_period".into(), serde_json::json!(200));
+    assert!(config.validate().is_err());
+    let mut config = runtime_config();
+    config.strategies[1]
+        .params
+        .insert("oversold".into(), serde_json::json!(80));
+    assert!(config.validate().is_err());
+    let mut config = runtime_config();
+    config.strategies[0].strategy_type = "unimplemented".into();
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn strategy_names_fit_the_observation_message_contract() {
+    for name in [
+        "x".repeat(257),
+        "line\nbreak".into(),
+        "tab\tname".into(),
+        "nul\0name".into(),
+    ] {
+        let mut config = runtime_config();
+        config.strategies[0].name = name;
+        assert!(
+            config.validate().is_err(),
+            "Protocol-invalid strategy names must fail before startup"
+        );
+    }
+    let mut config = runtime_config();
+    config.strategies[0].name = "x".repeat(256);
+    assert!(config.validate().is_ok());
 }
 
 struct OwnedDirectory(PathBuf);

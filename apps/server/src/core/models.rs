@@ -82,12 +82,72 @@ pub struct Ticker {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Candle {
     pub symbol: String,
+    /// Binance UTC interval; legacy serialized candles default to an unusable empty value.
+    #[serde(default)]
+    pub timeframe: String,
+    /// Exchange candle opening time, never the local receipt time.
     pub timestamp: DateTime<Utc>,
     pub open: f64,
     pub high: f64,
     pub low: f64,
     pub close: f64,
     pub volume: f64,
+}
+
+pub fn is_supported_timeframe(timeframe: &str) -> bool {
+    matches!(
+        timeframe,
+        "1s" | "1m"
+            | "3m"
+            | "5m"
+            | "15m"
+            | "30m"
+            | "1h"
+            | "2h"
+            | "4h"
+            | "6h"
+            | "8h"
+            | "12h"
+            | "1d"
+            | "3d"
+            | "1w"
+            | "1M"
+    )
+}
+
+pub fn normalize_market_symbol(symbol: &str) -> anyhow::Result<String> {
+    let parts: Vec<&str> = symbol.split('/').collect();
+    if symbol.len() > 64
+        || parts.len() > 2
+        || parts
+            .iter()
+            .any(|part| part.is_empty() || !part.bytes().all(|c| c.is_ascii_alphanumeric()))
+    {
+        anyhow::bail!("Invalid market symbol");
+    }
+    Ok(parts.concat().to_ascii_uppercase())
+}
+
+impl Candle {
+    pub fn validate_closed(&self) -> anyhow::Result<()> {
+        if normalize_market_symbol(&self.symbol)? != self.symbol
+            || !is_supported_timeframe(&self.timeframe)
+            || self.timestamp.timestamp_millis() < 0
+        {
+            anyhow::bail!("Invalid closed candle identity");
+        }
+        if [self.open, self.high, self.low, self.close]
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+            || !self.volume.is_finite()
+            || self.volume < 0.0
+            || self.low > self.open.min(self.close)
+            || self.high < self.open.max(self.close)
+        {
+            anyhow::bail!("Invalid closed candle values");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

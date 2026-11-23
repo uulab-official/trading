@@ -31,12 +31,54 @@ class PaperHaltLatched(RuntimeError):
     """Prior repeated failure must be acknowledged before running again."""
 
 
-def _check_prior_halt(heartbeat):
-    """Never silently auto-restart a previously halted paper supervisor."""
-    path = Path(heartbeat)
-    if not path.exists():
-        return
-    raw = path.read_bytes()
+def _normalized_paths(archive, checkpoint, heartbeat, kill_switch):
+    """Refuse data/STOP/lock aliases before creating any owner or output file."""
+    archive, checkpoint, heartbeat = (
+        Path(path).resolve() for path in (archive, checkpoint, heartbeat)
+    )
+    stop = (
+        Path(kill_switch).resolve()
+        if kill_switch is not None
+        else checkpoint.with_name(checkpoint.name + ".STOP").resolve()
+    )
+    paths = (archive, checkpoint, heartbeat, stop)
+    # These are the exact lock targets used by the supervisor, cycle, archive
+    # capture and checkpoint writer. Resolve virtual targets too, as the lock
+    # primitive does, before deriving their persistent .lock file names.
+    targets = (
+        archive,
+        checkpoint,
+        checkpoint.with_name("." + checkpoint.name + ".cycle").resolve(),
+        checkpoint.with_name(checkpoint.name + ".supervisor").resolve(),
+    )
+    reserved = tuple(target.with_name("." + target.name + ".lock").resolve() for target in targets)
+    names, inodes = set(), set()
+    for path in paths + reserved:
+        if path in names:
+            raise ValueError("Supervisor data, STOP and lock paths must be distinct")
+        names.add(path)
+        try:
+            metadata = path.stat()
+        except FileNotFoundError:
+            continue
+        identity = (metadata.st_dev, metadata.st_ino)
+        if identity in inodes:
+            raise ValueError("Supervisor paths must not share a file inode")
+        inodes.add(identity)
+        # POSIX locks are named by canonical path; unlike symbolic links,
+        # separate hardlink names cannot share a canonical owner lock.
+        if path == checkpoint and metadata.st_nlink != 1:
+            raise ValueError("Supervisor checkpoints must not have hardlink aliases")
+    return paths
+
+
+def _read_heartbeat(heartbeat):
+    """Read bounded saved state without modifying evidence on malformed input."""
+    try:
+        with Path(heartbeat).open("rb") as stream:
+            raw = stream.read(65537)
+    except FileNotFoundError:
+        return None
     if len(raw) > 65536:
         raise ValueError("Prior paper heartbeat exceeds size limit")
     saved = json.loads(raw)
@@ -45,11 +87,36 @@ def _check_prior_halt(heartbeat):
         or saved.get("mode") != "paper"
         or saved.get("live_orders_enabled") is not False
     ):
-        raise ValueError("Prior heartbeat is not an authenticated paper-mode marker")
-    if saved.get("status") == "halted":
-        if saved.get("operator_stop") is True:
-            raise PaperEmergencyStop("Operator STOP still latched")
+        raise ValueError("Invalid prior paper heartbeat")
+    status = saved.get("status")
+    if status not in ("healthy", "risk_blocked", "degraded", "halted", "stopped"):
+        raise ValueError("Invalid prior paper status")
+    if "operator_stop" in saved and type(saved["operator_stop"]) is not bool:
+        raise ValueError("Invalid prior operator stop marker")
+    failures = saved.get("consecutive_failures", 1 if status == "degraded" else 0)
+    if type(failures) is not int or not (0 <= failures <= 10):
+        raise ValueError("Invalid prior consecutive failure count")
+    if status == "degraded" and failures == 0:
+        raise ValueError("Degraded heartbeat requires a failure count")
+    if status in ("healthy", "risk_blocked") and failures:
+        raise ValueError("Successful heartbeat cannot carry outstanding failures")
+    return saved
+
+
+def _check_prior_halt(heartbeat, max_failures):
+    """Share durable failure history between one-shot, loop and stopped runs."""
+    saved = _read_heartbeat(heartbeat)
+    if saved is None:
+        return 0
+    if saved.get("operator_stop") is True:
+        raise PaperEmergencyStop("Operator STOP still latched")
+    if saved["status"] == "halted":
         raise PaperHaltLatched("Prior paper supervisor failure remains latched")
+    failures = saved.get("consecutive_failures", 1 if saved["status"] == "degraded" else 0)
+    if failures >= max_failures:
+        _safe_heartbeat(heartbeat, dict(saved, status="halted"))
+        raise PaperHaltLatched("Prior paper failure budget reached the configured threshold")
+    return failures
 
 
 def _safe_heartbeat(path, payload):
@@ -89,13 +156,18 @@ def run_supervised_once(
     cycle=run_cycle,
     now=time.time,
     kill_switch=None,
+    max_failures=3,
     _owner_locked=False,
-    _previous_failures=0,
 ):
+    if type(max_failures) is not int or not (1 <= max_failures <= 10):
+        raise ValueError("max_failures must be between 1 and 10")
+    archive, checkpoint, heartbeat, kill_switch = _normalized_paths(
+        archive, checkpoint, heartbeat, kill_switch
+    )
     if not _owner_locked:
         # One-shot calls must be excluded while the daemon owns the portfolio,
         # including during its idle period; do not race heartbeat writes.
-        owner = Path(checkpoint).with_name(Path(checkpoint).name + ".supervisor")
+        owner = checkpoint.with_name(checkpoint.name + ".supervisor")
         with locked_checkpoint(owner):
             return run_supervised_once(
                 archive=archive,
@@ -108,17 +180,15 @@ def run_supervised_once(
                 cycle=cycle,
                 now=now,
                 kill_switch=kill_switch,
+                max_failures=max_failures,
                 _owner_locked=True,
-                _previous_failures=_previous_failures,
             )
-    if len({Path(archive).resolve(), Path(checkpoint).resolve(), Path(heartbeat).resolve()}) != 3:
-        raise ValueError("Archive, checkpoint, and heartbeat must be distinct paths")
     observed = now()
     if not isinstance(observed, (int, float)) or not (0 < observed < 10**12):
         raise ValueError("Invalid supervisor clock")
     # A restart must not reset the failure threshold by replacing halted
     # state with a fresh healthy pulse. Preserve the old marker on refusal.
-    _check_prior_halt(heartbeat)
+    previous_failures = _check_prior_halt(heartbeat, max_failures)
     base = {
         "mode": "paper",
         "live_orders_enabled": False,
@@ -141,8 +211,14 @@ def run_supervised_once(
             not isinstance(result, dict)
             or result.get("mode") != "paper"
             or result.get("live_orders_enabled") is not False
+            or result.get("status") != "fixture_complete"
+            or type(result.get("processed_bars")) is not int
+            or type(result.get("appended_bars")) is not int
+            or not 0 <= result["appended_bars"] <= result["processed_bars"]
+            or type(result.get("daily_loss_halted")) is not bool
+            or type(result.get("drawdown_halted")) is not bool
         ):
-            raise ValueError("Unexpected non-paper trading result")
+            raise ValueError("Paper cycle did not return a valid completed result")
         risk_blocked = result["daily_loss_halted"] or result["drawdown_halted"]
         heartbeat_state = dict(
             base,
@@ -151,6 +227,7 @@ def run_supervised_once(
             appended_bars=result["appended_bars"],
             daily_loss_halted=result["daily_loss_halted"],
             drawdown_halted=result["drawdown_halted"],
+            consecutive_failures=0,
         )
         _safe_heartbeat(heartbeat, heartbeat_state)
         return heartbeat_state
@@ -164,12 +241,13 @@ def run_supervised_once(
         )
         if isinstance(error, PaperEmergencyStop):
             failure["operator_stop"] = True
+            failure["consecutive_failures"] = previous_failures
         else:
             # Persist the failure budget in the SAME atomic error heartbeat.
             # A crash before the loop's exception handler cannot erase it.
-            if type(_previous_failures) is not int or _previous_failures < 0:
-                raise ValueError("Invalid prior paper failure budget")
-            failure["consecutive_failures"] = _previous_failures + 1
+            failure["consecutive_failures"] = previous_failures + 1
+            if failure["consecutive_failures"] >= max_failures:
+                failure["status"] = "halted"
         _safe_heartbeat(heartbeat, failure)
         raise
 
@@ -197,35 +275,22 @@ def run_loop(
         raise ValueError("Paper polling interval must be at least a candle period")
     if type(max_failures) is not int or not (1 <= max_failures <= 10):
         raise ValueError("max_failures must be between 1 and 10")
+    archive, checkpoint, heartbeat, kill_switch = _normalized_paths(
+        archive, checkpoint, heartbeat, kill_switch
+    )
     # Hold a distinct supervisor owner lock across every idle interval,
     # not merely while one cycle is running. This excludes a second daemon
     # which would otherwise race on heartbeat / retry history.
-    owner = Path(checkpoint).with_name(Path(checkpoint).name + ".supervisor")
+    owner = checkpoint.with_name(checkpoint.name + ".supervisor")
     with locked_checkpoint(owner):
-        consecutive = 0
-        # A process crash after one or more failed cycles must not reset the
-        # failure budget. Health is owner-locked across the entire loop.
-        health_path = Path(heartbeat)
-        if health_path.exists():
-            prior_bytes = health_path.read_bytes()
-            if len(prior_bytes) > 65536:
-                raise ValueError("Prior supervisor heartbeat exceeds size limit")
-            prior = json.loads(prior_bytes)
-            if (
-                not isinstance(prior, dict)
-                or prior.get("mode") != "paper"
-                or prior.get("live_orders_enabled") is not False
-            ):
-                raise ValueError("Invalid prior paper heartbeat")
-            if prior.get("status") == "degraded":
-                prior_failures = prior.get("consecutive_failures", 1)
-                if type(prior_failures) is not int or not (1 <= prior_failures <= 10):
-                    raise ValueError("Invalid prior consecutive failure count")
-                consecutive = prior_failures
-                if consecutive >= max_failures:
-                    prior["status"] = "halted"
-                    _safe_heartbeat(heartbeat, prior)
-                    return 2
+        # Check latches BEFORE should_stop, so an immediate shutdown cannot
+        # downgrade halted evidence or erase a stopped process's failure budget.
+        try:
+            consecutive = _check_prior_halt(heartbeat, max_failures)
+        except PaperHaltLatched:
+            return 2
+        except PaperEmergencyStop:
+            return 3
         while not should_stop():
             try:
                 run_supervised_once(
@@ -239,47 +304,41 @@ def run_loop(
                     cycle=cycle,
                     now=now,
                     kill_switch=kill_switch,
+                    max_failures=max_failures,
                     _owner_locked=True,
-                    _previous_failures=consecutive,
                 )
                 consecutive = 0
             except PaperHaltLatched:
                 return 2
             except PaperEmergencyStop:
-                previous = json.loads(Path(heartbeat).read_text(encoding="utf-8"))
-                previous["status"] = "halted"
-                previous["operator_stop"] = True
-                _safe_heartbeat(heartbeat, previous)
                 return 3
             except Exception:
-                consecutive += 1
-                # Persist the failure counter after EACH attempt, not only
-                # at the terminal halt threshold. Reboots cannot reset it.
-                previous = json.loads(Path(heartbeat).read_text(encoding="utf-8"))
-                if (
-                    previous.get("mode") != "paper"
-                    or previous.get("live_orders_enabled") is not False
-                ):
-                    raise ValueError("Refusing to overwrite invalid paper heartbeat")
-                previous["consecutive_failures"] = consecutive
-                if consecutive >= max_failures:
-                    previous["status"] = "halted"
-                _safe_heartbeat(heartbeat, previous)
-                if consecutive >= max_failures:
+                # The cycle publishes its failure and threshold halt together.
+                # If publication failed, do not retry against stale evidence.
+                previous = _read_heartbeat(heartbeat)
+                if previous is None or previous.get("consecutive_failures") != consecutive + 1:
+                    raise
+                if previous["status"] == "halted":
                     return 2
+                if previous["status"] != "degraded":
+                    raise
+                consecutive = previous["consecutive_failures"]
             if should_stop():
                 break
             # Keep owner lock during interruptible sleep too.
             sleep(interval_seconds)
         # Graceful shutdown must not leave a recent "healthy" pulse that
         # suggests the stopped process is still supervising the market.
-        heartbeat_path = Path(heartbeat)
-        if heartbeat_path.exists():
-            previous = json.loads(heartbeat_path.read_text(encoding="utf-8"))
-            if previous.get("mode") != "paper" or previous.get("live_orders_enabled") is not False:
-                raise ValueError("Refusing to overwrite invalid paper heartbeat")
+        try:
+            _check_prior_halt(heartbeat, max_failures)
+        except PaperHaltLatched:
+            return 2
+        except PaperEmergencyStop:
+            return 3
+        previous = _read_heartbeat(heartbeat)
+        if previous is not None:
             previous["status"] = "stopped"
-            _safe_heartbeat(heartbeat_path, previous)
+            _safe_heartbeat(heartbeat, previous)
     return 0
 
 
@@ -317,7 +376,7 @@ def main(argv=None):
     paths = (args.archive.resolve(), args.checkpoint.resolve(), args.heartbeat.resolve())
     if len(set(paths)) != 3:
         parser.error("Archive, checkpoint and heartbeat paths must all be distinct")
-    kill_switch = args.kill_switch or args.checkpoint.with_name(args.checkpoint.name + ".STOP")
+    kill_switch = args.kill_switch or paths[1].with_name(paths[1].name + ".STOP")
     if kill_switch.resolve() in set(paths):
         parser.error("Kill-switch path must differ from data and health files")
     try:
@@ -353,6 +412,7 @@ def main(argv=None):
             count=args.count,
             balance=args.initial_balance,
             kill_switch=kill_switch,
+            max_failures=args.max_failures,
         )
     except PaperEmergencyStop:
         print("Paper supervisor stopped by operator STOP marker.", file=sys.stderr)

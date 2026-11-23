@@ -31,6 +31,11 @@ locally using simulated fills, and exits. The heartbeat is written as an
 atomic JSON snapshot with `mode: paper` and
 `live_orders_enabled: false`.
 
+`--max-failures` applies to both `--once` and `--loop` (default `3`,
+accepted range `1..10`). Repeated one-shot failures use the same durable
+failure budget as the loop; switching commands or stopping normally does
+not reset that budget. A completed, validated paper cycle resets it.
+
 ## 2. Opt-in continuous paper sampling
 
 ```sh
@@ -62,6 +67,9 @@ the next start verifies the last atomic checkpoint.
 ## Operator emergency STOP marker
 
 The default local kill-switch path is the checkpoint path plus `.STOP`.
+Symbolic checkpoint aliases use the canonical checkpoint's `.STOP` path
+and supervisor owner lock. Set `--kill-switch` explicitly for a different
+operator marker.
 For example, if the checkpoint is `data/upbit-btc-1h-paper.json`,
 create `data/upbit-btc-1h-paper.json.STOP` to prevent **any subsequent**
 cycle from fetching data or advancing simulated trades:
@@ -201,6 +209,10 @@ template, not proof of deployed or successfully monitored runtime.
 A graceful `--loop` shutdown writes `status: stopped` rather than leaving a
 recent `healthy` heartbeat. The health probe treats `stopped`,
 `risk_blocked`, `halted`, and `degraded` as operator-action-required states.
+Any outstanding `consecutive_failures` remain in that stopped heartbeat.
+A prior failure or operator `halted` record is preserved unchanged even
+when a shutdown signal is already pending at startup; its exit code
+remains `2` for a failure halt or `3` for an operator STOP.
 The supervisor does not automatically restart itself. A hard power loss or
 SIGKILL cannot rewrite the heartbeat; age-based stale detection remains the
 fallback and is not instantaneous.
@@ -254,17 +266,31 @@ then run the diagnostic. Never remove lock files to bypass this check.
 External code calling the paper cycle directly should separately
 coordinate access; the cycle maintains its own narrower replay lock.
 
+Before creating any lock or output, the supervisor checks the canonical
+archive, checkpoint, heartbeat and STOP paths against each other and the
+archive/checkpoint/cycle/supervisor lock files. A report or marker must not
+reuse one of these reserved lock paths: replacing a lock file would break
+ownership of its inode. Existing hardlink collisions are refused too;
+checkpoint files with multiple hardlink names are unsupported. Symbolic
+checkpoint aliases share the canonical checkpoint's owner lock, including
+the idle interval. These checks assume a trusted private local directory;
+they do not defend against another process deliberately replacing paths
+between validation and use.
+
 
 ## Failure budget survives restarts (2026-11-20)
 
 The supervisor now records `consecutive_failures` after **every**
 degraded capture/replay cycle, not merely on terminal `halted`.
-On process restart it restores the previous degraded count instead of
-starting at zero; a previous degraded heartbeat without a count is
+On process restart it restores the previous degraded or stopped count
+instead of starting at zero; a previous degraded heartbeat without a count is
 conservatively interpreted as one failure. If a newly configured
 `--max-failures` is already met by the persisted count, startup
-halts **before polling public prices**. A successful paper cycle resets
-the transient budget; a terminal `halted` state still requires
+halts **before polling public prices**, including when an immediate normal
+shutdown was requested. Reaching the threshold writes the failure count
+and `halted` in the same atomic heartbeat update. Only a validated
+`fixture_complete` cycle resets the budget; an incomplete or malformed
+result counts as a failure. A terminal `halted` state still requires
 the explicit operator recovery process above.
 
 Manual backups and recovery candidate reviews also require the same

@@ -100,6 +100,26 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
+        // Legacy candles have no reliable interval metadata. Keep their table
+        // and rows intact rather than assigning a guessed timeframe.
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS closed_candles (
+                symbol TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
+                volume REAL NOT NULL,
+                PRIMARY KEY (symbol, timeframe, timestamp)
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         info!("Database tables initialized");
         Ok(())
     }
@@ -260,15 +280,19 @@ impl Database {
     }
 
     pub async fn save_candle(&self, candle: &crate::core::models::Candle) -> Result<()> {
-        sqlx::query(
+        candle.validate_closed()?;
+        let timestamp = candle.timestamp.to_rfc3339();
+        let result = sqlx::query(
             r#"
-            INSERT OR REPLACE INTO candles 
-            (symbol, timestamp, open, high, low, close, volume)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO closed_candles
+            (symbol, timeframe, timestamp, open, high, low, close, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (symbol, timeframe, timestamp) DO NOTHING
             "#,
         )
         .bind(&candle.symbol)
-        .bind(candle.timestamp.to_rfc3339())
+        .bind(&candle.timeframe)
+        .bind(&timestamp)
         .bind(candle.open)
         .bind(candle.high)
         .bind(candle.low)
@@ -276,6 +300,29 @@ impl Database {
         .bind(candle.volume)
         .execute(&self.pool)
         .await?;
+
+        if result.rows_affected() == 0 {
+            let stored = sqlx::query(
+                r#"
+                SELECT open, high, low, close, volume FROM closed_candles
+                WHERE symbol = ? AND timeframe = ? AND timestamp = ?
+                "#,
+            )
+            .bind(&candle.symbol)
+            .bind(&candle.timeframe)
+            .bind(&timestamp)
+            .fetch_one(&self.pool)
+            .await?;
+
+            if stored.try_get::<f64, _>("open")? != candle.open
+                || stored.try_get::<f64, _>("high")? != candle.high
+                || stored.try_get::<f64, _>("low")? != candle.low
+                || stored.try_get::<f64, _>("close")? != candle.close
+                || stored.try_get::<f64, _>("volume")? != candle.volume
+            {
+                anyhow::bail!("Conflicting closed candle payload");
+            }
+        }
 
         Ok(())
     }

@@ -11,7 +11,7 @@ use tracing::{error, info, warn};
 pub mod deploy;
 pub mod web;
 
-use web::{DashboardEvent, WebDashboard};
+use web::WebDashboard;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum WorkerMessage {
@@ -130,12 +130,13 @@ impl MasterProcess {
 
         loop {
             let (stream, _) = listener.accept().await?;
-            let worker = self.current_worker.clone();
-            let event_tx = self.web_dashboard.get_event_sender();
-
+            let dashboard = self.web_dashboard.clone();
+            // Reserve a generation at accept time, before scheduling the task.
+            // A previous worker's delayed message or EOF cannot replace it.
+            let generation = dashboard.begin_worker_connection().await?;
             tokio::spawn(async move {
-                if let Err(e) = handle_worker_connection(stream, worker, event_tx).await {
-                    error!("Worker connection error: {}", e);
+                if let Err(error) = handle_worker_connection(stream, dashboard, generation).await {
+                    error!("Worker observation connection stopped: {}", error);
                 }
             });
         }
@@ -195,75 +196,52 @@ impl MasterProcess {
 
 async fn handle_worker_connection(
     mut stream: UnixStream,
-    _worker: Arc<RwLock<Option<Child>>>,
-    event_tx: tokio::sync::broadcast::Sender<DashboardEvent>,
+    dashboard: Arc<WebDashboard>,
+    generation: u64,
 ) -> Result<()> {
-    info!("Worker connected to master");
-
-    loop {
-        // Read message length (4 bytes)
-        let mut len_bytes = [0u8; 4];
-        match stream.read_exact(&mut len_bytes).await {
-            Ok(_) => {}
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                    info!("Worker disconnected");
-                    break;
-                }
-                return Err(e.into());
-            }
-        }
-        let len = u32::from_be_bytes(len_bytes) as usize;
-
-        // Read message
-        let mut buffer = vec![0u8; len];
-        stream.read_exact(&mut buffer).await?;
-
-        // Parse message
-        let message: WorkerMessage = serde_json::from_slice(&buffer)?;
-
-        // Convert to DashboardEvent and broadcast
-        let event = match &message {
-            WorkerMessage::PriceUpdate { symbol, price } => {
-                info!(
-                    "Received PriceUpdate from Worker: {} = ${:.2}",
-                    symbol, price
-                );
-                Some(DashboardEvent::PriceUpdate {
-                    symbol: symbol.clone(),
-                    price: *price,
-                })
-            }
-            WorkerMessage::TradeSignal { symbol, signal } => Some(DashboardEvent::TradeSignal {
-                symbol: symbol.clone(),
-                signal: signal.clone(),
-            }),
-            WorkerMessage::OrderUpdate(order) => Some(DashboardEvent::OrderUpdate(order.clone())),
-            WorkerMessage::PositionUpdate(position) => {
-                Some(DashboardEvent::PositionUpdate(position.clone()))
-            }
-            WorkerMessage::SystemStatus { status, message } => {
-                info!("Worker status: {} - {}", status, message);
-                Some(DashboardEvent::SystemStatus {
-                    status: status.clone(),
-                    message: message.clone(),
-                })
-            }
-            WorkerMessage::Heartbeat => None,
-        };
-
-        if let Some(event) = event {
-            let receiver_count = event_tx.send(event.clone()).unwrap_or(0);
-            if receiver_count == 0 {
-                info!("No WebSocket clients connected for event: {:?}", event);
-            } else {
-                info!(
-                    "Broadcasted event to {} clients: {:?}",
-                    receiver_count, event
-                );
-            }
-        }
-    }
-
-    Ok(())
+    let result = read_worker_messages(&mut stream, &dashboard, generation).await;
+    dashboard
+        .end_worker_connection(generation, result.is_err())
+        .await;
+    result
 }
+
+async fn read_worker_messages(
+    stream: &mut UnixStream,
+    dashboard: &WebDashboard,
+    generation: u64,
+) -> Result<()> {
+    loop {
+        // Read the first byte separately to distinguish an orderly EOF from a
+        // truncated length prefix. Bound allocation before trusting IPC input.
+        let mut length = [0_u8; 4];
+        let count = stream
+            .read(&mut length[..1])
+            .await
+            .map_err(|_| anyhow::anyhow!("Worker IPC header read failed"))?;
+        if count == 0 {
+            return Ok(());
+        }
+        stream
+            .read_exact(&mut length[1..])
+            .await
+            .map_err(|_| anyhow::anyhow!("Worker IPC header is truncated"))?;
+        let length = u32::from_be_bytes(length) as usize;
+        anyhow::ensure!(
+            (1..=65_536).contains(&length),
+            "Worker IPC frame length is invalid"
+        );
+        let mut buffer = vec![0_u8; length];
+        stream
+            .read_exact(&mut buffer)
+            .await
+            .map_err(|_| anyhow::anyhow!("Worker IPC frame is truncated"))?;
+        let message: WorkerMessage = serde_json::from_slice(&buffer)
+            .map_err(|_| anyhow::anyhow!("Worker IPC message is invalid"))?;
+        dashboard.record_worker_message(generation, message).await?;
+    }
+}
+
+#[cfg(test)]
+#[path = "connection_tests.rs"]
+mod tests;

@@ -57,11 +57,26 @@ are refused, and unknown order statuses cannot disappear from startup loading.
 Its `f64` metadata and local
 restoration are not an exact-money ledger or authenticated broker reconciliation.
 
-The Rust worker's portfolio/cash/fee accounting, risk enforcement, market-data
-reconnect/timestamp handling and deployment paths remain unvalidated. Its
-historical paper simulation is not the independently audited Python paper
-engine. Use the Python [paper lab](../../docs/PAPER_LAB.md) for the reproducible
-offline simulation path.
+The Rust worker now runs as a **public market observer**. Closed candles retain
+the exchange opening timestamp and timeframe, use an immutable composite SQLite
+key, and reach only the configured symbol/timeframe strategy. The socket task
+owns its transport without holding the worker's shared client lock. Connection
+failure no longer generates random substitute prices, and signals no longer
+create unfilled holdings or erase positions. Worker shutdown does not rewrite
+historical financial records.
+
+Its cash/fee accounting and risk execution remain unavailable. Automatic
+reconnection, missing-bar backfill, freshness monitoring, sustained operation and
+deployment validation remain separate work. Use the Python
+[paper lab](../../docs/PAPER_LAB.md) for the reproducible economic simulation.
+See the [public observation guide](../../docs/RUST_PUBLIC_FEED.md) and
+[current verification](../../docs/RUST_PUBLIC_FEED_VERIFICATION_2026_11_23.md).
+
+The Rust dashboard stores observation state independently of browser clients.
+`/health` returns 503 until the current worker reports observation mode and both
+its heartbeat and a valid price receipt are recent. Halts and disconnects remain
+visible, and account/order endpoints explicitly report `available: false`.
+This receipt-based health check does not verify exchange-event freshness.
 
 See [runtime verification](../../docs/RUST_RUNTIME_VERIFICATION_2026_11_22.md),
 [compiler verification](../../docs/RUST_QUALITY_VERIFICATION_2026_11_21.md), and

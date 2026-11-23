@@ -23,7 +23,9 @@ class OfflineTrialLauncherTests(unittest.TestCase):
             shutil.copytree(
                 ROOT / package,
                 self.repo / package,
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info"),
+                # Rust build artifacts are unrelated to the Python launcher and
+                # can exhaust temporary storage after a local Rust test run.
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info", "target"),
             )
         (self.repo / "config/examples").mkdir(parents=True)
         shutil.copy2(

@@ -1,5 +1,6 @@
+use crate::core::models::{is_supported_timeframe, normalize_market_symbol};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -100,6 +101,65 @@ impl Config {
 
         if self.strategies.is_empty() {
             return Err(anyhow::anyhow!("At least one strategy must be configured"));
+        }
+
+        if self.exchange.id != "binance" {
+            anyhow::bail!("Only the Binance public market observation adapter is implemented");
+        }
+        let mut names = HashSet::new();
+        for strategy in self.strategies.iter().filter(|strategy| strategy.enabled) {
+            if strategy.name.is_empty()
+                || strategy.name.len() > 256
+                || strategy.name.chars().any(char::is_control)
+                || !names.insert(&strategy.name)
+            {
+                anyhow::bail!("Enabled strategy names must be unique, 1 to 256 bytes, and contain no control characters");
+            }
+            normalize_market_symbol(&strategy.symbol)?;
+            if !is_supported_timeframe(&strategy.timeframe) {
+                anyhow::bail!("Unsupported strategy timeframe");
+            }
+            let period = |name: &str, default: u64| -> anyhow::Result<u64> {
+                let value = match strategy.params.get(name) {
+                    Some(value) => value.as_u64().ok_or_else(|| {
+                        anyhow::anyhow!("Strategy periods must be positive integers")
+                    })?,
+                    None => default,
+                };
+                if !(1..=10_000).contains(&value) {
+                    anyhow::bail!("Strategy periods must be between 1 and 10000");
+                }
+                Ok(value)
+            };
+            match strategy.strategy_type.as_str() {
+                "ma_cross" => {
+                    if period("fast_period", 10)? >= period("slow_period", 20)? {
+                        anyhow::bail!("MA fast period must be smaller than slow period");
+                    }
+                }
+                "rsi" => {
+                    period("period", 14)?;
+                    let threshold = |name: &str, default: f64| -> anyhow::Result<f64> {
+                        let value = match strategy.params.get(name) {
+                            Some(value) => value
+                                .as_f64()
+                                .ok_or_else(|| anyhow::anyhow!("RSI thresholds must be numeric"))?,
+                            None => default,
+                        };
+                        if !value.is_finite() || !(0.0..=100.0).contains(&value) {
+                            anyhow::bail!("RSI thresholds must be finite percentages");
+                        }
+                        Ok(value)
+                    };
+                    if threshold("oversold", 30.0)? >= threshold("overbought", 70.0)? {
+                        anyhow::bail!("RSI oversold must be smaller than overbought");
+                    }
+                }
+                _ => anyhow::bail!("Unsupported enabled strategy type"),
+            }
+        }
+        if names.is_empty() {
+            anyhow::bail!("At least one strategy must be enabled");
         }
 
         // Paper configuration does not authenticate or enable broker execution.

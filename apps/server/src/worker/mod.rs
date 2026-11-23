@@ -1,16 +1,15 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tokio::sync::{broadcast, RwLock};
 use tokio::time::{interval, Duration};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::core::config::Config;
 use crate::core::database::Database;
-use crate::core::models::{Candle, Order, OrderSide, OrderStatus, OrderType};
+use crate::core::models::{normalize_market_symbol, Order};
 use crate::core::order_manager::OrderManager;
 use crate::core::portfolio::PortfolioManager;
 use crate::core::risk_manager::{RiskConfig, RiskManager};
@@ -18,7 +17,10 @@ use crate::exchange::binance::BinanceClient;
 use crate::exchange::{Exchange, ExchangeConfig, ExchangeEvent};
 use crate::strategy::ma_cross::MaCrossStrategy;
 use crate::strategy::rsi::RsiStrategy;
-use crate::strategy::{Signal, Strategy};
+use crate::strategy::{Signal, Strategy, StrategyBinding};
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum WorkerMessage {
@@ -37,7 +39,7 @@ pub struct WorkerProcess {
     order_manager: Arc<OrderManager>,
     portfolio_manager: Arc<PortfolioManager>,
     risk_manager: Arc<RwLock<RiskManager>>,
-    strategies: Arc<RwLock<Vec<Box<dyn Strategy>>>>,
+    strategies: Arc<RwLock<Vec<StrategyBinding>>>,
     shutdown_tx: broadcast::Sender<()>,
     binance_client: Arc<RwLock<Option<BinanceClient>>>,
     master_tx: RwLock<Option<UnixStream>>,
@@ -100,275 +102,131 @@ impl WorkerProcess {
 
     async fn send_to_master(&self, message: WorkerMessage) -> Result<()> {
         let mut master_tx = self.master_tx.write().await;
-        if let Some(stream) = master_tx.as_mut() {
+        // Only a fully delivered frame restores the stream. Cancellation drops
+        // this local owner as well, so shutdown cannot append to a partial frame.
+        if let Some(mut stream) = master_tx.take() {
             let json = serde_json::to_string(&message)?;
             let bytes = json.as_bytes();
             let len = bytes.len() as u32;
-            stream.write_all(&len.to_be_bytes()).await?;
-            stream.write_all(bytes).await?;
-            Ok(())
+            let result = tokio::time::timeout(Duration::from_secs(5), async {
+                stream.write_all(&len.to_be_bytes()).await?;
+                stream.write_all(bytes).await
+            })
+            .await;
+            if matches!(result, Ok(Ok(()))) {
+                *master_tx = Some(stream);
+                Ok(())
+            } else {
+                // A partial frame cannot be reused as a healthy master connection.
+                Err(anyhow::anyhow!(
+                    "Master message delivery failed or timed out"
+                ))
+            }
         } else {
             Err(anyhow::anyhow!("Not connected to master"))
         }
     }
 
     pub async fn run(self) -> Result<()> {
-        info!("Worker process starting...");
+        self.connect_to_master().await?;
+        self.run_connected().await
+    }
 
-        // Connect to master first
-        if let Err(e) = self.connect_to_master().await {
-            error!("Failed to connect to master: {}", e);
-            return Err(e);
-        }
-
-        self.send_to_master(WorkerMessage::SystemStatus {
-            status: "initializing".to_string(),
-            message: "Worker starting up".to_string(),
-        })
-        .await
-        .ok();
-
-        self.init_exchanges().await?;
+    async fn run_connected(self) -> Result<()> {
         self.init_strategies().await?;
         self.restore_state().await?;
+        self.init_exchanges().await?;
 
-        self.send_to_master(WorkerMessage::SystemStatus {
-            status: "running".to_string(),
-            message: "Worker initialized and running".to_string(),
-        })
-        .await
-        .ok();
-
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        let mut health_interval = interval(Duration::from_secs(30));
-
-        let order_manager = self.order_manager.clone();
-        let portfolio_manager = self.portfolio_manager.clone();
-        let risk_manager = self.risk_manager.clone();
-        let strategies = self.strategies.clone();
-        let db = self.db.clone();
-
-        let mut binance_rx = {
-            let client = self.binance_client.read().await;
-            match client.as_ref() {
-                Some(client) => client.get_event_receiver(),
-                None => {
-                    warn!("No Binance client available, running in limited mode");
-                    let (tx, rx) = broadcast::channel(1);
-                    drop(tx);
-                    rx
-                }
-            }
-        };
-
-        let worker = Arc::new(self);
-
-        let has_binance = {
-            let client = worker.binance_client.read().await;
-            client.is_some()
-        };
-
-        let binance_task = {
-            let worker = Arc::clone(&worker);
-            tokio::spawn(async move {
-                if !has_binance {
-                    futures_util::future::pending::<()>().await;
-                    return;
-                }
-                let mut client = worker.binance_client.write().await;
-                if let Some(ref mut binance) = client.as_mut() {
-                    info!("Starting Binance message loop");
-                    if let Err(e) = binance.run_message_loop().await {
-                        error!("Binance message loop error: {}", e);
-                    }
-                }
-            })
-        };
-
-        let forwarder_task = {
-            let worker = Arc::clone(&worker);
-            tokio::spawn(async move {
-                let mut rx = {
-                    let client = worker.binance_client.read().await;
-                    match client.as_ref() {
-                        Some(client) => client.get_event_receiver(),
-                        None => {
-                            let (tx, rx) = broadcast::channel(1);
-                            drop(tx);
-                            rx
-                        }
-                    }
-                };
-
-                info!("Starting price forwarder task");
-                loop {
-                    match rx.recv().await {
-                        Ok(event) => match event {
-                            crate::exchange::ExchangeEvent::Ticker(ticker) => {
-                                worker
-                                    .send_to_master(WorkerMessage::PriceUpdate {
-                                        symbol: ticker.symbol.clone(),
-                                        price: ticker.last,
-                                    })
-                                    .await
-                                    .ok();
-                            }
-                            crate::exchange::ExchangeEvent::Candle(candle) => {
-                                worker
-                                    .send_to_master(WorkerMessage::SystemStatus {
-                                        status: "candle".to_string(),
-                                        message: format!(
-                                            "{} {} closed at {}",
-                                            candle.symbol, candle.timestamp, candle.close
-                                        ),
-                                    })
-                                    .await
-                                    .ok();
-                            }
-                            _ => {}
-                        },
-                        Err(_) => {
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                            continue;
-                        }
-                    }
-                }
-            })
-        };
-
-        let mock_price_task = {
-            let worker = Arc::clone(&worker);
-            tokio::spawn(async move {
-                if has_binance {
-                    futures_util::future::pending::<()>().await;
-                    return;
-                }
-
-                info!("Starting mock price generator (no Binance connection)");
-                let mut interval = interval(Duration::from_secs(5));
-                let mut price = 45000.0;
-
-                loop {
-                    interval.tick().await;
-                    price += (rand::random::<f64>() - 0.5) * 100.0;
-                    worker
-                        .send_to_master(WorkerMessage::PriceUpdate {
-                            symbol: "BTC/USDT".to_string(),
-                            price,
-                        })
-                        .await
-                        .ok();
-                }
-            })
-        };
-
-        tokio::select! {
-            _ = worker.run_trading_loop(
-                &mut binance_rx,
-                order_manager,
-                portfolio_manager,
-                risk_manager,
-                strategies,
-                db,
-            ) => {
-                info!("Trading loop ended");
-            }
-            _ = shutdown_rx.recv() => {
-                info!("Shutdown signal received");
-            }
-            _ = tokio::signal::ctrl_c() => {
-                info!("Ctrl+C received, shutting down");
-            }
-            _ = async {
-                loop {
-                    health_interval.tick().await;
-                    worker.send_to_master(WorkerMessage::Heartbeat).await.ok();
-                }
-            } => {}
-            _ = binance_task => {
-                warn!("Binance message loop ended");
-            }
-            _ = forwarder_task => {
-                warn!("Price forwarder task ended");
-            }
-            _ = mock_price_task => {
-                warn!("Mock price task ended");
-            }
-            else => {
-                warn!("All tasks completed unexpectedly");
-            }
-        }
-
-        worker
-            .send_to_master(WorkerMessage::SystemStatus {
-                status: "shutdown".to_string(),
-                message: "Worker shutting down".to_string(),
+        // Acquire the receiver before connecting, then transfer socket ownership.
+        // No shared lock is held while the transport waits for market messages.
+        let mut client = self
+            .binance_client
+            .write()
+            .await
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Public market client is unavailable"))?;
+        let mut event_rx = client.get_event_receiver();
+        if let Err(error) = client.connect().await {
+            self.send_to_master(WorkerMessage::SystemStatus {
+                status: "feed_unavailable".into(),
+                message: "Public market connection failed; observations stopped".into(),
             })
             .await
             .ok();
+            return Err(error);
+        }
+        self.send_to_master(WorkerMessage::SystemStatus {
+            status: "observation_only".into(),
+            message: "Public market observations and strategy signals; execution unavailable"
+                .into(),
+        })
+        .await?;
 
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let feed_task = tokio::spawn(async move { client.run_message_loop().await });
+        let worker = Arc::new(self);
+        let result = tokio::select! {
+            result = worker.run_trading_loop(
+                &mut event_rx, worker.order_manager.clone(), worker.portfolio_manager.clone(),
+                worker.risk_manager.clone(), worker.strategies.clone(), worker.db.clone(),
+            ) => result,
+            _ = shutdown_rx.recv() => Ok(()),
+            result = tokio::signal::ctrl_c() => result.map_err(anyhow::Error::from),
+            result = worker.send_heartbeats() => result,
+        };
+
+        // Do not leave a detached socket task alive after an error or shutdown.
+        if !feed_task.is_finished() {
+            feed_task.abort();
+        }
+        let _ = feed_task.await;
+        worker
+            .send_to_master(WorkerMessage::SystemStatus {
+                status: if result.is_ok() {
+                    "stopped"
+                } else {
+                    "feed_halted"
+                }
+                .into(),
+                message: "Market observations stopped; no financial state was changed".into(),
+            })
+            .await
+            .ok();
         worker.cleanup().await?;
-        info!("Worker process stopped");
+        result
+    }
 
-        Ok(())
+    async fn send_heartbeats(&self) -> Result<()> {
+        let mut timer = interval(Duration::from_secs(30));
+        loop {
+            timer.tick().await;
+            self.send_to_master(WorkerMessage::Heartbeat).await?;
+        }
     }
 
     async fn init_exchanges(&self) -> Result<()> {
         let exchange_config = ExchangeConfig {
             id: self.config.exchange.id.clone(),
-            api_key: self.config.exchange.api_key.clone().unwrap_or_default(),
-            api_secret: self.config.exchange.api_secret.clone().unwrap_or_default(),
+            // Market observation never forwards account credentials to its transport.
+            api_key: String::new(),
+            api_secret: String::new(),
             ws_url: self.config.exchange.ws_url.clone(),
             rest_url: self.config.exchange.rest_url.clone(),
             testnet: self.config.exchange.testnet,
         };
-
-        let mut binance = BinanceClient::new(exchange_config);
-
-        match binance.connect().await {
-            Ok(_) => {
-                for strategy_config in &self.config.strategies {
-                    if !strategy_config.enabled {
-                        continue;
-                    }
-
-                    let symbol = &strategy_config.symbol;
-                    let timeframe = &strategy_config.timeframe;
-
-                    if let Err(e) = binance.subscribe_candles(symbol, timeframe).await {
-                        warn!("Failed to subscribe to {} candles: {}", symbol, e);
-                    } else {
-                        info!("Subscribed to {} candles ({})", symbol, timeframe);
-                    }
-
-                    if let Err(e) = binance.subscribe_ticker(symbol).await {
-                        warn!("Failed to subscribe to {} ticker: {}", symbol, e);
-                    } else {
-                        info!("Subscribed to {} ticker", symbol);
-                    }
-                }
-
-                {
-                    let mut client = self.binance_client.write().await;
-                    *client = Some(binance);
-                }
-
-                info!("Exchanges initialized and WebSocket connected");
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to connect to exchange: {}. Running in mock mode.",
-                    e
-                );
-                self.send_to_master(WorkerMessage::SystemStatus {
-                    status: "mock_mode".to_string(),
-                    message: "Running without exchange connection".to_string(),
-                })
-                .await
-                .ok();
-            }
+        let mut client = BinanceClient::new(exchange_config);
+        for config in self
+            .config
+            .strategies
+            .iter()
+            .filter(|config| config.enabled)
+        {
+            client
+                .subscribe_candles(&config.symbol, &config.timeframe)
+                .await?;
+            client.subscribe_ticker(&config.symbol).await?;
         }
-
+        *self.binance_client.write().await = Some(client);
         Ok(())
     }
 
@@ -398,12 +256,17 @@ impl WorkerProcess {
                         .and_then(|v| v.as_f64())
                         .unwrap_or(70.0);
 
-                    strategies.push(Box::new(RsiStrategy::new(
+                    let strategy: Box<dyn Strategy> = Box::new(RsiStrategy::new(
                         strategy_config.name.clone(),
                         period,
                         oversold,
                         overbought,
-                    )));
+                    ));
+                    strategies.push(StrategyBinding::new(
+                        &strategy_config.symbol,
+                        &strategy_config.timeframe,
+                        strategy,
+                    )?);
                     info!("Initialized RSI strategy: {}", strategy_config.name);
                 }
                 "ma_cross" => {
@@ -418,15 +281,20 @@ impl WorkerProcess {
                         .and_then(|v| v.as_u64())
                         .unwrap_or(20) as usize;
 
-                    strategies.push(Box::new(MaCrossStrategy::new(
+                    let strategy: Box<dyn Strategy> = Box::new(MaCrossStrategy::new(
                         strategy_config.name.clone(),
                         fast,
                         slow,
-                    )));
+                    ));
+                    strategies.push(StrategyBinding::new(
+                        &strategy_config.symbol,
+                        &strategy_config.timeframe,
+                        strategy,
+                    )?);
                     info!("Initialized MA Cross strategy: {}", strategy_config.name);
                 }
                 _ => {
-                    warn!("Unknown strategy type: {}", strategy_config.strategy_type);
+                    anyhow::bail!("Unsupported enabled strategy type");
                 }
             }
         }
@@ -443,35 +311,10 @@ impl WorkerProcess {
             info!("Restored open order: {}", order.id);
         }
 
-        let positions = self.db.get_all_positions().await?;
-        let position_count = positions.len();
-        for position in &positions {
-            self.portfolio_manager
-                .open_position(
-                    &Order {
-                        id: format!("restore-{}", position.symbol),
-                        symbol: position.symbol.clone(),
-                        side: position.side.clone(),
-                        order_type: OrderType::Market,
-                        quantity: position.quantity,
-                        price: Some(position.entry_price),
-                        status: OrderStatus::Filled,
-                        created_at: position.opened_at,
-                        updated_at: position.opened_at,
-                        exchange_order_id: None,
-                        filled_quantity: position.quantity,
-                        average_price: Some(position.entry_price),
-                        commission: None,
-                        commission_asset: None,
-                    },
-                    position.entry_price,
-                )
-                .ok();
-            info!("Restored position: {} {:?}", position.symbol, position.side);
-        }
-
+        // Historical positions are inspected, never converted into fabricated fills.
+        let position_count = self.db.get_all_positions().await?.len();
         info!(
-            "State restored: {} orders, {} positions",
+            "State inspected: {} unresolved orders, {} historical positions",
             order_count, position_count
         );
         Ok(())
@@ -483,165 +326,136 @@ impl WorkerProcess {
         order_manager: Arc<OrderManager>,
         portfolio_manager: Arc<PortfolioManager>,
         risk_manager: Arc<RwLock<RiskManager>>,
-        strategies: Arc<RwLock<Vec<Box<dyn Strategy>>>>,
+        strategies: Arc<RwLock<Vec<StrategyBinding>>>,
         db: Arc<Database>,
     ) -> Result<()> {
-        let mut last_candles: HashMap<String, Candle> = HashMap::new();
-
-        info!("Trading loop started");
-
         loop {
-            tokio::select! {
-                Ok(event) = event_rx.recv() => {
-                    match event {
-                        ExchangeEvent::Ticker(ticker) => {
-                            portfolio_manager.update_position_prices(&ticker.symbol, ticker.last);
-                        }
-                        ExchangeEvent::Candle(candle) => {
-                            db.save_candle(&candle).await.ok();
-
-                            let mut strategies = strategies.write().await;
-                            for strategy in strategies.iter_mut() {
-                                let signal = strategy.on_candle(&candle);
-
-                                match signal {
-                                    Signal::Buy => {
-                                        if let Err(e) = self.handle_buy_signal(
-                                            &candle.symbol,
-                                            candle.close,
-                                            &order_manager,
-                                            &portfolio_manager,
-                                            &risk_manager,
-                                            &db,
-                                        ).await {
-                                            error!("Failed to execute buy signal: {}", e);
-                                        }
-                                    }
-                                    Signal::Sell => {
-                                        if let Err(e) = self.handle_sell_signal(
-                                            &candle.symbol,
-                                            candle.close,
-                                            &portfolio_manager,
-                                            &db,
-                                        ).await {
-                                            error!("Failed to execute sell signal: {}", e);
-                                        }
-                                    }
-                                    Signal::Hold => {}
-                                }
+            let event = match event_rx.recv().await {
+                Ok(event) => event,
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    anyhow::bail!("Public market events were lost; strategy observations halted")
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    anyhow::bail!("Public market event channel closed")
+                }
+            };
+            match event {
+                ExchangeEvent::Ticker(ticker) => {
+                    if normalize_market_symbol(&ticker.symbol)? != ticker.symbol
+                        || !ticker.last.is_finite()
+                        || ticker.last <= 0.0
+                        || ticker.timestamp.timestamp_millis() < 0
+                    {
+                        anyhow::bail!("Invalid market ticker observation");
+                    }
+                    self.send_to_master(WorkerMessage::PriceUpdate {
+                        symbol: ticker.symbol,
+                        price: ticker.last,
+                    })
+                    .await?;
+                }
+                ExchangeEvent::Candle(candle) => {
+                    candle.validate_closed()?;
+                    let mut bindings = strategies.write().await;
+                    if !bindings.iter().any(|binding| binding.matches(&candle)) {
+                        continue;
+                    }
+                    // Persistence must succeed before a strategy consumes the bar.
+                    db.save_candle(&candle).await?;
+                    let mut signals = Vec::new();
+                    for binding in bindings.iter_mut() {
+                        if let Some(signal) = binding.on_candle(&candle)? {
+                            if signal != Signal::Hold {
+                                signals.push((binding.name().to_string(), signal));
                             }
-
-                            last_candles.insert(candle.symbol.clone(), candle);
                         }
-                        ExchangeEvent::TradeUpdate(order) => {
-                            order_manager.handle_exchange_event(&ExchangeEvent::TradeUpdate(order));
+                    }
+                    drop(bindings);
+                    for (name, signal) in signals {
+                        self.send_to_master(WorkerMessage::TradeSignal {
+                            symbol: candle.symbol.clone(),
+                            signal: format!(
+                                "{:?} (observation only; {} {})",
+                                signal, name, candle.timeframe
+                            ),
+                        })
+                        .await?;
+                        let refusal = match signal {
+                            Signal::Buy => {
+                                self.handle_buy_signal(
+                                    &candle.symbol,
+                                    candle.close,
+                                    &order_manager,
+                                    &portfolio_manager,
+                                    &risk_manager,
+                                    &db,
+                                )
+                                .await
+                            }
+                            Signal::Sell => {
+                                self.handle_sell_signal(
+                                    &candle.symbol,
+                                    candle.close,
+                                    &portfolio_manager,
+                                    &db,
+                                )
+                                .await
+                            }
+                            Signal::Hold => Ok(()),
+                        };
+                        if let Err(error) = refusal {
+                            warn!("{}", error);
                         }
-                        _ => {}
                     }
                 }
-                else => {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                ExchangeEvent::Connected => {
+                    self.send_to_master(WorkerMessage::SystemStatus {
+                        status: "observation_only".into(),
+                        message: "Public market transport connected; execution unavailable".into(),
+                    })
+                    .await?;
                 }
+                ExchangeEvent::Disconnected => {
+                    anyhow::bail!("Public market feed disconnected; restart required")
+                }
+                ExchangeEvent::Error(_) => anyhow::bail!("Public market feed reported an error"),
+                ExchangeEvent::TradeUpdate(_) => {
+                    anyhow::bail!("Account update is not supported on the public observation path")
+                }
+                ExchangeEvent::OrderBook(_) => {}
             }
         }
     }
 
     async fn handle_buy_signal(
         &self,
-        symbol: &str,
-        price: f64,
-        order_manager: &Arc<OrderManager>,
-        portfolio_manager: &Arc<PortfolioManager>,
-        risk_manager: &Arc<RwLock<RiskManager>>,
-        db: &Arc<Database>,
+        _symbol: &str,
+        _price: f64,
+        _order_manager: &Arc<OrderManager>,
+        _portfolio_manager: &Arc<PortfolioManager>,
+        _risk_manager: &Arc<RwLock<RiskManager>>,
+        _db: &Arc<Database>,
     ) -> Result<()> {
-        let risk = risk_manager.read().await;
-
-        if !risk.is_trading_allowed() {
-            return Ok(());
-        }
-
-        if portfolio_manager.get_position(symbol).is_some() {
-            return Ok(());
-        }
-
-        let balance = 10000.0;
-        let stop_loss = risk.calculate_stop_loss(price, &OrderSide::Buy, price * 0.02);
-        let position_size = risk.calculate_position_size(balance, price, stop_loss);
-
-        if position_size <= 0.0 {
-            return Ok(());
-        }
-
-        drop(risk);
-
-        let order = order_manager
-            .create_order(
-                symbol.to_string(),
-                OrderSide::Buy,
-                OrderType::Market,
-                position_size,
-                Some(price),
-            )
-            .await?;
-
-        db.save_order(&order).await?;
-
-        portfolio_manager.open_position(&order, price)?;
-        db.save_position(&portfolio_manager.get_position(symbol).unwrap())
-            .await?;
-
-        info!(
-            symbol = symbol,
-            price = price,
-            quantity = position_size,
-            "Buy signal executed"
-        );
-
-        Ok(())
+        anyhow::bail!(
+            "Rust paper execution is unavailable: cash, fee and risk accounting is not validated"
+        )
     }
 
     async fn handle_sell_signal(
         &self,
-        symbol: &str,
-        price: f64,
-        portfolio_manager: &Arc<PortfolioManager>,
-        db: &Arc<Database>,
+        _symbol: &str,
+        _price: f64,
+        _portfolio_manager: &Arc<PortfolioManager>,
+        _db: &Arc<Database>,
     ) -> Result<()> {
-        if let Some(position) = portfolio_manager.get_position(symbol) {
-            if position.side == OrderSide::Buy {
-                let pnl = portfolio_manager.close_position(symbol, price)?;
-                db.delete_position(symbol).await?;
-
-                let mut risk = self.risk_manager.write().await;
-                risk.update_pnl(pnl);
-
-                info!(
-                    symbol = symbol,
-                    price = price,
-                    pnl = pnl,
-                    "Sell signal executed - position closed"
-                );
-            }
-        }
-
-        Ok(())
+        anyhow::bail!(
+            "Rust paper execution is unavailable: cash, fee and risk accounting is not validated"
+        )
     }
 
     async fn cleanup(&self) -> Result<()> {
-        info!("Cleaning up worker process...");
-
-        let orders = self.order_manager.get_all_orders();
-        for order in orders {
-            self.db.save_order(&order).await?;
-        }
-
-        let positions = self.portfolio_manager.get_all_positions();
-        for position in positions {
-            self.db.save_position(&position).await?;
-        }
-
-        info!("State saved to database");
+        // Observation shutdown must not rewrite historical orders or positions.
+        info!("Observation worker stopped; persisted financial records preserved");
         Ok(())
     }
 }
