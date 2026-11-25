@@ -1,6 +1,7 @@
 pub mod config;
 pub mod database;
 pub mod error;
+pub mod market_units;
 pub mod models;
 pub mod order_manager;
 pub mod paper_ledger;
