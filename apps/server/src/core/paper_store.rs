@@ -2,6 +2,7 @@
 //! Always replay verified events before returning account state or appending.
 
 use anyhow::{ensure, Context, Result};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
@@ -15,8 +16,12 @@ const SCHEMA_VERSION: i64 = 1;
 /// This development store replays the entire journal for each operation.
 pub const MAX_EVENTS: i64 = 2048;
 const MAX_PAYLOAD_BYTES: usize = 4096;
+const BACKUP_VERSION: u32 = 1;
+/// Bound the complete logical backup before parsing untrusted input.
+pub const MAX_BACKUP_BYTES: usize = 9 * 1024 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct JournalHead {
     pub sequence: i64,
     pub hash: String,
@@ -28,19 +33,60 @@ pub struct VerifiedState {
     pub account: AccountSnapshot,
 }
 
+/// Store independently of the database. Trust in this value is supplied by the
+/// caller, not by the SHA-256 chain itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JournalCheckpoint {
+    pub ledger_id: String,
+    pub head: JournalHead,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExportedBackup {
+    pub checkpoint: JournalCheckpoint,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BackupV1 {
+    version: u32,
+    ledger_id: String,
+    config: PaperConfig,
+    head: JournalHead,
+    events: Vec<JournalEvent>,
+}
+
 /// An explicitly identified, isolated, single-currency paper account. Separate
 /// instances coordinate writes through SQLite; no in-memory state is authoritative.
 pub struct PaperStore {
     pool: SqlitePool,
     ledger_id: String,
     config: PaperConfig,
+    checkpoint_floor: Option<JournalCheckpoint>,
 }
 
 impl PaperStore {
     /// Never opens or replaces a pre-existing file. If initialization fails,
     /// leave the file in place for inspection rather than silently resetting it.
     pub async fn create(path: &Path, ledger_id: &str, config: PaperConfig) -> Result<Self> {
-        validate_identity(ledger_id, &config)?;
+        let ledger = PaperLedger::new(config)?;
+        Self::create_from_ledger(path, ledger_id, ledger, None).await
+    }
+
+    async fn create_from_ledger(
+        path: &Path,
+        ledger_id: &str,
+        ledger: PaperLedger,
+        checkpoint_floor: Option<JournalCheckpoint>,
+    ) -> Result<Self> {
+        validate_identity(ledger_id, ledger.config())?;
+        ensure!(
+            ledger.journal().len() <= MAX_EVENTS as usize,
+            "Paper journal capacity exceeded"
+        );
+        let (head, _) = replay_with_head(ledger.config(), ledger_id, ledger.journal(), checkpoint_floor.as_ref())?;
         OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -48,7 +94,8 @@ impl PaperStore {
             .context("Paper ledger must be created at a new file path")?
             .sync_all()?;
 
-        let store = Self::connect(path, ledger_id, config).await?;
+        let mut store = Self::connect(path, ledger_id, ledger.config().clone()).await?;
+        store.checkpoint_floor = checkpoint_floor;
         let config_json = encode(&store.config)?;
         let hash = genesis(&store.ledger_id, &config_json);
         let mut tx = store.pool.begin().await?;
@@ -75,17 +122,40 @@ impl PaperStore {
         )
         .execute(&mut *tx)
         .await?;
-        sqlx::query(
-            "INSERT INTO paper_meta VALUES (1, ?, ?, ?, 0, ?)",
-        )
-        .bind(SCHEMA_VERSION)
-        .bind(&store.ledger_id)
-        .bind(&config_json)
-        .bind(&hash)
-        .execute(&mut *tx)
-        .await?;
+        let mut previous_hash = hash;
+        for (index, event) in ledger.journal().iter().enumerate() {
+            let sequence = i64::try_from(index)? + 1;
+            let payload = encode(event)?;
+            let next_hash = event_digest(sequence, &previous_hash, &payload);
+            sqlx::query(
+                "INSERT INTO paper_events (seq, event_id, payload, prev_hash, event_hash) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(sequence)
+            .bind(&event.event_id)
+            .bind(&payload)
+            .bind(&previous_hash)
+            .bind(&next_hash)
+            .execute(&mut *tx)
+            .await?;
+            previous_hash = next_hash;
+        }
+        ensure!(previous_hash == head.hash, "Unexpected restore head");
+        sqlx::query("INSERT INTO paper_meta VALUES (1, ?, ?, ?, ?, ?)")
+            .bind(SCHEMA_VERSION)
+            .bind(&store.ledger_id)
+            .bind(&config_json)
+            .bind(head.sequence)
+            .bind(&head.hash)
+            .execute(&mut *tx)
+            .await?;
+        // Verify inside the same transaction so a failed initialization never
+        // publishes a valid-looking, empty account in place of a restored one.
+        let (restored, restored_head) = store.load(&mut tx).await?;
+        ensure!(
+            restored_head == head && restored.snapshot()? == ledger.snapshot()?,
+            "Restored paper journal differs from verified input"
+        );
         tx.commit().await?;
-        store.audit().await?;
         Ok(store)
     }
 
@@ -96,6 +166,75 @@ impl PaperStore {
         let store = Self::connect(path, ledger_id, config).await?;
         store.audit().await?;
         Ok(store)
+    }
+
+    /// A trusted checkpoint is a lower bound on the accepted history, not an
+    /// equality check. Later valid descendants may continue trading in paper mode.
+    /// Every subsequent audit, export and append checks this floor in its own
+    /// transaction. The caller must supply the latest independently retained
+    /// checkpoint when restarting the process.
+    pub async fn open_with_checkpoint(
+        path: &Path,
+        ledger_id: &str,
+        config: PaperConfig,
+        checkpoint: JournalCheckpoint,
+    ) -> Result<Self> {
+        validate_identity(ledger_id, &config)?;
+        validate_checkpoint(ledger_id, &checkpoint)?;
+        let mut store = Self::connect(path, ledger_id, config).await?;
+        store.checkpoint_floor = Some(checkpoint);
+        store.audit().await?;
+        Ok(store)
+    }
+
+    /// Produce an internally consistent logical backup without copying SQLite
+    /// files or depending on WAL checkpoint timing. Persist the returned
+    /// checkpoint independently if rollback detection is required.
+    pub async fn export_backup(&self) -> Result<ExportedBackup> {
+        let mut tx = self.pool.begin().await?;
+        let (ledger, head) = self.load(&mut tx).await?;
+        let backup = BackupV1 {
+            version: BACKUP_VERSION,
+            ledger_id: self.ledger_id.clone(),
+            config: self.config.clone(),
+            head: head.clone(),
+            events: ledger.journal().to_vec(),
+        };
+        let bytes = serde_json::to_vec(&backup)?;
+        ensure!(bytes.len() <= MAX_BACKUP_BYTES, "Paper backup too large");
+        tx.commit().await?;
+        Ok(ExportedBackup {
+            checkpoint: JournalCheckpoint { ledger_id: self.ledger_id.clone(), head },
+            bytes,
+        })
+    }
+
+    /// Restore ONLY into a new file. The supplied checkpoint must match the
+    /// exact backup head; a prefix or checkpoint read only from this untrusted
+    /// backup is not independent evidence. Validate before touching the path.
+    /// All events and metadata are created in a single SQLite transaction.
+    pub async fn restore_backup(
+        path: &Path,
+        ledger_id: &str,
+        config: PaperConfig,
+        bytes: &[u8],
+        expected: JournalCheckpoint,
+    ) -> Result<Self> {
+        validate_identity(ledger_id, &config)?;
+        validate_checkpoint(ledger_id, &expected)?;
+        ensure!(bytes.len() <= MAX_BACKUP_BYTES, "Paper backup too large");
+        let backup: BackupV1 = serde_json::from_slice(bytes)?;
+        ensure!(backup.version == BACKUP_VERSION, "Unsupported paper backup version");
+        ensure!(
+            backup.ledger_id == ledger_id && backup.config == config,
+            "Paper backup account or configuration mismatch"
+        );
+        // Reject silently ignored fields, alternative encodings and trailing bytes.
+        ensure!(serde_json::to_vec(&backup)? == bytes, "Noncanonical paper backup");
+        ensure!(backup.head == expected.head, "Paper backup checkpoint mismatch");
+        let (head, ledger) = replay_with_head(&config, ledger_id, &backup.events, Some(&expected))?;
+        ensure!(head == expected.head, "Paper backup replay head mismatch");
+        Self::create_from_ledger(path, ledger_id, ledger, Some(expected)).await
     }
 
     async fn connect(path: &Path, ledger_id: &str, config: PaperConfig) -> Result<Self> {
@@ -117,6 +256,7 @@ impl PaperStore {
             pool,
             ledger_id: ledger_id.to_owned(),
             config,
+            checkpoint_floor: None,
         })
     }
 
@@ -132,6 +272,12 @@ impl PaperStore {
         let account = ledger.snapshot()?;
         tx.commit().await?;
         Ok(VerifiedState { head, account })
+    }
+
+    /// The latest verified head may be retained by an independent system.
+    pub async fn checkpoint(&self) -> Result<JournalCheckpoint> {
+        let state = self.audit().await?;
+        Ok(JournalCheckpoint { ledger_id: self.ledger_id.clone(), head: state.head })
     }
 
     /// Acquire SQLite's writer lock *before* reading any state. Never append
@@ -230,6 +376,11 @@ impl PaperStore {
         );
 
         let mut previous_hash = genesis(&self.ledger_id, &config_json);
+        let mut checkpoint_matched = false;
+        if let Some(checkpoint) = &self.checkpoint_floor {
+            ensure!(head.sequence >= checkpoint.head.sequence, "Paper journal rolled back");
+            checkpoint_matched = check_prefix(checkpoint, 0, &previous_hash)?;
+        }
         let mut ledger = PaperLedger::new(self.config.clone())?;
         for (index, row) in rows.iter().enumerate() {
             let sequence = i64::try_from(index)? + 1;
@@ -257,7 +408,14 @@ impl PaperStore {
                 "Duplicate accepted paper event"
             );
             previous_hash = expected_hash;
+            if let Some(checkpoint) = &self.checkpoint_floor {
+                checkpoint_matched |= check_prefix(checkpoint, sequence, &previous_hash)?;
+            }
         }
+        ensure!(
+            self.checkpoint_floor.is_none() || checkpoint_matched,
+            "Trusted paper checkpoint not found"
+        );
         ensure!(previous_hash == head.hash, "Paper journal head digest mismatch");
         Ok((ledger, head))
     }
@@ -306,4 +464,54 @@ fn event_digest(sequence: i64, previous_hash: &str, payload: &str) -> String {
         previous_hash.as_bytes(),
         payload.as_bytes(),
     ])
+}
+
+fn validate_checkpoint(ledger_id: &str, checkpoint: &JournalCheckpoint) -> Result<()> {
+    ensure!(checkpoint.ledger_id == ledger_id, "Paper checkpoint account mismatch");
+    ensure!(
+        (0..=MAX_EVENTS).contains(&checkpoint.head.sequence)
+            && checkpoint.head.hash.len() == 64
+            && checkpoint.head.hash.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)),
+        "Invalid paper checkpoint"
+    );
+    Ok(())
+}
+
+/// A valid newer head must contain the exact trusted prefix. A matching
+/// sequence with different bytes indicates a fork, not a legitimate extension.
+fn check_prefix(checkpoint: &JournalCheckpoint, sequence: i64, hash: &str) -> Result<bool> {
+    if checkpoint.head.sequence != sequence {
+        return Ok(false);
+    }
+    ensure!(checkpoint.head.hash == hash, "Paper journal diverges from trusted checkpoint");
+    Ok(true)
+}
+
+fn replay_with_head(
+    config: &PaperConfig,
+    ledger_id: &str,
+    events: &[JournalEvent],
+    floor: Option<&JournalCheckpoint>,
+) -> Result<(JournalHead, PaperLedger)> {
+    ensure!(events.len() <= MAX_EVENTS as usize, "Paper journal capacity exceeded");
+    let mut ledger = PaperLedger::new(config.clone())?;
+    let mut hash = genesis(ledger_id, &encode(config)?);
+    let mut matched = false;
+    if let Some(checkpoint) = floor {
+        validate_checkpoint(ledger_id, checkpoint)?;
+        matched = check_prefix(checkpoint, 0, &hash)?;
+    }
+    for (index, event) in events.iter().enumerate() {
+        let sequence = i64::try_from(index)? + 1;
+        hash = event_digest(sequence, &hash, &encode(event)?);
+        ensure!(
+            ledger.apply(event.clone())? == ApplyOutcome::Applied,
+            "Duplicate accepted paper event"
+        );
+        if let Some(checkpoint) = floor {
+            matched |= check_prefix(checkpoint, sequence, &hash)?;
+        }
+    }
+    ensure!(floor.is_none() || matched, "Trusted paper checkpoint not found");
+    Ok((JournalHead { sequence: i64::try_from(events.len())?, hash }, ledger))
 }
