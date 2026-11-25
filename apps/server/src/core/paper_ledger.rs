@@ -4,6 +4,7 @@
 //! must perform exact unit conversion before submitting events. Never interpret
 //! an accepted simulated fill as a broker execution.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -33,7 +34,7 @@ impl std::error::Error for LedgerError {}
 
 type Result<T> = std::result::Result<T, LedgerError>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaperConfig {
     pub quote_asset: String,
     pub initial_cash: u64,
@@ -47,7 +48,7 @@ pub struct PaperConfig {
     pub max_realized_loss: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
     Buy,
     Sell,
@@ -61,7 +62,7 @@ pub enum Status {
     Canceled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrderTerms {
     pub order_id: String,
     /// Canonical uppercase base asset; account quote asset is fixed.
@@ -110,7 +111,7 @@ pub struct Holding {
     pub cost_basis: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Action {
     Submit(OrderTerms),
     Fill {
@@ -126,7 +127,7 @@ pub enum Action {
     HaltBuys,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JournalEvent {
     pub event_id: String,
     pub action: Action,
