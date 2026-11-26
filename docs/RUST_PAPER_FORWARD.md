@@ -83,3 +83,31 @@ Network-disabled Docker smoke coverage compares init and audit output.
 Actual source freshness, data capture, order-book availability, exchange
 authenticity, live dashboard and continuous scheduling are separate concerns.
 No actual broker requests, live orders or real capital release are enabled.
+
+## Binance public archive integration
+
+The existing Python public collector can export a current, verified fixed-start
+window as a ForwardInput envelope. It checks the archive, freshness, operator
+STOP, contiguous bar count, market/template identity and optional exact
+expected archive head in a single read transaction. The source ID is derived
+from the pinned archive configuration; the head changes as it grows.
+
+From the repository root (prepare a real static market-rules scenario template,
+not the synthetic DEMO fixture):
+
+```sh
+python tools/binance_public_archive.py forward-export data/binance-history/btc.sqlite \
+  --start-open-ms SESSION_START_UTC_MS --template data/btc-paper-template.json \
+  > data/btc-forward-input.json
+apps/server/target/release/trading-server paper-forward \
+  --input data/btc-forward-input.json --output-dir data/btc-forward --initialize
+```
+
+After later completed-bar capture, repeat the export with the SAME start and
+template and invoke paper-forward without --initialize. Use --audit-only for
+a read-only report. Do not change start to get around capacity. Use the
+collector's separate sync --loop for capture; no automatic real order or
+live execution is involved. The input file must be fully written before the
+Rust process reads it; use a private directory and atomic file publication
+if scheduling these commands. Independent external archive checkpoint
+retention and real API verification are still required.

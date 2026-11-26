@@ -204,6 +204,64 @@ class BinanceArchiveTests(unittest.TestCase):
         with self.assertRaises(archive.ArchiveError):
             archive.export_window(self.path, 6)
 
+    def forward_template(self):
+        return {
+            "version": 1,
+            "market": {"base_asset": "BTC"},
+            "account": {"quote_asset": "USDT"},
+            "timeframe": "1m",
+            "bars": [],
+        }
+
+    def test_forward_export_keeps_fixed_start_and_source_identity_as_archive_grows(self):
+        self.run_sync()
+        template = self.forward_template()
+        start = START + STEP
+        first = archive.export_forward(self.path, start, template, clock=self.feed.clock)
+        self.assertEqual(first["source"], archive.SOURCE)
+        self.assertEqual(first["archive_head_sha256"], self.state()["head_sha256"])
+        self.assertEqual(first["scenario"]["bars"][0]["open_ms"], start)
+        self.assertEqual(len(first["scenario"]["bars"]), 4)
+        self.feed.latest += STEP
+        self.run_sync()
+        second = archive.export_forward(self.path, start, template, clock=self.feed.clock)
+        self.assertEqual(second["source_id"], first["source_id"])
+        self.assertNotEqual(second["archive_head_sha256"], first["archive_head_sha256"])
+        self.assertEqual(second["scenario"]["bars"][:-1], first["scenario"]["bars"])
+        self.assertEqual(template["bars"], [])
+        with self.assertRaises(archive.ArchiveError):
+            archive.export_forward(
+                self.path,
+                start,
+                template,
+                clock=self.feed.clock,
+                expected_head=first["archive_head_sha256"],
+            )
+
+    def test_forward_export_rejects_noncurrent_or_oversize_history_without_sliding(self):
+        self.run_sync(pages=1, page_size=2)
+        template = self.forward_template()
+        with self.assertRaises(archive.ArchiveError):
+            archive.export_forward(self.path, START, template, clock=self.feed.clock)
+        self.run_sync()
+        with self.assertRaises(archive.ArchiveError):
+            archive.export_forward(
+                self.path, START, template, clock=lambda: self.feed.clock() + 4 * STEP
+            )
+        with self.assertRaises(archive.ArchiveError):
+            archive.export_forward(self.path, START + 1, template, clock=self.feed.clock)
+        stop = Path(f"{self.path}.STOP")
+        stop.touch()
+        with self.assertRaises(archive.ArchiveError):
+            archive.export_forward(self.path, START, template, clock=self.feed.clock)
+        stop.unlink()
+        self.feed.latest = START + 240 * STEP
+        self.run_sync()
+        with self.assertRaises(archive.ArchiveError):
+            archive.export_forward(self.path, START, template, clock=self.feed.clock)
+        result = archive.export_forward(self.path, START + STEP, template, clock=self.feed.clock)
+        self.assertEqual(len(result["scenario"]["bars"]), 240)
+
     def test_owner_lock_and_stale_capture(self):
         self.run_sync()
         with archive.owner(self.path):

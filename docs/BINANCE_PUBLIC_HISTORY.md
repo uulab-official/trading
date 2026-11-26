@@ -104,3 +104,11 @@ Tests use injected public responses, not actual Binance requests. The standard
 offline safety suite includes this module. No private account permissions,
 real order execution, long-running deployment, or profitability is validated.
 Official protocol: https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/market .
+
+## Fixed-start forward export
+
+Use `forward-export --start-open-ms ... --template ...` to generate a Rust
+paper-forward envelope rather than a sliding backtest window. Current,
+caught-up capture is required; stale/STOP/halted/oversized sessions fail closed.
+The exported source ID pins the archive configuration; no market unit rules
+are inferred. See [RUST_PAPER_FORWARD.md](RUST_PAPER_FORWARD.md).

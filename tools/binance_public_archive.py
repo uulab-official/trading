@@ -557,19 +557,78 @@ def export_window(path, count, *, end_open_ms=None, template=None):
         require(len(bars) == count, "incomplete_export")
         if template is None:
             return {"identity": cfg, "archive_head_sha256": meta["head"], "bars": bars}
-        require(isinstance(template, dict) and template.get("version") == 1, "invalid_template")
+        return scenario_from_template(cfg, bars, template)
+
+
+def scenario_from_template(cfg, bars, template):
+    require(isinstance(template, dict) and template.get("version") == 1, "invalid_template")
+    require(
+        isinstance(template.get("market"), dict)
+        and isinstance(template.get("account"), dict)
+        and isinstance(template["market"].get("base_asset"), str)
+        and isinstance(template["account"].get("quote_asset"), str)
+        and template["market"]["base_asset"] + template["account"]["quote_asset"] == cfg["symbol"]
+        and template.get("timeframe") == cfg["interval"]
+        and "bars" in template,
+        "replay_template_identity_mismatch",
+    )
+    return {**template, "bars": bars}
+
+
+def export_forward(
+    path, start_open_ms, template, *, expected_head=None, max_age_ms=180_000, clock=now_ms
+):
+    """Build a growing fixed-start Rust forward input in one audited read snapshot.
+
+    Refuse stale, halted, stopped or still catching-up capture. The supplied
+    archive head is provenance, not authentication of the exchange response.
+    """
+    require(type(max_age_ms) is int and 1_000 <= max_age_ms <= 86_400_000, "invalid_age")
+    path = existing_archive(path)
+    with connection(path, readonly=True) as db:
+        db.execute("BEGIN")
+        cfg, meta, last = audit(db)
+        if expected_head is not None:
+            require(meta["head"] == expected_head, "external_checkpoint_mismatch")
+        now = clock()
+        require(type(now) is int and now > 0, "invalid_clock")
+        step = INTERVALS[cfg["interval"]]
+        current_target = (now - CLOSE_GRACE_MS) // step * step - step
         require(
-            isinstance(template.get("market"), dict)
-            and isinstance(template.get("account"), dict)
-            and isinstance(template["market"].get("base_asset"), str)
-            and isinstance(template["account"].get("quote_asset"), str)
-            and template["market"]["base_asset"] + template["account"]["quote_asset"]
-            == cfg["symbol"]
-            and template.get("timeframe") == cfg["interval"]
-            and "bars" in template,
-            "replay_template_identity_mismatch",
+            meta["status"] == "caught_up"
+            and not stop_requested(path)
+            and meta["last_success_ms"] is not None
+            and 0 <= now - meta["last_success_ms"] <= max_age_ms
+            and last is not None
+            and last[0] >= current_target
+            and last[1] <= now + MAX_CLOCK_SKEW_MS,
+            "capture_not_current",
         )
-        return {**template, "bars": bars}
+        require(
+            type(start_open_ms) is int
+            and cfg["start_ms"] <= start_open_ms <= last[0]
+            and start_open_ms % step == 0,
+            "invalid_forward_start",
+        )
+        count = (last[0] - start_open_ms) // step + 1
+        require(2 <= count <= 240, "forward_bar_capacity")
+        bars = [
+            dict(row)
+            for row in db.execute(
+                "SELECT open_ms, open, high, low, close, volume FROM bars "
+                "WHERE open_ms BETWEEN ? AND ? ORDER BY open_ms",
+                (start_open_ms, last[0]),
+            )
+        ]
+        require(len(bars) == count, "incomplete_forward_export")
+        scenario = scenario_from_template(cfg, bars, template)
+        return {
+            "version": 1,
+            "source": SOURCE,
+            "source_id": digest("paper-forward-source-v1", cfg),
+            "archive_head_sha256": meta["head"],
+            "scenario": scenario,
+        }
 
 
 def read_template(path):
@@ -614,6 +673,12 @@ def main(argv=None):
     export.add_argument("--count", type=int, required=True)
     export.add_argument("--end-open-ms", type=int)
     export.add_argument("--template", type=Path)
+    forward = sub.add_parser("forward-export")
+    forward.add_argument("archive", type=Path)
+    forward.add_argument("--start-open-ms", type=int, required=True)
+    forward.add_argument("--template", type=Path, required=True)
+    forward.add_argument("--expected-head")
+    forward.add_argument("--max-age-ms", type=int, default=180_000)
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -645,6 +710,14 @@ def main(argv=None):
             result = backup(args.archive, args.destination)
         elif args.command == "daily-backup":
             result = daily_backup(args.archive, args.directory)
+        elif args.command == "forward-export":
+            result = export_forward(
+                args.archive,
+                args.start_open_ms,
+                read_template(args.template),
+                expected_head=args.expected_head,
+                max_age_ms=args.max_age_ms,
+            )
         else:
             template = read_template(args.template) if args.template else None
             result = export_window(
