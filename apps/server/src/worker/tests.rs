@@ -103,6 +103,7 @@ async fn closed_event_channel_returns_an_error_instead_of_spinning() {
             worker.risk_manager.clone(),
             worker.strategies.clone(),
             worker.db.clone(),
+            fixture_clock,
         ),
     )
     .await
@@ -156,6 +157,10 @@ fn bar(symbol: &str, minute: i64, close: f64) -> Candle {
     }
 }
 
+fn fixture_clock() -> chrono::DateTime<Utc> {
+    bar("BTCUSDT", 1, 100.0).timestamp + chrono::Duration::seconds(60)
+}
+
 async fn observation_worker() -> WorkerProcess {
     let mut worker = fixture_worker().await;
     worker.config.strategies.truncate(1);
@@ -200,6 +205,7 @@ async fn observe_events(
             worker.risk_manager.clone(),
             worker.strategies.clone(),
             worker.db.clone(),
+            fixture_clock,
         ),
     )
     .await
@@ -224,7 +230,7 @@ async fn real_event_path_delivers_prices_and_signals_without_financial_mutation(
         ask: 102.0,
         last: 101.0,
         volume: 1.0,
-        timestamp: bar("BTCUSDT", 0, 100.0).timestamp,
+        timestamp: fixture_clock(),
     };
     let (result, messages) = observe_events(
         &worker,
@@ -237,12 +243,15 @@ async fn real_event_path_delivers_prices_and_signals_without_financial_mutation(
     )
     .await;
     assert!(result.unwrap_err().to_string().contains("channel closed"));
-    assert_eq!(messages.len(), 2);
+    assert_eq!(messages.len(), 3);
     assert!(
         matches!(&messages[0], WorkerMessage::PriceUpdate { symbol, price } if symbol == "BTCUSDT" && *price == 101.0)
     );
     assert!(
-        matches!(&messages[1], WorkerMessage::TradeSignal { symbol, signal } if symbol == "BTCUSDT" && signal.contains("observation only"))
+        matches!(&messages[1], WorkerMessage::SystemStatus { status, .. } if status == "observation_only")
+    );
+    assert!(
+        matches!(&messages[2], WorkerMessage::TradeSignal { symbol, signal } if symbol == "BTCUSDT" && signal.contains("observation only"))
     );
     assert!(worker.order_manager.get_all_orders().is_empty());
     assert!(worker.portfolio_manager.get_all_positions().is_empty());
@@ -319,6 +328,7 @@ async fn lost_events_and_disconnect_halt_without_substituting_prices() {
             worker.risk_manager.clone(),
             worker.strategies.clone(),
             worker.db.clone(),
+            fixture_clock,
         )
         .await;
     assert!(result.unwrap_err().to_string().contains("events were lost"));
@@ -340,7 +350,7 @@ async fn worker_owns_transport_without_blocking_observation_delivery() {
         let (stream, _) = listener.accept().await.unwrap();
         let mut ws = accept_async(stream).await.unwrap();
         ws.send(Message::Text(serde_json::json!({"stream":"btcusdt@ticker", "data":{
-            "e":"24hrTicker", "E":1700000100000_i64, "s":"BTCUSDT", "b":"100", "a":"102", "c":"101", "v":"1"
+            "e":"24hrTicker", "E":Utc::now().timestamp_millis(), "s":"BTCUSDT", "b":"100", "a":"102", "c":"101", "v":"1"
         }}).to_string())).await.unwrap();
         ws.close(None).await.unwrap();
     });

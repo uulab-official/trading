@@ -365,14 +365,27 @@ impl BinanceClient {
         Ok(())
     }
 
+    /// Initial startup only: bounded attempts with backoff. A later feed
+    /// failure still halts; reconnecting after observations requires a verified
+    /// history boundary, never blind resumption of a strategy cursor.
+    pub(crate) async fn connect_bounded(&mut self) -> Result<()> {
+        self.validate_endpoint()?;
+        for attempt in 0..3 {
+            match self.connect().await {
+                Ok(()) => return Ok(()),
+                Err(error) if attempt == 2 => return Err(error),
+                Err(_) => tokio::time::sleep(Duration::from_secs(1 << attempt)).await,
+            }
+        }
+        anyhow::bail!("Public market connection attempts exhausted")
+    }
+
     async fn receive_messages(&mut self) -> Result<()> {
         loop {
-            let next = self
-                .ws_stream
-                .as_mut()
-                .ok_or_else(|| anyhow!("Binance public-feed transport is disconnected"))?
-                .next()
-                .await;
+            let socket = self.ws_stream.as_mut()
+                .ok_or_else(|| anyhow!("Binance public-feed transport is disconnected"))?;
+            let next = timeout(Duration::from_secs(90), socket.next())
+                .await.map_err(|_| anyhow!("Binance public-feed receive deadline exceeded"))?;
             match next {
                 Some(Ok(Message::Close(_))) => {
                     // Tungstenite queued the close reply while reading this frame.

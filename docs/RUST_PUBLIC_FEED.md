@@ -111,3 +111,34 @@ WebSocket 알림이 현재 화면을 덮어쓰지 않도록 제한합니다.
 raw/combined 형식, UTC kline 필드와 주기, ping/pong 계약입니다.
 실행 결과와 재현 기록은
 [2026-11-23 검증 문서](RUST_PUBLIC_FEED_VERIFICATION_2026_11_23.md)에 정리합니다.
+
+## Bounded startup and per-stream observation watchdog
+
+The worker attempts its initial public WebSocket connection at most three
+times (1s and 2s backoff; shutdown can interrupt). Invalid endpoint validation
+fails before retrying. After a successful connection the status stays
+initializing until a fresh ticker has arrived for **every** enabled symbol.
+Unrelated/identical retransmitted tickers do not refresh liveness. Signals
+received during initialization are not published. Every subscribed ticker
+must remain fresh: source timestamps may be at most 90s old or 5s in the
+future, and each subscription must receive a new ticker within 90s.
+Regressing timestamps and conflicting last prices at equal source time halt.
+A 90s transport-frame watchdog and 5s worker watchdog prevent a silent
+connection from appearing indefinitely active.
+
+For closed bars the in-process cursor checks the exact next opening
+timestamp (including calendar months). The close must be recent, with the
+same 90s age and 5s future-skew limits. Duplicate current-bar identity still
+requires the immutable SQLite overlap check. A gap, regression, conflicting
+payload or overdue next bar halts before advancing the strategy. The first
+bar deadline uses one interval plus grace; no assumption is made about an
+unqualified historical candle. All of these are observation gates, not
+proof of tradable quotes or real exchange health.
+
+Automatic mid-session resumption is deliberately not enabled: the legacy
+closed-candle table does not pin testnet versus production venue identity.
+Do not replay it into a new session without verified provenance and
+backfill. The separate public REST archive is designed for audited history
+capture, not automatic WebSocket promotion. Private operations and worker
+economic execution remain unavailable. New watchdog regression tests use
+injected times and loopback events; no real-feed availability is claimed.
