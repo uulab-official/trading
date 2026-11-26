@@ -37,6 +37,19 @@ enum Cli {
         #[arg(long)]
         html: bool,
     },
+    /// Rolling out-of-sample strategy research; no orders or databases.
+    PaperWalkForward {
+        #[arg(long)]
+        input: std::path::PathBuf,
+        #[arg(long)]
+        train_bars: usize,
+        #[arg(long)]
+        test_bars: usize,
+        #[arg(long)]
+        min_train_fills: usize,
+        #[arg(long)]
+        max_train_drawdown_bps: u16,
+    },
 }
 
 #[tokio::main]
@@ -75,6 +88,15 @@ async fn main() -> Result<()> {
             } else {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
+        }
+        Cli::PaperWalkForward {
+            input, train_bars, test_bars, min_train_fills, max_train_drawdown_bps,
+        } => {
+            let input = core::paper_sim::read_input(&input)?;
+            let report = core::paper_sim::walk_forward(&input, core::paper_sim::WalkForwardConfig {
+                train_bars, test_bars, min_train_fills, max_train_drawdown_bps,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Cli::Migrate => {
             info!("Running database migrations");
@@ -225,6 +247,7 @@ mod tests {
             Some("deploy"),
             Some("migrate"),
             Some("paper-replay"),
+            Some("paper-walk-forward"),
         ] {
             let mut arguments = vec!["trading-server"];
             if let Some(command) = command {

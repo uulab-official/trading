@@ -68,7 +68,7 @@ attempts with signal/open timestamps and outcomes. Open inventory is marked at
 the last close (not force liquidated); return includes modeled fees. JSON
 integer atom fields may exceed JavaScript's safe integer range; use an
 integer-preserving parser. The HTML renders amounts as exact decimal integers.
-No annualized return, Sharpe, parameter optimizer, or claim of statistical edge.
+No annualized return, Sharpe, or claim of statistical edge.
 Warmup is not training; independent out-of-sample dataset selection and
 walk-forward optimization are separate requirements. Python backtest, portfolio
 report and supervisor paths remain unchanged.
@@ -93,3 +93,13 @@ the existing 2,048-event cap, safe live supervisor, atomic external checkpoint
 publication and backup retention, live dashboard integration, broker
 reconciliation and independent multi-day paper validation. Live orders remain
 disabled; never use the simulator's synthetic fills as actual execution evidence.
+
+## Rolling walk-forward evaluation
+
+```sh
+cargo run --locked -- paper-walk-forward --input config/paper_replay_example.json --train-bars 4 --test-bars 2 --min-train-fills 1 --max-train-drawdown-bps 10000
+```
+
+Predeclared candidates are compared only on training bars; ranking uses exact final marked equity with equal initial funds. Halted candidates and those failing the explicit fill-count or drawdown requirement are excluded. Ties prefer lower drawdown then lexical ID. Each nonoverlapping test window starts with fresh funds and earlier indicator warmup only. No eligible candidate means a skipped fold, not zero return. At most 32 complete folds are evaluated; trailing bars are validated but not scored. Reports include exact input/config digests, training evidence and selected test returns. Means are independent fold averages, not compound or annualized returns. Repeatedly changing candidate definitions after reading test results destroys holdout isolation. Use a final untouched dataset and independent longer-history validation before any deployment.
+
+Regression: `cargo test --locked --test paper_walk_forward_test`. The new network-disabled Docker smoke gate also invokes the CLI. Test execution is pending CI.

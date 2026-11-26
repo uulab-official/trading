@@ -497,6 +497,136 @@ pub fn simulate(input: &ReplayInput) -> Result<ReplayReport> {
     Ok(experiment(input)?.0)
 }
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WalkForwardConfig {
+    pub train_bars: usize,
+    pub test_bars: usize,
+    pub min_train_fills: usize,
+    pub max_train_drawdown_bps: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TrainingCandidate {
+    pub id: String,
+    pub final_equity_atoms: u64,
+    pub return_bps: i128,
+    pub max_sampled_drawdown_bps: u16,
+    pub fills: usize,
+    pub buys_halted: bool,
+    pub eligible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WalkForwardFold {
+    pub fold: usize,
+    pub train_start_ms: u64,
+    pub train_end_ms: u64,
+    pub test_start_ms: u64,
+    pub test_end_ms: u64,
+    pub training_candidates: Vec<TrainingCandidate>,
+    pub selected_strategy: Option<String>,
+    pub test_result: Option<StrategyReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WalkForwardReport {
+    pub mode: &'static str,
+    pub scenario_sha256: String,
+    pub experiment_sha256: String,
+    pub base_asset: String,
+    pub quote_asset: String,
+    pub quote_scale: u32,
+    pub config: WalkForwardConfig,
+    pub warmup_bars: usize,
+    pub unused_trailing_bars: usize,
+    pub evaluated_folds: usize,
+    pub skipped_folds: usize,
+    /// Independent fold mean, not compounded or annualized.
+    pub mean_test_return_bps: Option<i128>,
+    pub worst_test_drawdown_bps: Option<u16>,
+    pub positive_test_folds: usize,
+    pub folds: Vec<WalkForwardFold>,
+}
+
+/// Rolling train-only candidate selection. The selected test uses only
+/// prior warmup bars and fresh cash, never the training account's positions.
+/// Skipped folds have no fabricated return. No database writes occur.
+pub fn walk_forward(input: &ReplayInput, config: WalkForwardConfig) -> Result<WalkForwardReport> {
+    let prepared = prepare(input)?;
+    ensure!(
+        config.train_bars >= 2 && config.test_bars >= 2
+            && config.min_train_fills > 0 && config.min_train_fills <= config.train_bars
+            && config.max_train_drawdown_bps <= 10_000,
+        "Invalid walk-forward parameters"
+    );
+    let first_test = input.warmup_bars.checked_add(config.train_bars)
+        .context("Walk-forward window overflow")?;
+    let remaining = input.bars.len().checked_sub(first_test)
+        .context("Insufficient bars for walk-forward training")?;
+    let count = remaining / config.test_bars;
+    ensure!((1..=32).contains(&count), "Walk-forward requires 1 to 32 complete folds");
+    let mut folds = Vec::with_capacity(count);
+    let (mut evaluated, mut positive, mut total_return) = (0usize, 0usize, 0i128);
+    let mut worst_drawdown: Option<u16> = None;
+    for i in 0..count {
+        let train_start = input.warmup_bars + i * config.test_bars;
+        let test_start = train_start + config.train_bars;
+        let test_end = test_start + config.test_bars;
+        let mut training = input.clone();
+        training.bars = input.bars[train_start - input.warmup_bars..test_start].to_vec();
+        let train_report = simulate(&training)?;
+        let candidates: Vec<TrainingCandidate> = train_report.results.iter().map(|r| TrainingCandidate {
+            id: r.id.clone(), final_equity_atoms: r.final_equity_atoms, return_bps: r.return_bps,
+            max_sampled_drawdown_bps: r.max_sampled_drawdown_bps,
+            fills: r.fills, buys_halted: r.buys_halted,
+            eligible: !r.buys_halted && r.fills >= config.min_train_fills
+                && r.max_sampled_drawdown_bps <= config.max_train_drawdown_bps,
+        }).collect();
+        // Exact marked equity ranks equal-starting-cash candidates.
+        // Ties prefer lower drawdown, then lexicographically smaller ID.
+        let chosen = candidates.iter().filter(|c| c.eligible).max_by(|a,b| {
+            a.final_equity_atoms.cmp(&b.final_equity_atoms)
+                .then_with(|| b.max_sampled_drawdown_bps.cmp(&a.max_sampled_drawdown_bps))
+                .then_with(|| b.id.cmp(&a.id))
+        }).map(|c| c.id.clone());
+        let test_result = if let Some(id) = &chosen {
+            let mut testing = input.clone();
+            testing.bars = input.bars[test_start - input.warmup_bars..test_end].to_vec();
+            testing.strategies = vec![input.strategies.iter().find(|s| &s.id == id)
+                .context("Selected strategy not found")?.clone()];
+            let result = simulate(&testing)?.results.into_iter().next()
+                .context("Missing selected test result")?;
+            evaluated += 1;
+            if result.final_equity_atoms > result.initial_cash_atoms { positive += 1; }
+            total_return = total_return.checked_add(result.return_bps).context("Fold return overflow")?;
+            worst_drawdown = Some(worst_drawdown.map_or(result.max_sampled_drawdown_bps,
+                |previous| previous.max(result.max_sampled_drawdown_bps)));
+            Some(result)
+        } else { None };
+        folds.push(WalkForwardFold {
+            fold: i + 1,
+            train_start_ms: prepared.bars[train_start].open_ms,
+            train_end_ms: prepared.bars[test_start - 1].close_ms,
+            test_start_ms: prepared.bars[test_start].open_ms,
+            test_end_ms: prepared.bars[test_end - 1].close_ms,
+            training_candidates: candidates, selected_strategy: chosen, test_result,
+        });
+    }
+    let experiment_sha256 = hex::encode(Sha256::digest(
+        serde_json::to_vec(&(&prepared.fingerprint, config))?));
+    Ok(WalkForwardReport {
+        mode: "offline_paper_walk_forward", scenario_sha256: prepared.fingerprint,
+        experiment_sha256, base_asset: input.market.base_asset.clone(),
+        quote_asset: input.account.quote_asset.clone(), quote_scale: input.quote_scale,
+        config, warmup_bars: input.warmup_bars, unused_trailing_bars: remaining % config.test_bars,
+        evaluated_folds: evaluated, skipped_folds: count - evaluated,
+        mean_test_return_bps: if evaluated == 0 { None } else { Some(total_return / evaluated as i128) },
+        worst_test_drawdown_bps: worst_drawdown, positive_test_folds: positive, folds,
+    })
+}
+
 /// Compute every strategy before touching any destination. Independent accounts
 /// are not cross-file atomic; reruns verify exact histories in existing output
 /// files and create only missing accounts. A mismatched or partial DB is never
