@@ -8,13 +8,15 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
     Row, Sqlite, SqlitePool, Transaction,
 };
-use std::{fs::OpenOptions, path::Path, time::Duration};
+use std::{collections::BTreeSet, fs::OpenOptions, path::Path, time::Duration};
 
 use super::paper_ledger::{AccountSnapshot, ApplyOutcome, JournalEvent, PaperConfig, PaperLedger};
 
 const SCHEMA_VERSION: i64 = 1;
 /// This development store replays the entire journal for each operation.
 pub const MAX_EVENTS: i64 = 2048;
+/// Maximum events in one atomic compare-and-append transaction.
+pub const MAX_BATCH_EVENTS: usize = 128;
 const MAX_PAYLOAD_BYTES: usize = 4096;
 const BACKUP_VERSION: u32 = 1;
 /// Bound the complete logical backup before parsing untrusted input.
@@ -42,6 +44,14 @@ pub struct JournalCheckpoint {
     pub head: JournalHead,
 }
 
+/// A duplicate confirms the exact history segment, not how it was originally committed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchReceipt {
+    pub outcome: ApplyOutcome,
+    pub batch_end: JournalCheckpoint,
+    pub current_head: JournalCheckpoint,
+}
+
 #[derive(Debug, Clone)]
 pub struct ExportedBackup {
     pub checkpoint: JournalCheckpoint,
@@ -65,6 +75,7 @@ pub struct PaperStore {
     ledger_id: String,
     config: PaperConfig,
     checkpoint_floor: Option<JournalCheckpoint>,
+    read_only: bool,
 }
 
 impl PaperStore {
@@ -256,7 +267,20 @@ impl PaperStore {
         Self::create_from_ledger(path, ledger_id, ledger, Some(expected)).await
     }
 
+    /// Read-only SQLite connection; no writable fallback or journal-mode change.
+    /// WAL readers may still require SQLite's auxiliary SHM/WAL files.
+    pub async fn open_read_only(path: &Path, ledger_id: &str, config: PaperConfig) -> Result<Self> {
+        validate_identity(ledger_id, &config)?;
+        let store = Self::connect_mode(path, ledger_id, config, true).await?;
+        store.audit().await?;
+        Ok(store)
+    }
+
     async fn connect(path: &Path, ledger_id: &str, config: PaperConfig) -> Result<Self> {
+        Self::connect_mode(path, ledger_id, config, false).await
+    }
+
+    async fn connect_mode(path: &Path, ledger_id: &str, config: PaperConfig, read_only: bool) -> Result<Self> {
         ensure!(
             std::fs::symlink_metadata(path)?.file_type().is_file(),
             "Paper ledger requires a regular file (not a symlink)"
@@ -264,9 +288,13 @@ impl PaperStore {
         let options = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(false)
-            .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Full)
+            .read_only(read_only)
             .busy_timeout(Duration::from_secs(5));
+        let options = if read_only {
+            options.pragma("query_only", "ON")
+        } else {
+            options.journal_mode(SqliteJournalMode::Wal).synchronous(SqliteSynchronous::Full)
+        };
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(options)
@@ -276,6 +304,7 @@ impl PaperStore {
             ledger_id: ledger_id.to_owned(),
             config,
             checkpoint_floor: None,
+            read_only,
         })
     }
 
@@ -303,6 +332,7 @@ impl PaperStore {
     /// from a cached snapshot. Commit the event and journal head atomically.
     /// A failed/ambiguous commit can safely be retried using the same event ID.
     pub async fn apply(&self, event: JournalEvent) -> Result<ApplyOutcome> {
+        ensure!(!self.read_only, "Read-only paper store refuses writes");
         let mut tx = self.pool.begin().await?;
         let locked = sqlx::query("UPDATE paper_meta SET head_seq = head_seq WHERE id = 1")
             .execute(&mut *tx)
@@ -343,6 +373,93 @@ impl PaperStore {
         ensure!(updated.rows_affected() == 1, "Paper journal head changed");
         tx.commit().await?;
         Ok(outcome)
+    }
+
+    /// Append a bounded sequence against an exact expected head. Replay the
+    /// verified journal once per batch. A stale head cannot append new events.
+    /// Retry an ambiguous commit with the ORIGINAL checkpoint and ordered
+    /// events: the exact stored segment is a no-op, even after further appends.
+    pub async fn apply_batch(
+        &self,
+        expected: &JournalCheckpoint,
+        events: &[JournalEvent],
+    ) -> Result<BatchReceipt> {
+        ensure!(!self.read_only, "Read-only paper store refuses writes");
+        validate_checkpoint(&self.ledger_id, expected)?;
+        ensure!((1..=MAX_BATCH_EVENTS).contains(&events.len()), "Invalid paper batch size");
+        let end_sequence = expected.head.sequence.checked_add(i64::try_from(events.len())?)
+            .context("Paper batch sequence overflow")?;
+        ensure!(end_sequence <= MAX_EVENTS, "Paper journal capacity reached");
+        let mut ids = BTreeSet::new();
+        let mut encoded = Vec::with_capacity(events.len());
+        let mut hash = expected.head.hash.clone();
+        for (index, event) in events.iter().enumerate() {
+            ensure!(ids.insert(event.event_id.as_str()), "Duplicate ID inside paper batch");
+            let payload = encode(event)?;
+            let sequence = expected.head.sequence + i64::try_from(index)? + 1;
+            let next_hash = event_digest(sequence, &hash, &payload);
+            encoded.push((sequence, payload, hash, next_hash.clone()));
+            hash = next_hash;
+        }
+        let batch_end = JournalCheckpoint {
+            ledger_id: self.ledger_id.clone(),
+            head: JournalHead { sequence: end_sequence, hash },
+        };
+
+        let mut tx = self.pool.begin().await?;
+        let locked = sqlx::query("UPDATE paper_meta SET head_seq = head_seq WHERE id = 1")
+            .execute(&mut *tx).await?;
+        ensure!(locked.rows_affected() == 1, "Missing paper ledger metadata");
+        let (mut ledger, previous) = self.load(&mut tx).await?;
+        ensure!(previous.sequence >= expected.head.sequence, "Paper batch checkpoint is ahead of journal");
+        let prefix_hash = if expected.head.sequence == 0 {
+            genesis(&self.ledger_id, &encode(&self.config)?)
+        } else {
+            sqlx::query_scalar::<_, String>("SELECT event_hash FROM paper_events WHERE seq = ?")
+                .bind(expected.head.sequence).fetch_one(&mut *tx).await?
+        };
+        ensure!(prefix_hash == expected.head.hash, "Paper batch checkpoint diverges");
+        if previous.sequence != expected.head.sequence {
+            let start = usize::try_from(expected.head.sequence)?;
+            let end = usize::try_from(end_sequence)?;
+            ensure!(
+                ledger.journal().get(start..end) == Some(events),
+                "Stale paper batch checkpoint or conflicting committed segment"
+            );
+            tx.rollback().await?;
+            return Ok(BatchReceipt {
+                outcome: ApplyOutcome::Duplicate,
+                batch_end,
+                current_head: JournalCheckpoint { ledger_id: self.ledger_id.clone(), head: previous },
+            });
+        }
+
+        // Validate every event and resulting state before inserting any row.
+        for event in events {
+            ensure!(
+                ledger.apply(event.clone())? == ApplyOutcome::Applied,
+                "Paper batch contains a previously accepted event"
+            );
+        }
+        for (event, (sequence, payload, prev_hash, next_hash)) in events.iter().zip(&encoded) {
+            sqlx::query(
+                "INSERT INTO paper_events (seq, event_id, payload, prev_hash, event_hash) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(*sequence).bind(&event.event_id).bind(payload).bind(prev_hash).bind(next_hash)
+            .execute(&mut *tx).await?;
+        }
+        let updated = sqlx::query(
+            "UPDATE paper_meta SET head_seq = ?, head_hash = ? WHERE id = 1 AND head_seq = ? AND head_hash = ?",
+        )
+        .bind(batch_end.head.sequence).bind(&batch_end.head.hash)
+        .bind(previous.sequence).bind(&previous.hash).execute(&mut *tx).await?;
+        ensure!(updated.rows_affected() == 1, "Paper journal head changed");
+        tx.commit().await?;
+        Ok(BatchReceipt {
+            outcome: ApplyOutcome::Applied,
+            current_head: batch_end.clone(),
+            batch_end,
+        })
     }
 
     async fn load(&self, tx: &mut Transaction<'_, Sqlite>) -> Result<(PaperLedger, JournalHead)> {

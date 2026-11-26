@@ -37,6 +37,15 @@ enum Cli {
         #[arg(long)]
         html: bool,
     },
+    /// Verify persisted historical accounts without changing them.
+    PaperAudit {
+        #[arg(long)]
+        input: std::path::PathBuf,
+        #[arg(long)]
+        output_dir: std::path::PathBuf,
+        #[arg(long)]
+        html: bool,
+    },
     /// Rolling out-of-sample strategy research; no orders or databases.
     PaperWalkForward {
         #[arg(long)]
@@ -85,6 +94,15 @@ async fn main() -> Result<()> {
             let report = core::paper_sim::persist(&input, &output_dir).await?;
             if html {
                 println!("{}", core::paper_sim::html(&report)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
+        Cli::PaperAudit { input, output_dir, html } => {
+            let input = core::paper_sim::read_input(&input)?;
+            let report = core::paper_sim::audit_persisted(&input, &output_dir).await?;
+            if html {
+                println!("{}", core::paper_sim::audit_html(&report)?);
             } else {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
@@ -247,6 +265,7 @@ mod tests {
             Some("deploy"),
             Some("migrate"),
             Some("paper-replay"),
+            Some("paper-audit"),
             Some("paper-walk-forward"),
         ] {
             let mut arguments = vec!["trading-server"];

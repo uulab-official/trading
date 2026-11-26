@@ -12,7 +12,7 @@ use super::{
     models::{Candle, normalize_market_symbol},
     paper_ledger::{Action, JournalEvent, LedgerError, OrderTerms, PaperConfig, PaperLedger, Side},
     paper_risk::{Mark, RiskObservation, RiskPolicy},
-    paper_store::{PaperStore, MAX_EVENTS},
+    paper_store::{JournalCheckpoint, PaperStore, MAX_EVENTS},
 };
 use crate::strategy::{ma_cross::MaCrossStrategy, rsi::RsiStrategy, Signal, Strategy, StrategyBinding};
 
@@ -668,6 +668,65 @@ pub async fn persist(input: &ReplayInput, directory: &Path) -> Result<ReplayRepo
         }
     }
     Ok(report)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuditedAccount {
+    pub strategy_id: String,
+    pub checkpoint: JournalCheckpoint,
+    pub remaining_event_capacity: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuditReport {
+    pub mode: &'static str,
+    pub live_orders_enabled: bool,
+    pub verification: &'static str,
+    pub replay: ReplayReport,
+    pub accounts: Vec<AuditedAccount>,
+}
+
+/// Recompute the experiment and verify every expected SQLite account read-only.
+/// Missing accounts or mismatched histories prevent a successful report.
+/// Independent account snapshots are not a cross-database transaction.
+pub async fn audit_persisted(input: &ReplayInput, directory: &Path) -> Result<AuditReport> {
+    let (report, runs) = experiment(input)?;
+    ensure!(fs::symlink_metadata(directory)?.file_type().is_dir(), "Replay directory must already exist");
+    let mut accounts = Vec::with_capacity(runs.len());
+    for run in &runs {
+        let path = directory.join(format!("paper-{}.sqlite", run.report.id));
+        let id = format!("replay-{}-{}", report.scenario_sha256, run.report.id);
+        let store = PaperStore::open_read_only(&path, &id, input.account.clone()).await?;
+        let verified = store.verify_replay(&run.ledger).await?;
+        store.close().await;
+        accounts.push(AuditedAccount {
+            strategy_id: run.report.id.clone(),
+            remaining_event_capacity: MAX_EVENTS - verified.head.sequence,
+            checkpoint: JournalCheckpoint { ledger_id: id, head: verified.head },
+        });
+    }
+    Ok(AuditReport {
+        mode: "offline_paper_replay_audit",
+        live_orders_enabled: false,
+        verification: "exact_replay_and_persisted_account_history",
+        replay: report,
+        accounts,
+    })
+}
+
+pub fn audit_html(report: &AuditReport) -> Result<String> {
+    let mut out = html(&report.replay)?;
+    let suffix = "</body></html>";
+    ensure!(out.ends_with(suffix), "Unexpected replay HTML boundary");
+    out.truncate(out.len() - suffix.len());
+    out.push_str("<article class=\"scroll\"><h2>Verified persisted accounts</h2><p>Read-only historical audit. No live orders. No current-market health claim.</p><table><thead><tr><th>Strategy</th><th>Verified event count</th><th>Remaining capacity</th><th>Checkpoint SHA-256</th></tr></thead><tbody>");
+    for account in &report.accounts {
+        write!(out, "<tr><td>{}</td><td>{}</td><td>{}</td><td><code>{}</code></td></tr>",
+            escape(&account.strategy_id), account.checkpoint.head.sequence,
+            account.remaining_event_capacity, escape(&account.checkpoint.head.hash))?;
+    }
+    out.push_str("</tbody></table></article></body></html>");
+    Ok(out)
 }
 
 fn escape(value: &str) -> String {

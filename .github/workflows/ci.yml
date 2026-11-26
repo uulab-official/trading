@@ -140,6 +140,7 @@ jobs:
         docker run --rm --network none trading-bot:latest ./trading-server deploy --help
         docker run --rm --network none trading-bot:latest ./trading-server migrate --help
         docker run --rm --network none trading-bot:latest ./trading-server paper-replay --help
+        docker run --rm --network none trading-bot:latest ./trading-server paper-audit --help
         docker run --rm --network none trading-bot:latest ./trading-server paper-walk-forward --help
 
     - name: Verify deterministic paper replay with no network
@@ -151,6 +152,10 @@ jobs:
           cmp /tmp/first.json /tmp/second.json
           ./trading-server paper-replay --input config/paper_replay_example.json --output-dir /tmp/paper-ci --html > /tmp/report.html
           grep -q "Independent strategy comparison" /tmp/report.html
+          ./trading-server paper-audit --input config/paper_replay_example.json --output-dir /tmp/paper-ci > /tmp/audit.json
+          grep -q "exact_replay_and_persisted_account_history" /tmp/audit.json
+          ./trading-server paper-audit --input config/paper_replay_example.json --output-dir /tmp/paper-ci --html > /tmp/audit.html
+          grep -q "Verified persisted accounts" /tmp/audit.html
           ./trading-server paper-walk-forward --input config/paper_replay_example.json --train-bars 4 --test-bars 2 --min-train-fills 1 --max-train-drawdown-bps 10000 > /tmp/wfa.json
           grep -q "offline_paper_walk_forward" /tmp/wfa.json
         '

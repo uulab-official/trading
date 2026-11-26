@@ -103,3 +103,17 @@ cargo run --locked -- paper-walk-forward --input config/paper_replay_example.jso
 Predeclared candidates are compared only on training bars; ranking uses exact final marked equity with equal initial funds. Halted candidates and those failing the explicit fill-count or drawdown requirement are excluded. Ties prefer lower drawdown then lexical ID. Each nonoverlapping test window starts with fresh funds and earlier indicator warmup only. No eligible candidate means a skipped fold, not zero return. At most 32 complete folds are evaluated; trailing bars are validated but not scored. Reports include exact input/config digests, training evidence and selected test returns. Means are independent fold averages, not compound or annualized returns. Repeatedly changing candidate definitions after reading test results destroys holdout isolation. Use a final untouched dataset and independent longer-history validation before any deployment.
 
 Regression: `cargo test --locked --test paper_walk_forward_test`. The new network-disabled Docker smoke gate also invokes the CLI. Test execution is pending CI.
+
+## 저장 원장 읽기 전용 운영 감사
+
+```sh
+cargo run --locked -- paper-audit --input config/paper_replay_example.json --output-dir /tmp/paper-example
+cargo run --locked -- paper-audit --input config/paper_replay_example.json --output-dir /tmp/paper-example --html > /tmp/paper-audit.html
+```
+
+원본 시나리오에서 전략·모의 체결·위험 이벤트를 다시 계산하고 각각의 SQLite 원장과
+전체 이벤트 및 최종 계좌를 대조한다. 누락 또는 다른 이력은 오류이며 신규 계좌 생성,
+수정, 복구, 주문 전송은 하지 않는다. JSON 및 HTML에 검증된 이벤트 수, 남은 원장
+용량, 외부 보관용 checkpoint를 표시한다. 여러 계좌는 각각 읽기 스냅샷을 사용하므로
+동일 시각의 실시간 포트폴리오 또는 현재 시세 건강 상태를 증명하지 않는다.
+`cargo test --locked --test paper_audit_test` 및 네트워크 차단 Docker CLI 검증 대상이다.
