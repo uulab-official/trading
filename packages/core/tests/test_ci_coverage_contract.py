@@ -119,9 +119,41 @@ class CoverageWorkflowTests(unittest.TestCase):
                 *arguments,
                 "--help",
             ]
-            for arguments in ([], ["master"], ["worker"], ["deploy"], ["migrate"])
+            for arguments in (
+                [],
+                ["master"],
+                ["worker"],
+                ["deploy"],
+                ["migrate"],
+                ["paper-replay"],
+                ["paper-walk-forward"],
+            )
         ]
         self.assertEqual([shlex.split(command) for command in commands], expected_commands)
+
+        smoke = next(
+            step
+            for step in docker["steps"]
+            if step.get("name") == "Verify deterministic paper replay with no network"
+        )
+        command = shlex.split(smoke["run"])
+        self.assertEqual(
+            command[:-1],
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--entrypoint",
+                "sh",
+                "trading-bot:latest",
+                "-ec",
+            ],
+        )
+        self.assertIn("cmp /tmp/first.json /tmp/second.json", command[-1])
+        self.assertIn("./trading-server paper-replay ", command[-1])
+        self.assertIn("./trading-server paper-walk-forward ", command[-1])
 
     def test_image_publication_stays_explicit_and_depends_on_verification(self):
         publish = self.jobs["build-and-push"]
