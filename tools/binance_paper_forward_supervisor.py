@@ -216,6 +216,8 @@ def publish(session, state, status, reason, clock, **updates):
 
 def fail(session, state, reason, retryable, clock):
     failures = min(state["consecutive_failures"] + 1, session.max_failures)
+    if os.path.lexists(session.stop_path):
+        return publish(session, state, "halted", "operator_stop", clock)
     status = "degraded" if retryable and failures < session.max_failures else "halted"
     return publish(session, state, status, reason, clock, consecutive_failures=failures)
 
@@ -259,7 +261,8 @@ def verify_report(envelope, report, previous):
         and report.get("mode") == "offline_paper_forward"
         and report.get("live_orders_enabled") is False
         and all(
-            report.get(key) == envelope[key] for key in ("source", "source_id", "archive_head_sha256")
+            report.get(key) == envelope[key]
+            for key in ("source", "source_id", "archive_head_sha256")
         )
         and report.get("input_bar_count") == len(envelope["scenario"]["bars"]),
         "invalid_paper_report_provenance",
@@ -325,11 +328,12 @@ def cycle(session, *, initialize=False, exporter=None, runner=None, clock=archiv
         return fail(session, state, str(error), False, clock)
     except (OSError, sqlite3.Error, ValueError, KeyError, TypeError):
         return fail(session, state, "forward_operation_refused", False, clock)
+    stopped = os.path.lexists(session.stop_path)
     return publish(
         session,
         state,
-        "halted" if os.path.lexists(session.stop_path) else "paper_current",
-        "operator_stop" if os.path.lexists(session.stop_path) else None,
+        "halted" if stopped else "paper_current",
+        "operator_stop" if stopped else None,
         clock,
         consecutive_failures=0,
         last_success_ms=clock(),
