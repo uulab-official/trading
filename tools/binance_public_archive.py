@@ -221,21 +221,17 @@ def create(path, symbol, interval, start_ms, max_failures=3):
     with connection(path) as db, db:
         db.execute("PRAGMA journal_mode = WAL")
         db.execute("BEGIN IMMEDIATE")
-        db.execute(
-            """CREATE TABLE meta (
+        db.execute("""CREATE TABLE meta (
             id INTEGER PRIMARY KEY CHECK (id = 1), config TEXT NOT NULL,
             count INTEGER NOT NULL, head TEXT NOT NULL, failures INTEGER NOT NULL,
             status TEXT NOT NULL, reason TEXT, server_ms INTEGER,
             target_ms INTEGER, last_success_ms INTEGER
-            )"""
-        )
-        db.execute(
-            """CREATE TABLE bars (
+            )""")
+        db.execute("""CREATE TABLE bars (
             open_ms INTEGER PRIMARY KEY, close_ms INTEGER NOT NULL,
             open TEXT NOT NULL, high TEXT NOT NULL, low TEXT NOT NULL,
             close TEXT NOT NULL, volume TEXT NOT NULL, hash TEXT NOT NULL
-            )"""
-        )
+            )""")
         db.execute(
             "INSERT INTO meta VALUES (1, ?, 0, ?, 0, 'initializing', NULL, NULL, NULL, NULL)",
             (canonical(cfg), digest("archive-genesis", cfg)),
@@ -597,7 +593,9 @@ def main(argv=None):
     sync.add_argument("--pages", type=int, default=3)
     sync.add_argument("--loop", action="store_true")
     sync.add_argument("--poll-seconds", type=int, default=60)
-    sync.add_argument("--backup-dir", type=Path, help="publish a daily verified backup when current")
+    sync.add_argument(
+        "--backup-dir", type=Path, help="publish a daily verified backup when current"
+    )
     show = sub.add_parser("status")
     show.add_argument("archive", type=Path)
     show.add_argument("--expected-head")
