@@ -346,6 +346,13 @@ impl MarketCatalog {
         quote_atoms(amount, self.quote_scale)
     }
 
+    /// Convert a valuation mark using the same price grid and lot denomination
+    /// as simulated orders. Timestamp/source trust remains the caller's duty.
+    pub fn mark_price_atoms(&self, config: &PaperConfig, asset: &str, price: &str) -> Result<u64> {
+        self.validate_quote(config)?;
+        self.instrument(asset)?.price(price)
+    }
+
     /// A checked string boundary; no implicit rounding or quote conversion.
     pub fn order_terms(&self, config: &PaperConfig, request: LimitRequest<'_>) -> Result<OrderTerms> {
         self.validate_quote(config)?;

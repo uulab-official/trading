@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use super::paper_risk::{RiskError, RiskObservation, RiskPolicy, RiskSnapshot, RiskTracker};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LedgerError {
@@ -22,6 +23,10 @@ pub enum LedgerError {
     DuplicateReplayEvent,
     ClosedOrder,
     FillOutsideTerms,
+    RiskNotConfigured,
+    RiskAlreadyConfigured,
+    RiskObservationRequired,
+    Risk(RiskError),
 }
 
 impl fmt::Display for LedgerError {
@@ -31,6 +36,10 @@ impl fmt::Display for LedgerError {
 }
 
 impl std::error::Error for LedgerError {}
+
+impl From<RiskError> for LedgerError {
+    fn from(error: RiskError) -> Self { Self::Risk(error) }
+}
 
 type Result<T> = std::result::Result<T, LedgerError>;
 
@@ -125,6 +134,20 @@ pub enum Action {
     },
     /// Sticky; cancels all open buys but leaves inventory-reducing sells allowed.
     HaltBuys,
+    /// Optional risk policy must be the first event in a fresh paper account.
+    ConfigureRisk(RiskPolicy),
+    /// Record a valid market observation and atomically halt buys on breach.
+    ObserveRisk(RiskObservation),
+    /// A simulated buy must be assessed before and after reservation.
+    GuardedSubmit { terms: OrderTerms, observation: RiskObservation },
+    /// A simulated buy fill must be assessed before and after accounting.
+    GuardedFill {
+        order_id: String,
+        lots: u64,
+        price: u64,
+        fee: u64,
+        observation: RiskObservation,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,6 +171,7 @@ pub struct AccountSnapshot {
     pub buys_halted: bool,
     pub holdings: BTreeMap<String, Holding>,
     pub orders: BTreeMap<String, PaperOrder>,
+    pub risk: Option<RiskSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,6 +181,7 @@ struct State {
     buys_halted: bool,
     holdings: BTreeMap<String, Holding>,
     orders: BTreeMap<String, PaperOrder>,
+    risk: Option<RiskTracker>,
 }
 
 /// Only this type owns mutable accounting state. Serialize access externally if
@@ -212,6 +237,7 @@ impl PaperLedger {
                 buys_halted: false,
                 holdings: BTreeMap::new(),
                 orders: BTreeMap::new(),
+                risk: None,
             },
             config,
             journal: Vec::new(),
@@ -228,21 +254,7 @@ impl PaperLedger {
     }
 
     pub fn snapshot(&self) -> Result<AccountSnapshot> {
-        let reserved_cash = self.state.reserved_cash()?;
-        let available_cash = self
-            .state
-            .cash
-            .checked_sub(reserved_cash)
-            .ok_or(LedgerError::InsufficientCash)?;
-        Ok(AccountSnapshot {
-            cash: self.state.cash,
-            reserved_cash,
-            available_cash,
-            realized_pnl: self.state.realized_pnl,
-            buys_halted: self.state.buys_halted,
-            holdings: self.state.holdings.clone(),
-            orders: self.state.orders.clone(),
-        })
+        self.state.snapshot()
     }
 
     pub fn available_lots(&self, asset: &str) -> Result<u64> {
@@ -265,15 +277,54 @@ impl PaperLedger {
 
         let mut next = self.state.clone();
         match &event.action {
-            Action::Submit(terms) => next.submit(&self.config, terms)?,
+            Action::Submit(terms) => {
+                if next.risk.is_some() && terms.side == Side::Buy {
+                    return Err(LedgerError::RiskObservationRequired);
+                }
+                next.submit(&self.config, terms)?;
+            }
             Action::Fill {
                 order_id,
                 lots,
                 price,
                 fee,
-            } => next.fill(&self.config, order_id, *lots, *price, *fee)?,
+            } => {
+                if next.risk.is_some() && next.order_side(order_id)? == Side::Buy {
+                    return Err(LedgerError::RiskObservationRequired);
+                }
+                next.fill(&self.config, order_id, *lots, *price, *fee)?;
+            }
             Action::Cancel { order_id } => next.cancel(order_id)?,
             Action::HaltBuys => next.halt_buys(),
+            Action::ConfigureRisk(policy) => {
+                if !self.journal.is_empty() {
+                    return Err(LedgerError::RiskAlreadyConfigured);
+                }
+                next.risk = Some(RiskTracker::new(*policy, self.config.initial_cash)?);
+            }
+            Action::ObserveRisk(observation) => {
+                let evaluated = next.evaluate_risk(observation)?;
+                if evaluated.breached() {
+                    next.halt_buys();
+                }
+                next.risk = Some(evaluated);
+            }
+            Action::GuardedSubmit { terms, observation } => {
+                if terms.side != Side::Buy {
+                    return Err(LedgerError::InvalidInput);
+                }
+                let before = next.require_buy_risk(observation)?;
+                next.submit(&self.config, terms)?;
+                next.finish_buy_risk(before, observation)?;
+            }
+            Action::GuardedFill { order_id, lots, price, fee, observation } => {
+                if next.order_side(order_id)? != Side::Buy {
+                    return Err(LedgerError::InvalidInput);
+                }
+                let before = next.require_buy_risk(observation)?;
+                next.fill(&self.config, order_id, *lots, *price, *fee)?;
+                next.finish_buy_risk(before, observation)?;
+            }
         }
 
         // Even an unexpected reservation inconsistency must fail closed.
@@ -306,6 +357,54 @@ impl PaperLedger {
 }
 
 impl State {
+    fn snapshot(&self) -> Result<AccountSnapshot> {
+        let reserved_cash = self.reserved_cash()?;
+        let available_cash = self
+            .cash
+            .checked_sub(reserved_cash)
+            .ok_or(LedgerError::InsufficientCash)?;
+        Ok(AccountSnapshot {
+            cash: self.cash,
+            reserved_cash,
+            available_cash,
+            realized_pnl: self.realized_pnl,
+            buys_halted: self.buys_halted,
+            holdings: self.holdings.clone(),
+            orders: self.orders.clone(),
+            risk: self.risk.as_ref().map(RiskTracker::snapshot),
+        })
+    }
+
+
+    fn order_side(&self, order_id: &str) -> Result<Side> {
+        self.orders.get(order_id).map(|order| order.terms.side).ok_or(LedgerError::UnknownOrder)
+    }
+
+    fn evaluate_risk(&self, observation: &RiskObservation) -> Result<RiskTracker> {
+        let tracker = self.risk.as_ref().ok_or(LedgerError::RiskNotConfigured)?;
+        Ok(tracker.evaluate(&self.snapshot()?, observation)?)
+    }
+
+    fn require_buy_risk(&self, observation: &RiskObservation) -> Result<RiskTracker> {
+        if self.buys_halted {
+            return Err(LedgerError::BuysHalted);
+        }
+        let before = self.evaluate_risk(observation)?;
+        if before.breached() {
+            return Err(LedgerError::RiskLimit);
+        }
+        Ok(before)
+    }
+
+    fn finish_buy_risk(&mut self, before: RiskTracker, observation: &RiskObservation) -> Result<()> {
+        let after = before.evaluate(&self.snapshot()?, observation)?;
+        if after.breached() {
+            return Err(LedgerError::RiskLimit);
+        }
+        self.risk = Some(after);
+        Ok(())
+    }
+
     fn reserved_cash(&self) -> Result<u64> {
         self.orders
             .values()

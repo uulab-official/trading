@@ -5,6 +5,7 @@ pub mod market_units;
 pub mod models;
 pub mod order_manager;
 pub mod paper_ledger;
+pub mod paper_risk;
 pub mod paper_store;
 pub mod portfolio;
 pub mod risk_manager;
