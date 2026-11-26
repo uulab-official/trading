@@ -12,6 +12,7 @@ import os
 import re
 import sqlite3
 import stat
+import tempfile
 import time
 from contextlib import contextmanager
 from decimal import Decimal
@@ -166,6 +167,32 @@ def config(symbol, interval, start_ms, max_failures):
     }
 
 
+def check_archive_name(path):
+    path = Path(path)
+    require(
+        not path.name.lower().endswith((".owner", ".stop", "-wal", "-shm", "-journal")),
+        "reserved_archive_path",
+    )
+    return path
+
+
+def existing_archive(path):
+    path = check_archive_name(path)
+    info = path.lstat()
+    require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1, "unsafe_archive_path")
+    return path.resolve(strict=True)
+
+
+def new_archive_path(path):
+    path = check_archive_name(path)
+    path = path.parent.resolve(strict=True) / path.name
+    if os.path.lexists(path):
+        raise FileExistsError("archive destination exists")
+    for suffix in (".owner", ".STOP", "-wal", "-shm", "-journal"):
+        require(not os.path.lexists(f"{path}{suffix}"), "reserved_archive_sidecar_exists")
+    return path
+
+
 def reserve_file(path):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     os.close(fd)
@@ -173,9 +200,7 @@ def reserve_file(path):
 
 @contextmanager
 def connection(path, *, readonly=False):
-    path = Path(path)
-    info = path.lstat()
-    require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1, "unsafe_archive_path")
+    path = existing_archive(path)
     mode = "ro" if readonly else "rw"
     db = sqlite3.connect(f"{path.resolve().as_uri()}?mode={mode}", uri=True, timeout=5)
     db.row_factory = sqlite3.Row
@@ -191,6 +216,7 @@ def connection(path, *, readonly=False):
 
 def create(path, symbol, interval, start_ms, max_failures=3):
     cfg = config(symbol, interval, start_ms, max_failures)
+    path = new_archive_path(path)
     reserve_file(path)
     with connection(path) as db, db:
         db.execute("PRAGMA journal_mode = WAL")
@@ -245,7 +271,7 @@ def audit(db):
         "incomplete_metadata_time",
     )
     require(
-        (meta["status"] == "halted" or meta["failures"] < cfg["max_failures"]),
+        meta["status"] == "halted" or meta["failures"] < cfg["max_failures"],
         "invalid_failure_state",
     )
     step = INTERVALS[cfg["interval"]]
@@ -305,6 +331,7 @@ def sync_once(path, *, fetch=public_get, clock=now_ms, pages=3, page_size=1000):
     """
     require(type(pages) is int and 1 <= pages <= 10, "invalid_page_budget")
     require(type(page_size) is int and 2 <= page_size <= 1000, "invalid_page_size")
+    path = existing_archive(path)
     with connection(path) as db, db:
         db.execute("BEGIN IMMEDIATE")
         cfg, meta, last = audit(db)
@@ -375,6 +402,7 @@ def sync_once(path, *, fetch=public_get, clock=now_ms, pages=3, page_size=1000):
 
 def status(path, *, clock=now_ms, max_age_ms=180_000, expected_head=None):
     require(type(max_age_ms) is int and 1_000 <= max_age_ms <= 86_400_000, "invalid_age")
+    path = existing_archive(path)
     with connection(path, readonly=True) as db:
         db.execute("BEGIN")
         cfg, meta, last = audit(db)
@@ -382,9 +410,8 @@ def status(path, *, clock=now_ms, max_age_ms=180_000, expected_head=None):
             require(meta["head"] == expected_head, "external_checkpoint_mismatch")
         now = clock()
         age = None if meta["last_success_ms"] is None else now - meta["last_success_ms"]
-        current_target = (now - CLOSE_GRACE_MS) // INTERVALS[cfg["interval"]] * INTERVALS[
-            cfg["interval"]
-        ] - INTERVALS[cfg["interval"]]
+        step = INTERVALS[cfg["interval"]]
+        current_target = (now - CLOSE_GRACE_MS) // step * step - step
         ready = (
             meta["status"] == "caught_up"
             and not stop_requested(path)
@@ -412,7 +439,7 @@ def status(path, *, clock=now_ms, max_age_ms=180_000, expected_head=None):
 
 @contextmanager
 def owner(path):
-    lock_path = f"{Path(path).resolve()}.owner"
+    lock_path = f"{existing_archive(path)}.owner"
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         info = os.fstat(fd)
@@ -428,6 +455,7 @@ def owner(path):
 
 def resume(path, expected_head):
     """Explicit operator review only; never remove STOP or clear a corrupt history."""
+    path = existing_archive(path)
     with owner(path), connection(path) as db, db:
         db.execute("BEGIN IMMEDIATE")
         _, meta, _ = audit(db)
@@ -439,15 +467,76 @@ def resume(path, expected_head):
 
 def backup(path, destination):
     """Native SQLite snapshot; never copy a live WAL file or overwrite a path."""
+    destination = new_archive_path(destination)
     with connection(path, readonly=True) as source:
         source.execute("BEGIN")
         cfg, meta, _ = audit(source)
         reserve_file(destination)
         with connection(destination) as target:
             source.backup(target)
+            mode = target.execute("PRAGMA journal_mode = DELETE").fetchone()[0]
+            require(mode == "delete", "backup_journal_not_standalone")
+    with open(destination, "rb") as handle:
+        os.fsync(handle.fileno())
     result = status(destination, expected_head=meta["head"])
     require(result["identity"] == cfg, "backup_identity_mismatch")
     return result
+
+
+def verify_backup_prefix(source, destination):
+    saved = status(destination)
+    with connection(source, readonly=True) as db:
+        db.execute("BEGIN")
+        cfg, meta, _ = audit(db)
+        require(saved["identity"] == cfg, "backup_identity_mismatch")
+        require(0 < saved["count"] <= meta["count"], "backup_count_mismatch")
+        row = db.execute(
+            "SELECT hash FROM bars WHERE open_ms=?", (saved["last_open_ms"],)
+        ).fetchone()
+        require(row is not None and row[0] == saved["head_sha256"], "backup_not_source_prefix")
+    return saved
+
+
+def daily_backup(path, directory, *, clock=now_ms):
+    """Publish at most one immutable verified snapshot per identity and UTC day.
+
+    Publication uses a same-filesystem hard link, so competing publishers
+    cannot overwrite an existing backup. The staging file is unlinked before
+    validation. There is no automatic retention or automatic promotion.
+    """
+    directory = Path(directory)
+    require(directory.is_dir() and not directory.is_symlink(), "invalid_backup_directory")
+    directory = directory.resolve(strict=True)
+    current = status(path, clock=clock)
+    require(current["capture_current"], "capture_not_current")
+    day = current["last_success_ms"] // 86_400_000
+    identity = digest("backup-identity", current["identity"])
+    destination = directory / f"binance-{identity}-{day}.sqlite"
+    if not os.path.lexists(destination):
+        with tempfile.TemporaryDirectory(prefix=".backup-staging-", dir=directory) as staging:
+            candidate = Path(staging) / "candidate.sqlite"
+            saved = backup(path, candidate)
+            require(saved["last_success_ms"] // 86_400_000 == day, "backup_day_changed")
+            verify_backup_prefix(path, candidate)
+            try:
+                os.link(candidate, destination)
+            except FileExistsError:
+                pass
+            else:
+                candidate.unlink()
+                fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+    saved = verify_backup_prefix(path, destination)
+    require(saved["last_success_ms"] // 86_400_000 == day, "backup_day_mismatch")
+    return {
+        "backup_path": str(destination),
+        "head_sha256": saved["head_sha256"],
+        "count": saved["count"],
+        "utc_day": day,
+    }
 
 
 def export_window(path, count, *, end_open_ms=None, template=None):
@@ -508,6 +597,7 @@ def main(argv=None):
     sync.add_argument("--pages", type=int, default=3)
     sync.add_argument("--loop", action="store_true")
     sync.add_argument("--poll-seconds", type=int, default=60)
+    sync.add_argument("--backup-dir", type=Path, help="publish a daily verified backup when current")
     show = sub.add_parser("status")
     show.add_argument("archive", type=Path)
     show.add_argument("--expected-head")
@@ -518,6 +608,9 @@ def main(argv=None):
     save = sub.add_parser("backup")
     save.add_argument("archive", type=Path)
     save.add_argument("destination", type=Path)
+    daily = sub.add_parser("daily-backup")
+    daily.add_argument("archive", type=Path)
+    daily.add_argument("directory", type=Path)
     export = sub.add_parser("export")
     export.add_argument("archive", type=Path)
     export.add_argument("--count", type=int, required=True)
@@ -534,6 +627,8 @@ def main(argv=None):
                 while True:
                     outcome = sync_once(args.archive, pages=args.pages)
                     result = status(args.archive)
+                    if args.backup_dir and result["capture_current"]:
+                        result["daily_backup"] = daily_backup(args.archive, args.backup_dir)
                     print(canonical(result), flush=True)
                     if outcome == "halted" or not args.loop:
                         return 2 if outcome in ("halted", "degraded") else 0
@@ -550,6 +645,8 @@ def main(argv=None):
             result = status(args.archive)
         elif args.command == "backup":
             result = backup(args.archive, args.destination)
+        elif args.command == "daily-backup":
+            result = daily_backup(args.archive, args.directory)
         else:
             template = read_template(args.template) if args.template else None
             result = export_window(

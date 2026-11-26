@@ -20,6 +20,9 @@ python tools/binance_public_archive.py sync data/binance-history/btc.sqlite --pa
 python tools/binance_public_archive.py status data/binance-history/btc.sqlite
 # Explicit opt-in local polling:
 python tools/binance_public_archive.py sync data/binance-history/btc.sqlite --loop --poll-seconds 60
+# Optional daily verified backup on successful current capture:
+mkdir -p data/binance-backups
+python tools/binance_public_archive.py sync data/binance-history/btc.sqlite --loop --backup-dir data/binance-backups
 ```
 
 The collector reads exchange server time, checks bounded local-clock skew and
@@ -69,8 +72,14 @@ overwrites a file. Preserve the emitted head in a separate trusted location.
 A verified backup is itself a valid archive; do not run two active copies of
 the same logical archive. Stop the collector before replacing any operational
 reference. Failed backup candidates are not automatically promoted or deleted.
-Independent retention, scheduled publication, external checkpoint service and
-disaster-recovery drills remain operator work.
+Optional --backup-dir publishes a standalone, verified SQLite file at most
+once per archive identity and UTC day, only after a current capture. A private
+same-filesystem staging directory and exclusive hard-link publication prevent
+overwriting a previous snapshot. Existing daily files must verify as prefixes
+of the current archive; errors stop the CLI rather than silently replacing
+backups. The explicit daily-backup command performs the same publication.
+The logged checkpoint still needs independent retention; automatic deletion,
+external checkpoint service and disaster-recovery drills remain operator work.
 
 After diagnosing an intentional halt (including honoring Retry-After for rate
 limits), stop the process, preserve evidence, remove the STOP marker only if

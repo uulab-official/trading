@@ -2,10 +2,14 @@
 
 import json
 import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
 
 from tools import binance_public_archive as archive
 
@@ -45,9 +49,7 @@ class BinanceArchiveTests(unittest.TestCase):
         self.feed = Feed(START + 4 * STEP)
 
     def run_sync(self, **kwargs):
-        return archive.sync_once(
-            self.path, fetch=self.feed.fetch, clock=self.feed.clock, **kwargs
-        )
+        return archive.sync_once(self.path, fetch=self.feed.fetch, clock=self.feed.clock, **kwargs)
 
     def state(self):
         return archive.status(self.path, clock=self.feed.clock)
@@ -154,6 +156,35 @@ class BinanceArchiveTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             archive.create(self.path, "BTCUSDT", "1m", START)
 
+    def test_daily_backup_is_immutable_across_same_day_and_recovers_next_day(self):
+        self.run_sync()
+        target = Path(self.temp.name) / "backups"
+        target.mkdir()
+        first = archive.daily_backup(self.path, target, clock=self.feed.clock)
+        self.feed.latest += STEP
+        self.run_sync()
+        second = archive.daily_backup(self.path, target, clock=self.feed.clock)
+        self.assertEqual(first, second)
+        self.assertEqual(len(list(target.glob("*.sqlite"))), 1)
+        self.feed.latest += 86_400_000
+        self.assertEqual(self.run_sync(pages=2), "caught_up")
+        third = archive.daily_backup(self.path, target, clock=self.feed.clock)
+        self.assertNotEqual(first["backup_path"], third["backup_path"])
+        self.assertEqual(len(list(target.glob("*.sqlite"))), 2)
+        self.assertEqual(third["head_sha256"], self.state()["head_sha256"])
+
+    def test_backup_refuses_reserved_sidecar_paths(self):
+        self.run_sync()
+        for suffix in (".STOP", ".owner", "-wal", "-shm", "-journal"):
+            with self.assertRaises(archive.ArchiveError):
+                archive.backup(self.path, Path(f"{self.path}{suffix}"))
+        self.assertFalse(Path(f"{self.path}.STOP").exists())
+        target = Path(self.temp.name) / "new.sqlite"
+        Path(f"{target}.STOP").touch()
+        with self.assertRaises(archive.ArchiveError):
+            archive.backup(self.path, target)
+        self.assertFalse(target.exists())
+
     def test_export_preserves_exact_units_and_rejects_wrong_template(self):
         self.run_sync()
         template = {
@@ -202,7 +233,9 @@ class BinanceArchiveTests(unittest.TestCase):
                     archive.public_get("time", {})
                 self.assertEqual(opener.open.call_count, 1)
                 self.assertEqual(caught.exception.permanent, code != 503)
-                self.assertEqual(opener.open.call_args.args[0].full_url, f"{archive.HOST}/api/v3/time")
+                self.assertEqual(
+                    opener.open.call_args.args[0].full_url, f"{archive.HOST}/api/v3/time"
+                )
         with self.assertRaises(archive.ArchiveError):
             archive.public_get("order", {})
 

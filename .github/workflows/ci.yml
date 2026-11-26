@@ -113,11 +113,11 @@ jobs:
 
     - name: Run black check
       run: |
-        black --check packages/ apps/ tools/
+        black --check --diff packages/ apps/ tools/
 
     - name: Run isort check
       run: |
-        isort --check-only packages/ apps/ tools/
+        isort --check-only --diff packages/ apps/ tools/
 
   docker:
     runs-on: ubuntu-latest
