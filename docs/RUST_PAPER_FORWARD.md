@@ -111,3 +111,50 @@ live execution is involved. The input file must be fully written before the
 Rust process reads it; use a private directory and atomic file publication
 if scheduling these commands. Independent external archive checkpoint
 retention and real API verification are still required.
+
+## Local supervised paper continuation
+
+`tools/binance_paper_forward_supervisor.py` connects the separately running
+public archive collector to the local Rust executable. It does not make
+network requests itself. Prepare a private existing empty session directory
+and a fixed real-market template. Initialize explicitly once, then run the
+same command without --initialize and with --loop if desired:
+
+```sh
+python tools/binance_paper_forward_supervisor.py \
+  --archive data/binance-history/btc.sqlite --template data/btc-paper-template.json \
+  --binary apps/server/target/release/trading-server --session-dir data/btc-forward \
+  --start-open-ms SESSION_START_UTC_MS --initialize
+# Remove --initialize and add --loop --poll-seconds 60 for a supervised loop.
+```
+
+The supervisor pins the archive, directory, template digest, executable path,
+start and failure budget in a sibling .forward-status.json file. It acquires
+an exclusive local POSIX owner lock across cycles/sleep; do not remove the lock
+or run other account writers concurrently. Only current verified archive
+snapshots may invoke the fixed paper-forward subcommand (empty inherited
+environment, no shell, bounded invocation time). The report's provenance,
+account identity and checkpoint fields are checked before atomic status
+publication. The latest successful report is retained even on failure and is
+historical simulation, not an assertion of current positions at a broker.
+
+Stale/catching-up data consumes the durable failure budget and uses bounded
+backoff; invalid archive, replay, or report state halts. Create a sibling
+.forward.STOP marker to latch halt at a cycle boundary. An in-progress
+subprocess may finish its simulated transactions before the stop is observed;
+no further cycle starts. On interruption, retain the stopped/previously
+halted status. After diagnosing a halt, stop the process and preserve the
+status file under a distinct review path before a deliberate restart;
+never delete the SQLite account or reset a missing/corrupt history.
+For an interrupted initial creation, inspect and restore/rebuild in a new
+directory; ordinary advance never creates missing accounts. No automatic
+service installation or start is performed. A crash can leave running status;
+operator health monitoring must check status and age, not last_report alone.
+Use a trusted executable and directory; this is not an OS sandbox or
+signature verification system.
+
+Seven new orchestration regressions are registered in the network-forbidden
+Python safety suite. The supervisor remains bounded by the Rust 240-bar,
+2,048-event limits; do not rotate/reset accounts automatically to bypass them.
+Continuous real-data validation, independently retained external checkpoints,
+incremental long-history replay and a live operator UI remain separate gates.
