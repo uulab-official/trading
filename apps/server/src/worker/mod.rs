@@ -1,10 +1,11 @@
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tokio::sync::{broadcast, RwLock};
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
 use crate::core::config::Config;
@@ -18,6 +19,9 @@ use crate::exchange::{Exchange, ExchangeConfig, ExchangeEvent};
 use crate::strategy::ma_cross::MaCrossStrategy;
 use crate::strategy::rsi::RsiStrategy;
 use crate::strategy::{Signal, Strategy, StrategyBinding};
+
+mod feed_guard;
+use feed_guard::FeedGuard;
 
 #[cfg(test)]
 mod tests;
@@ -146,7 +150,28 @@ impl WorkerProcess {
             .take()
             .ok_or_else(|| anyhow::anyhow!("Public market client is unavailable"))?;
         let mut event_rx = client.get_event_receiver();
-        if let Err(error) = client.connect().await {
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        self.send_to_master(WorkerMessage::SystemStatus {
+            status: "initializing".into(),
+            message: "Connecting public market feed; execution unavailable".into(),
+        }).await?;
+        let connection = tokio::select! {
+            result = client.connect_bounded() => Some(result),
+            _ = shutdown_rx.recv() => None,
+            result = tokio::signal::ctrl_c() => {
+                result?;
+                None
+            },
+        };
+        let Some(connection) = connection else {
+            self.send_to_master(WorkerMessage::SystemStatus {
+                status: "stopped".into(),
+                message: "Public observation startup canceled".into(),
+            }).await.ok();
+            self.cleanup().await?;
+            return Ok(());
+        };
+        if let Err(error) = connection {
             self.send_to_master(WorkerMessage::SystemStatus {
                 status: "feed_unavailable".into(),
                 message: "Public market connection failed; observations stopped".into(),
@@ -155,20 +180,13 @@ impl WorkerProcess {
             .ok();
             return Err(error);
         }
-        self.send_to_master(WorkerMessage::SystemStatus {
-            status: "observation_only".into(),
-            message: "Public market observations and strategy signals; execution unavailable"
-                .into(),
-        })
-        .await?;
-
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
         let feed_task = tokio::spawn(async move { client.run_message_loop().await });
         let worker = Arc::new(self);
         let result = tokio::select! {
             result = worker.run_trading_loop(
                 &mut event_rx, worker.order_manager.clone(), worker.portfolio_manager.clone(),
                 worker.risk_manager.clone(), worker.strategies.clone(), worker.db.clone(),
+                Utc::now,
             ) => result,
             _ = shutdown_rx.recv() => Ok(()),
             result = tokio::signal::ctrl_c() => result.map_err(anyhow::Error::from),
@@ -328,9 +346,21 @@ impl WorkerProcess {
         risk_manager: Arc<RwLock<RiskManager>>,
         strategies: Arc<RwLock<Vec<StrategyBinding>>>,
         db: Arc<Database>,
+        clock: fn() -> DateTime<Utc>,
     ) -> Result<()> {
+        let mut guard = FeedGuard::new(&self.config, clock().timestamp_millis(), Instant::now())?;
+        let mut timer = interval(Duration::from_secs(5));
+        timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
-            let event = match event_rx.recv().await {
+            let event = tokio::select! {
+                _ = timer.tick() => {
+                    guard.deadlines(clock().timestamp_millis(), Instant::now())?;
+                    continue;
+                },
+                result = event_rx.recv() => result,
+            };
+            guard.deadlines(clock().timestamp_millis(), Instant::now())?;
+            let event = match event {
                 Ok(event) => event,
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     anyhow::bail!("Public market events were lost; strategy observations halted")
@@ -348,11 +378,21 @@ impl WorkerProcess {
                     {
                         anyhow::bail!("Invalid market ticker observation");
                     }
+                    let was_ready = guard.ready();
+                    if !guard.ticker(&ticker, clock().timestamp_millis(), Instant::now())? {
+                        continue;
+                    }
                     self.send_to_master(WorkerMessage::PriceUpdate {
                         symbol: ticker.symbol,
                         price: ticker.last,
                     })
                     .await?;
+                    if !was_ready && guard.ready() {
+                        self.send_to_master(WorkerMessage::SystemStatus {
+                            status: "observation_only".into(),
+                            message: "All subscribed tickers observed; execution unavailable".into(),
+                        }).await?;
+                    }
                 }
                 ExchangeEvent::Candle(candle) => {
                     candle.validate_closed()?;
@@ -360,12 +400,14 @@ impl WorkerProcess {
                     if !bindings.iter().any(|binding| binding.matches(&candle)) {
                         continue;
                     }
+                    guard.check_candle(&candle, clock().timestamp_millis())?;
                     // Persistence must succeed before a strategy consumes the bar.
                     db.save_candle(&candle).await?;
+                    guard.stored(&candle)?;
                     let mut signals = Vec::new();
                     for binding in bindings.iter_mut() {
                         if let Some(signal) = binding.on_candle(&candle)? {
-                            if signal != Signal::Hold {
+                            if signal != Signal::Hold && guard.ready() {
                                 signals.push((binding.name().to_string(), signal));
                             }
                         }
@@ -410,8 +452,8 @@ impl WorkerProcess {
                 }
                 ExchangeEvent::Connected => {
                     self.send_to_master(WorkerMessage::SystemStatus {
-                        status: "observation_only".into(),
-                        message: "Public market transport connected; execution unavailable".into(),
+                        status: "initializing".into(),
+                        message: "Waiting for all subscribed tickers; execution unavailable".into(),
                     })
                     .await?;
                 }
