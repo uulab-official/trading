@@ -127,6 +127,7 @@ class CoverageWorkflowTests(unittest.TestCase):
                 ["migrate"],
                 ["paper-replay"],
                 ["paper-audit"],
+                ["paper-forward"],
                 ["paper-walk-forward"],
             )
         ]
@@ -155,6 +156,8 @@ class CoverageWorkflowTests(unittest.TestCase):
         self.assertIn("cmp /tmp/first.json /tmp/second.json", command[-1])
         self.assertIn("./trading-server paper-replay ", command[-1])
         self.assertIn("./trading-server paper-audit ", command[-1])
+        self.assertIn("./trading-server paper-forward ", command[-1])
+        self.assertIn("cmp /tmp/forward.json /tmp/forward-audit.json", command[-1])
         self.assertIn("./trading-server paper-walk-forward ", command[-1])
 
     def test_image_publication_stays_explicit_and_depends_on_verification(self):

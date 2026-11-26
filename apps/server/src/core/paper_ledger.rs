@@ -138,6 +138,10 @@ pub enum Action {
     ConfigureRisk(RiskPolicy),
     /// Record a valid market observation and atomically halt buys on breach.
     ObserveRisk(RiskObservation),
+    /// Non-economic marker used only by deterministic forward replay. It binds
+    /// an input bar, including warmup and volume, to the journal history.
+    /// The replay caller must independently verify the marker's actual input.
+    SealReplayBar { open_ms: u64, sha256: String },
     /// A simulated buy must be assessed before and after reservation.
     GuardedSubmit { terms: OrderTerms, observation: RiskObservation },
     /// A simulated buy fill must be assessed before and after accounting.
@@ -308,6 +312,16 @@ impl PaperLedger {
                     next.halt_buys();
                 }
                 next.risk = Some(evaluated);
+            }
+            Action::SealReplayBar { open_ms, sha256 } => {
+                if *open_ms == 0 || sha256.len() != 64
+                    || !sha256.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+                {
+                    return Err(LedgerError::InvalidInput);
+                }
+                if next.risk.is_none() {
+                    return Err(LedgerError::RiskNotConfigured);
+                }
             }
             Action::GuardedSubmit { terms, observation } => {
                 if terms.side != Side::Buy {

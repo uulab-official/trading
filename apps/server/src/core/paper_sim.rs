@@ -12,7 +12,7 @@ use super::{
     models::{Candle, normalize_market_symbol},
     paper_ledger::{Action, JournalEvent, LedgerError, OrderTerms, PaperConfig, PaperLedger, Side},
     paper_risk::{Mark, RiskObservation, RiskPolicy},
-    paper_store::{JournalCheckpoint, PaperStore, MAX_EVENTS},
+    paper_store::{JournalCheckpoint, PaperStore, MAX_BATCH_EVENTS, MAX_EVENTS},
 };
 use crate::strategy::{ma_cross::MaCrossStrategy, rsi::RsiStrategy, Signal, Strategy, StrategyBinding};
 
@@ -114,6 +114,7 @@ pub enum AttemptStatus {
     InvalidTerms,
     RiskOrBalanceRejected,
     Expired,
+    AwaitingNextBar,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -407,7 +408,7 @@ fn strategy(spec: &StrategySpec, input: &ReplayInput, prepared: &Prepared) -> Re
     StrategyBinding::new(&prepared.symbol, &input.timeframe, implementation)
 }
 
-fn run_one(input: &ReplayInput, prepared: &Prepared, spec: &StrategySpec) -> Result<Run> {
+fn run_one(input: &ReplayInput, prepared: &Prepared, spec: &StrategySpec, seal_bars: bool) -> Result<Run> {
     let mut ledger = PaperLedger::new(input.account.clone())?;
     ledger.apply(event("risk-policy".into(), Action::ConfigureRisk(input.risk)))?;
     let mut strategy = strategy(spec, input, prepared)?;
@@ -435,6 +436,14 @@ fn run_one(input: &ReplayInput, prepared: &Prepared, spec: &StrategySpec) -> Res
             close: bar.close as f64, volume: bar.volume as f64,
         };
         let signal = strategy.on_candle(&candle)?.context("Replay strategy skipped validated candle")?;
+        // Seal the original exact decimal input, even if this bar had no fill
+        // or was used only for indicator warmup. No financial state changes.
+        if seal_bars {
+            let sha256 = hex::encode(Sha256::digest(serde_json::to_vec(&input.bars[index])?));
+            ledger.apply(event(format!("bar-{index}-seal"), Action::SealReplayBar {
+                open_ms: bar.open_ms, sha256,
+            }))?;
+        }
         if index < input.warmup_bars { continue; }
         match signal {
             Signal::Buy => buy_signals += 1,
@@ -460,7 +469,7 @@ fn run_one(input: &ReplayInput, prepared: &Prepared, spec: &StrategySpec) -> Res
     if let Some(intent) = pending {
         attempts.push(Attempt { side: intent.side, signal_ms: intent.signal_ms,
             execution_ms: None, requested_lots: intent.lots, filled_lots: 0,
-            fill_price_atoms_per_lot: None, fee_atoms: 0, status: AttemptStatus::Expired });
+            fill_price_atoms_per_lot: None, fee_atoms: 0, status: if seal_bars { AttemptStatus::AwaitingNextBar } else { AttemptStatus::Expired } });
     }
     ensure!(ledger.journal().len() <= MAX_EVENTS as usize, "Replay journal capacity exceeded");
     let account = ledger.snapshot()?;
@@ -481,10 +490,14 @@ fn run_one(input: &ReplayInput, prepared: &Prepared, spec: &StrategySpec) -> Res
 }
 
 fn experiment(input: &ReplayInput) -> Result<(ReplayReport, Vec<Run>)> {
+    experiment_mode(input, false)
+}
+
+fn experiment_mode(input: &ReplayInput, seal_bars: bool) -> Result<(ReplayReport, Vec<Run>)> {
     let prepared = prepare(input)?;
-    let runs = input.strategies.iter().map(|spec| run_one(input, &prepared, spec)).collect::<Result<Vec<_>>>()?;
+    let runs = input.strategies.iter().map(|spec| run_one(input, &prepared, spec, seal_bars)).collect::<Result<Vec<_>>>()?;
     let report = ReplayReport {
-        mode: "offline_paper_replay", scenario_sha256: prepared.fingerprint,
+        mode: if seal_bars { "offline_paper_forward_reconstruction" } else { "offline_paper_replay" }, scenario_sha256: prepared.fingerprint,
         base_asset: input.market.base_asset.clone(), quote_asset: input.account.quote_asset.clone(),
         quote_scale: input.quote_scale, evaluation_start_ms: prepared.bars[input.warmup_bars].open_ms,
         evaluation_end_ms: prepared.bars.last().context("Empty replay")?.close_ms,
@@ -726,6 +739,183 @@ pub fn audit_html(report: &AuditReport) -> Result<String> {
             account.remaining_event_capacity, escape(&account.checkpoint.head.hash))?;
     }
     out.push_str("</tbody></table></article></body></html>");
+    Ok(out)
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ForwardInput {
+    pub version: u32,
+    /// Caller-supplied provenance. The local collector verifies its own archive.
+    /// The Rust engine does not authenticate an exchange or an archive digest.
+    pub source: String,
+    pub source_id: String,
+    pub archive_head_sha256: String,
+    pub scenario: ReplayInput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwardMode {
+    Initialize,
+    Advance,
+    Audit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ForwardReport {
+    pub mode: &'static str,
+    pub live_orders_enabled: bool,
+    pub source: String,
+    pub source_id: String,
+    pub archive_head_sha256: String,
+    pub session_sha256: String,
+    pub input_bar_count: usize,
+    pub max_bar_count: usize,
+    pub replay: ReplayReport,
+    pub accounts: Vec<AuditedAccount>,
+}
+
+pub fn read_forward_input(path: &Path) -> Result<ForwardInput> {
+    ensure!(fs::metadata(path)?.is_file(), "Forward input must be a regular file");
+    let mut bytes = Vec::new();
+    fs::File::open(path)?.take(MAX_INPUT_BYTES + 1).read_to_end(&mut bytes)?;
+    ensure!(bytes.len() as u64 <= MAX_INPUT_BYTES, "Forward input too large");
+    Ok(serde_json::from_slice(&bytes).context("Invalid forward scenario")?)
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
+fn forward_session(input: &ForwardInput) -> Result<String> {
+    ensure!(input.version == 1, "Unsupported forward input version");
+    ensure!(
+        matches!(input.source.as_str(), "binance-spot-public-utc-v1" | "synthetic-fixture-v1"),
+        "Unsupported forward input source"
+    );
+    ensure!(valid_digest(&input.source_id) && valid_digest(&input.archive_head_sha256), "Invalid forward provenance digest");
+    let first = input.scenario.bars.first().context("Missing forward start bar")?.open_ms;
+    let mut fixed = input.scenario.clone();
+    fixed.bars.clear();
+    // All parameters, candidate identities, units, source identity and fixed
+    // start are immutable across extensions. Only the bar suffix may grow.
+    Ok(hex::encode(Sha256::digest(serde_json::to_vec(&(
+        "paper-forward-session-v1", &input.source, &input.source_id, first, fixed,
+    ))?)))
+}
+
+fn forward_path(directory: &Path, id: &str) -> std::path::PathBuf {
+    directory.join(format!("forward-{id}.sqlite"))
+}
+
+fn sealed_at(ledger: &PaperLedger, count: usize) -> bool {
+    count.checked_sub(1).and_then(|index| ledger.journal().get(index))
+        .is_some_and(|event| matches!(&event.action, Action::SealReplayBar { .. }))
+}
+
+async fn preflight_forward(
+    input: &ForwardInput, directory: &Path, session: &str, runs: &[Run], mode: ForwardMode,
+) -> Result<Vec<JournalCheckpoint>> {
+    let mut checkpoints = Vec::with_capacity(runs.len());
+    if mode == ForwardMode::Initialize {
+        ensure!(fs::read_dir(directory)?.next().is_none(), "Forward initialization requires an empty dedicated directory");
+        return Ok(checkpoints);
+    }
+    for run in runs {
+        let id = format!("forward-{session}-{}", run.report.id);
+        let path = forward_path(directory, &run.report.id);
+        let store = PaperStore::open_read_only(&path, &id, input.scenario.account.clone()).await?;
+        let verified = store.verify_replay_prefix(&run.ledger).await?;
+        store.close().await;
+        let count = usize::try_from(verified.head.sequence)?;
+        ensure!(sealed_at(&run.ledger, count), "Forward history does not end at a verified bar boundary");
+        if mode == ForwardMode::Audit {
+            ensure!(count == run.ledger.journal().len(), "Forward account is behind input");
+        }
+        checkpoints.push(JournalCheckpoint { ledger_id: id, head: verified.head });
+    }
+    Ok(checkpoints)
+}
+
+/// Extend an existing bounded offline experiment from a fixed start to a
+/// later verified bar prefix. Recompute strategy state from original history
+/// (including unresolved delayed signals); append ONLY complete bar groups.
+/// All input and existing accounts are validated before writing. Each account
+/// has its own transaction history, so use exclusive directory ownership.
+/// This is not a cross-account atomic commit or a real-time broker service.
+pub async fn forward(
+    input: &ForwardInput, directory: &Path, mode: ForwardMode,
+) -> Result<ForwardReport> {
+    let session = forward_session(input)?;
+    let (replay, runs) = experiment_mode(&input.scenario, true)?;
+    ensure!(fs::symlink_metadata(directory)?.file_type().is_dir(), "Forward directory must already exist");
+    let checkpoints = preflight_forward(input, directory, &session, &runs, mode).await?;
+    for (index, run) in runs.iter().enumerate() {
+        let id = format!("forward-{session}-{}", run.report.id);
+        let path = forward_path(directory, &run.report.id);
+        match mode {
+            ForwardMode::Initialize => {
+                let store = PaperStore::persist_replay(&path, &id, run.ledger.clone()).await?;
+                store.close().await;
+            }
+            ForwardMode::Advance => {
+                let mut checkpoint = checkpoints[index].clone();
+                let store = PaperStore::open_with_checkpoint(&path, &id,
+                    input.scenario.account.clone(), checkpoint.clone()).await?;
+                let expected = run.ledger.journal();
+                while usize::try_from(checkpoint.head.sequence)? < expected.len() {
+                    let start = usize::try_from(checkpoint.head.sequence)?;
+                    let limit = (start + MAX_BATCH_EVENTS).min(expected.len());
+                    let last = expected[start..limit].iter().rposition(|event|
+                        matches!(&event.action, Action::SealReplayBar { .. }))
+                        .context("Complete bar exceeds batch capacity")?;
+                    let end = start + last + 1;
+                    let receipt = store.apply_batch(&checkpoint, &expected[start..end]).await?;
+                    // Keep the verified end of this exact segment. If another
+                    // caller advanced further, the next batch checks its prefix.
+                    checkpoint = receipt.batch_end;
+                }
+                store.verify_replay(&run.ledger).await?;
+                store.close().await;
+            }
+            ForwardMode::Audit => {}
+        }
+    }
+    let mut accounts = Vec::with_capacity(runs.len());
+    for run in &runs {
+        let id = format!("forward-{session}-{}", run.report.id);
+        let path = forward_path(directory, &run.report.id);
+        let store = PaperStore::open_read_only(&path, &id, input.scenario.account.clone()).await?;
+        let verified = store.verify_replay(&run.ledger).await?;
+        store.close().await;
+        accounts.push(AuditedAccount {
+            strategy_id: run.report.id.clone(),
+            remaining_event_capacity: MAX_EVENTS - verified.head.sequence,
+            checkpoint: JournalCheckpoint { ledger_id: id, head: verified.head },
+        });
+    }
+    Ok(ForwardReport {
+        mode: "offline_paper_forward", live_orders_enabled: false,
+        source: input.source.clone(), source_id: input.source_id.clone(),
+        archive_head_sha256: input.archive_head_sha256.clone(), session_sha256: session,
+        input_bar_count: input.scenario.bars.len(), max_bar_count: MAX_BARS,
+        replay, accounts,
+    })
+}
+
+pub fn forward_html(report: &ForwardReport) -> Result<String> {
+    let mut out = audit_html(&AuditReport {
+        mode: "offline_paper_forward_audit", live_orders_enabled: false,
+        verification: "exact_replay_and_persisted_account_history",
+        replay: report.replay.clone(), accounts: report.accounts.clone(),
+    })?;
+    let suffix = "</body></html>";
+    ensure!(out.ends_with(suffix), "Unexpected report HTML boundary");
+    out.truncate(out.len() - suffix.len());
+    write!(out, "<article><h2>Verified forward reconstruction</h2><p>Historical closed-bar simulation; not live fills or a real-time health claim.</p><p>Source: {} · Bars: {} / {}</p><small>Session SHA-256: <code>{}</code></small><p><small>Supplied archive head: <code>{}</code></small></p></article></body></html>",
+        escape(&report.source), report.input_bar_count, report.max_bar_count,
+        escape(&report.session_sha256), escape(&report.archive_head_sha256))?;
     Ok(out)
 }
 

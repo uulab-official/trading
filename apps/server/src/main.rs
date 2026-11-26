@@ -37,6 +37,19 @@ enum Cli {
         #[arg(long)]
         html: bool,
     },
+    /// Initialize, advance or audit an append-only closed-bar paper experiment.
+    PaperForward {
+        #[arg(long)]
+        input: std::path::PathBuf,
+        #[arg(long)]
+        output_dir: std::path::PathBuf,
+        #[arg(long, conflicts_with = "audit_only")]
+        initialize: bool,
+        #[arg(long, conflicts_with = "initialize")]
+        audit_only: bool,
+        #[arg(long)]
+        html: bool,
+    },
     /// Verify persisted historical accounts without changing them.
     PaperAudit {
         #[arg(long)]
@@ -94,6 +107,19 @@ async fn main() -> Result<()> {
             let report = core::paper_sim::persist(&input, &output_dir).await?;
             if html {
                 println!("{}", core::paper_sim::html(&report)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
+        Cli::PaperForward { input, output_dir, initialize, audit_only, html } => {
+            use core::paper_sim::ForwardMode;
+            let input = core::paper_sim::read_forward_input(&input)?;
+            let mode = if initialize { ForwardMode::Initialize }
+                else if audit_only { ForwardMode::Audit }
+                else { ForwardMode::Advance };
+            let report = core::paper_sim::forward(&input, &output_dir, mode).await?;
+            if html {
+                println!("{}", core::paper_sim::forward_html(&report)?);
             } else {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
@@ -266,6 +292,7 @@ mod tests {
             Some("migrate"),
             Some("paper-replay"),
             Some("paper-audit"),
+            Some("paper-forward"),
             Some("paper-walk-forward"),
         ] {
             let mut arguments = vec!["trading-server"];

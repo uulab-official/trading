@@ -189,6 +189,22 @@ impl PaperStore {
         Ok(VerifiedState { head, account })
     }
 
+    /// Verify that every committed event is the exact prefix of a recomputed
+    /// experiment. This does not authorize arbitrary new events. A caller can
+    /// use the returned head for a subsequent compare-and-append transaction.
+    pub async fn verify_replay_prefix(&self, expected: &PaperLedger) -> Result<VerifiedState> {
+        ensure!(expected.config() == &self.config, "Replay configuration mismatch");
+        let mut tx = self.pool.begin().await?;
+        let (ledger, head) = self.load(&mut tx).await?;
+        ensure!(
+            expected.journal().get(..ledger.journal().len()) == Some(ledger.journal()),
+            "Stored history is not the expected replay prefix"
+        );
+        let account = ledger.snapshot()?;
+        tx.commit().await?;
+        Ok(VerifiedState { head, account })
+    }
+
     /// Requires an existing file, exact original account ID and configuration.
     /// Missing, corrupt and unsupported databases fail closed; no auto-migration.
     pub async fn open(path: &Path, ledger_id: &str, config: PaperConfig) -> Result<Self> {
