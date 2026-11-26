@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "account": {
+    "quote_asset": "USDT",
+    "initial_cash": 10000,
+    "max_order_cost": 10000,
+    "max_asset_cost": 10000,
+    "max_assets": 1,
+    "max_realized_loss": 10000
+  },
+  "risk": {
+    "max_daily_loss_bps": 10000,
+    "max_drawdown_bps": 10000,
+    "max_total_exposure_bps": 10000,
+    "max_asset_exposure_bps": 10000,
+    "max_mark_age_ms": 60000
+  },
+  "quote_scale": 0,
+  "market": {
+    "base_asset": "DEMO",
+    "lot_size": "1",
+    "price_tick": "1",
+    "min_quantity": "1",
+    "max_quantity": null,
+    "min_price": null,
+    "max_price": null,
+    "min_notional": "0",
+    "max_notional": null
+  },
+  "timeframe": "1m",
+  "warmup_bars": 2,
+  "execution": {
+    "buy_lots": 4,
+    "delay_bars": 1,
+    "fee_bps": 100,
+    "slippage_bps": 0,
+    "participation_bps": 5000,
+    "style": {
+      "kind": "market"
+    }
+  },
+  "strategies": [
+    {
+      "id": "ma",
+      "strategy": {
+        "kind": "ma_cross",
+        "fast": 1,
+        "slow": 2
+      }
+    },
+    {
+      "id": "rsi",
+      "strategy": {
+        "kind": "rsi",
+        "period": 2,
+        "oversold": 30,
+        "overbought": 70
+      }
+    }
+  ],
+  "bars": [
+    {
+      "open_ms": 60000,
+      "open": "100",
+      "high": "100",
+      "low": "100",
+      "close": "100",
+      "volume": "20"
+    },
+    {
+      "open_ms": 120000,
+      "open": "100",
+      "high": "100",
+      "low": "100",
+      "close": "100",
+      "volume": "20"
+    },
+    {
+      "open_ms": 180000,
+      "open": "110",
+      "high": "110",
+      "low": "110",
+      "close": "110",
+      "volume": "6"
+    },
+    {
+      "open_ms": 240000,
+      "open": "120",
+      "high": "120",
+      "low": "120",
+      "close": "120",
+      "volume": "20"
+    },
+    {
+      "open_ms": 300000,
+      "open": "90",
+      "high": "90",
+      "low": "90",
+      "close": "90",
+      "volume": "20"
+    },
+    {
+      "open_ms": 360000,
+      "open": "80",
+      "high": "80",
+      "low": "80",
+      "close": "80",
+      "volume": "20"
+    },
+    {
+      "open_ms": 420000,
+      "open": "70",
+      "high": "70",
+      "low": "70",
+      "close": "70",
+      "volume": "20"
+    },
+    {
+      "open_ms": 480000,
+      "open": "90",
+      "high": "90",
+      "low": "90",
+      "close": "90",
+      "volume": "20"
+    },
+    {
+      "open_ms": 540000,
+      "open": "100",
+      "high": "100",
+      "low": "100",
+      "close": "100",
+      "volume": "20"
+    }
+  ]
+}

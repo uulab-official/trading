@@ -139,6 +139,18 @@ jobs:
         docker run --rm --network none trading-bot:latest ./trading-server worker --help
         docker run --rm --network none trading-bot:latest ./trading-server deploy --help
         docker run --rm --network none trading-bot:latest ./trading-server migrate --help
+        docker run --rm --network none trading-bot:latest ./trading-server paper-replay --help
+
+    - name: Verify deterministic paper replay with no network
+      run: |
+        docker run --rm --network none --entrypoint sh trading-bot:latest -ec '
+          mkdir /tmp/paper-ci
+          ./trading-server paper-replay --input config/paper_replay_example.json --output-dir /tmp/paper-ci > /tmp/first.json
+          ./trading-server paper-replay --input config/paper_replay_example.json --output-dir /tmp/paper-ci > /tmp/second.json
+          cmp /tmp/first.json /tmp/second.json
+          ./trading-server paper-replay --input config/paper_replay_example.json --output-dir /tmp/paper-ci --html > /tmp/report.html
+          grep -q "Independent strategy comparison" /tmp/report.html
+        '
 
   build-and-push:
     runs-on: ubuntu-latest

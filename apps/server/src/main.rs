@@ -27,6 +27,16 @@ enum Cli {
         binary_path: String,
     },
     Migrate,
+    /// Deterministic local historical experiment; never connects to a broker.
+    PaperReplay {
+        #[arg(long)]
+        input: std::path::PathBuf,
+        #[arg(long)]
+        output_dir: std::path::PathBuf,
+        /// Emit a self-contained HTML report instead of JSON.
+        #[arg(long)]
+        html: bool,
+    },
 }
 
 #[tokio::main]
@@ -56,6 +66,15 @@ async fn main() -> Result<()> {
         Cli::Deploy { binary_path } => {
             info!("Initiating zero-downtime deployment");
             master::deploy::execute_deploy(binary_path).await?;
+        }
+        Cli::PaperReplay { input, output_dir, html } => {
+            let input = core::paper_sim::read_input(&input)?;
+            let report = core::paper_sim::persist(&input, &output_dir).await?;
+            if html {
+                println!("{}", core::paper_sim::html(&report)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
         }
         Cli::Migrate => {
             info!("Running database migrations");
@@ -205,6 +224,7 @@ mod tests {
             Some("worker"),
             Some("deploy"),
             Some("migrate"),
+            Some("paper-replay"),
         ] {
             let mut arguments = vec!["trading-server"];
             if let Some(command) = command {

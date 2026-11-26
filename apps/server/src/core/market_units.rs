@@ -186,7 +186,8 @@ fn valid_id(id: &str) -> bool {
 /// Explicit, static, uniform tick and lot rules. Amounts and prices must be
 /// decimal strings in original market units, not floating-point values.
 /// This does not model a variable price-tier tick schedule.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MarketRules {
     pub base_asset: String,
     pub lot_size: String,
@@ -344,6 +345,41 @@ impl MarketCatalog {
 
     pub fn quote_atoms(&self, amount: &str) -> Result<u64> {
         quote_atoms(amount, self.quote_scale)
+    }
+
+    /// Closed historical volume in whole lots (zero is valid).
+    pub fn volume_lots(&self, config: &PaperConfig, asset: &str, volume: &str) -> Result<u64> {
+        self.validate_quote(config)?;
+        Decimal::parse(volume)?.units(self.instrument(asset)?.lot)
+    }
+
+    pub fn tick_atoms(&self, config: &PaperConfig, asset: &str) -> Result<u64> {
+        self.validate_quote(config)?;
+        Ok(self.instrument(asset)?.atoms_per_tick_lot)
+    }
+
+    /// Validate already normalized integer terms without converting through float.
+    pub fn validate_integer_terms(&self, config: &PaperConfig, terms: &OrderTerms) -> Result<()> {
+        self.validate_quote(config)?;
+        if !valid_id(&terms.order_id) || terms.lots == 0 {
+            return Err(UnitError::InvalidId);
+        }
+        self.instrument(&terms.asset)?.validate_terms_grid(terms)
+    }
+
+    pub fn validate_integer_price(&self, config: &PaperConfig, asset: &str, price: u64) -> Result<()> {
+        self.validate_quote(config)?;
+        let instrument = self.instrument(asset)?;
+        if price == 0 || price % instrument.atoms_per_tick_lot != 0 {
+            return Err(UnitError::OffGrid);
+        }
+        let ticks = price / instrument.atoms_per_tick_lot;
+        if instrument.min_ticks.is_some_and(|min| ticks < min)
+            || instrument.max_ticks.is_some_and(|max| ticks > max)
+        {
+            return Err(UnitError::PriceBounds);
+        }
+        Ok(())
     }
 
     /// Convert a valuation mark using the same price grid and lot denomination

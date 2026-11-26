@@ -159,6 +159,25 @@ impl PaperStore {
         Ok(store)
     }
 
+    /// Persist a completed, deterministic replay in a new database. The
+    /// complete event history is checked and published in one transaction.
+    pub async fn persist_replay(path: &Path, ledger_id: &str, ledger: PaperLedger) -> Result<Self> {
+        Self::create_from_ledger(path, ledger_id, ledger, None).await
+    }
+
+    /// Verify a previous output against a recomputed replay, not merely against
+    /// its own internal hash chain. Refuse a different or incomplete history.
+    pub async fn verify_replay(&self, expected: &PaperLedger) -> Result<VerifiedState> {
+        ensure!(expected.config() == &self.config, "Replay configuration mismatch");
+        let mut tx = self.pool.begin().await?;
+        let (ledger, head) = self.load(&mut tx).await?;
+        ensure!(ledger.journal() == expected.journal(), "Stored replay events differ");
+        let account = ledger.snapshot()?;
+        ensure!(account == expected.snapshot()?, "Stored replay account differs");
+        tx.commit().await?;
+        Ok(VerifiedState { head, account })
+    }
+
     /// Requires an existing file, exact original account ID and configuration.
     /// Missing, corrupt and unsupported databases fail closed; no auto-migration.
     pub async fn open(path: &Path, ledger_id: &str, config: PaperConfig) -> Result<Self> {
