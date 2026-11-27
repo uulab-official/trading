@@ -2,6 +2,7 @@
 
 import argparse
 import html
+import os
 import re
 import sqlite3
 import sys
@@ -101,7 +102,8 @@ def report_rows(session, report, identity):
     scale = integer(replay["quote_scale"], minimum=0, maximum=18)
     expected = [item["id"] for item in session.template["strategies"]]
     require(
-        all(isinstance(item, str) and MAX_ID.fullmatch(item) for item in expected)
+        1 <= len(expected) <= 8
+        and all(isinstance(item, str) and MAX_ID.fullmatch(item) for item in expected)
         and len(expected) == len(set(item.lower() for item in expected)),
         "invalid_strategy_identity",
     )
@@ -185,7 +187,13 @@ def collect(session, *, clock=archive.now_ms, max_age_ms=180_000, deep_audit=Fal
         result["archive"]["interval"] = identity["interval"]
         result["supervisor"] = {
             key: state[key]
-            for key in ("status", "reason", "last_success_ms", "updated_at_ms", "consecutive_failures")
+            for key in (
+                "status",
+                "reason",
+                "last_success_ms",
+                "updated_at_ms",
+                "consecutive_failures",
+            )
         }
         report = state["last_report"]
         if report is None:
@@ -203,7 +211,7 @@ def collect(session, *, clock=archive.now_ms, max_age_ms=180_000, deep_audit=Fal
         )
         age = now - state["last_success_ms"]
         result["report_age_ms"] = age
-        if state["status"] == "halted" or session.stop_path.exists():
+        if state["status"] == "halted" or os.path.lexists(session.stop_path):
             result["status"] = "halted"
         elif not capture["capture_current"]:
             result["status"] = "archive_not_current"
@@ -222,7 +230,11 @@ def collect(session, *, clock=archive.now_ms, max_age_ms=180_000, deep_audit=Fal
             result["ready"] = True
         # Explicit one-shot verification only. Serving a page never launches
         # the binary, creates an account or performs simulated order writes.
-        if deep_audit and result["status"] in ("reported_current", "risk_blocked", "capacity_reached"):
+        if deep_audit and result["status"] in (
+            "reported_current",
+            "risk_blocked",
+            "capacity_reached",
+        ):
             envelope = archive.export_forward(
                 session.archive_path,
                 session.start_ms,
@@ -242,8 +254,17 @@ def collect(session, *, clock=archive.now_ms, max_age_ms=180_000, deep_audit=Fal
             )
             result["verification"] = "independently_replayed_at_request"
         return result
-    except (supervisor.SupervisorError, archive.ArchiveError, OSError, sqlite3.Error, ValueError,
-            KeyError, TypeError, IndexError, AttributeError):
+    except (
+        supervisor.SupervisorError,
+        archive.ArchiveError,
+        OSError,
+        sqlite3.Error,
+        ValueError,
+        KeyError,
+        TypeError,
+        IndexError,
+        AttributeError,
+    ):
         result.update(ready=False, status="audit_or_state_refused", verification="not_verified")
         result["strategies"] = []
         return result
@@ -253,7 +274,9 @@ def utc_label(stamp):
     if stamp is None:
         return "—"
     try:
-        return datetime.fromtimestamp(stamp / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return datetime.fromtimestamp(stamp / 1000, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
     except (ValueError, OSError, OverflowError):
         return "—"
 
@@ -403,7 +426,14 @@ def main(argv=None):
         return 0 if data["ready"] else 2
     except KeyboardInterrupt:
         return 130
-    except (supervisor.SupervisorError, archive.ArchiveError, OSError, ValueError, KeyError, TypeError):
+    except (
+        supervisor.SupervisorError,
+        archive.ArchiveError,
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+    ):
         parser.exit(2, "Paper operator dashboard refused; inspect local configuration.\n")
 
 
