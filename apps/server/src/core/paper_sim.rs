@@ -12,13 +12,16 @@ use super::{
     models::{Candle, normalize_market_symbol},
     paper_ledger::{Action, JournalEvent, LedgerError, OrderTerms, PaperConfig, PaperLedger, Side},
     paper_risk::{Mark, RiskObservation, RiskPolicy},
-    paper_store::{JournalCheckpoint, PaperStore, MAX_BATCH_EVENTS, MAX_EVENTS},
+    paper_store::{JournalCheckpoint, PaperStore, MAX_EVENTS},
 };
 use crate::strategy::{ma_cross::MaCrossStrategy, rsi::RsiStrategy, Signal, Strategy, StrategyBinding};
 
 const MAX_BARS: usize = 240;
+/// Forward sessions have a larger but still bounded fixed-start history.
+pub const MAX_FORWARD_BARS: usize = 2048;
 const MAX_STRATEGIES: usize = 8;
 const MAX_INPUT_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_FORWARD_INPUT_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_EXACT_F64: u64 = (1u64 << 53) - 1;
 const BPS: u128 = 10_000;
 
@@ -208,10 +211,14 @@ fn valid_name(name: &str) -> bool {
 }
 
 fn prepare(input: &ReplayInput) -> Result<Prepared> {
+    prepare_bounded(input, MAX_BARS)
+}
+
+fn prepare_bounded(input: &ReplayInput, max_bars: usize) -> Result<Prepared> {
     ensure!(input.version == 1, "Unsupported replay version");
     PaperLedger::new(input.account.clone())?;
     input.risk.validate().map_err(|e| anyhow!("Invalid risk policy: {e:?}"))?;
-    ensure!(input.bars.len() >= 2 && input.bars.len() <= MAX_BARS, "Replay bar count outside bounds");
+    ensure!(input.bars.len() >= 2 && input.bars.len() <= max_bars, "Replay bar count outside bounds");
     ensure!(input.warmup_bars < input.bars.len(), "Warmup consumes evaluation window");
     ensure!(!input.strategies.is_empty() && input.strategies.len() <= MAX_STRATEGIES, "Invalid strategy count");
     ensure!(input.execution.buy_lots > 0 && input.execution.delay_bars > 0
@@ -494,7 +501,7 @@ fn experiment(input: &ReplayInput) -> Result<(ReplayReport, Vec<Run>)> {
 }
 
 fn experiment_mode(input: &ReplayInput, seal_bars: bool) -> Result<(ReplayReport, Vec<Run>)> {
-    let prepared = prepare(input)?;
+    let prepared = prepare_bounded(input, if seal_bars { MAX_FORWARD_BARS } else { MAX_BARS })?;
     let runs = input.strategies.iter().map(|spec| run_one(input, &prepared, spec, seal_bars)).collect::<Result<Vec<_>>>()?;
     let report = ReplayReport {
         mode: if seal_bars { "offline_paper_forward_reconstruction" } else { "offline_paper_replay" }, scenario_sha256: prepared.fingerprint,
@@ -765,6 +772,7 @@ pub enum ForwardMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ForwardReport {
     pub mode: &'static str,
+    pub max_event_count: i64,
     pub live_orders_enabled: bool,
     pub source: String,
     pub source_id: String,
@@ -779,8 +787,8 @@ pub struct ForwardReport {
 pub fn read_forward_input(path: &Path) -> Result<ForwardInput> {
     ensure!(fs::metadata(path)?.is_file(), "Forward input must be a regular file");
     let mut bytes = Vec::new();
-    fs::File::open(path)?.take(MAX_INPUT_BYTES + 1).read_to_end(&mut bytes)?;
-    ensure!(bytes.len() as u64 <= MAX_INPUT_BYTES, "Forward input too large");
+    fs::File::open(path)?.take(MAX_FORWARD_INPUT_BYTES + 1).read_to_end(&mut bytes)?;
+    ensure!(bytes.len() as u64 <= MAX_FORWARD_INPUT_BYTES, "Forward input too large");
     Ok(serde_json::from_slice(&bytes).context("Invalid forward scenario")?)
 }
 
@@ -860,23 +868,10 @@ pub async fn forward(
                 store.close().await;
             }
             ForwardMode::Advance => {
-                let mut checkpoint = checkpoints[index].clone();
+                let checkpoint = checkpoints[index].clone();
                 let store = PaperStore::open_with_checkpoint(&path, &id,
                     input.scenario.account.clone(), checkpoint.clone()).await?;
-                let expected = run.ledger.journal();
-                while usize::try_from(checkpoint.head.sequence)? < expected.len() {
-                    let start = usize::try_from(checkpoint.head.sequence)?;
-                    let limit = (start + MAX_BATCH_EVENTS).min(expected.len());
-                    let last = expected[start..limit].iter().rposition(|event|
-                        matches!(&event.action, Action::SealReplayBar { .. }))
-                        .context("Complete bar exceeds batch capacity")?;
-                    let end = start + last + 1;
-                    let receipt = store.apply_batch(&checkpoint, &expected[start..end]).await?;
-                    // Keep the verified end of this exact segment. If another
-                    // caller advanced further, the next batch checks its prefix.
-                    checkpoint = receipt.batch_end;
-                }
-                store.verify_replay(&run.ledger).await?;
+                store.extend_verified_replay(&checkpoint, &run.ledger).await?;
                 store.close().await;
             }
             ForwardMode::Audit => {}
@@ -896,10 +891,10 @@ pub async fn forward(
         });
     }
     Ok(ForwardReport {
-        mode: "offline_paper_forward", live_orders_enabled: false,
+        mode: "offline_paper_forward", max_event_count: MAX_EVENTS, live_orders_enabled: false,
         source: input.source.clone(), source_id: input.source_id.clone(),
         archive_head_sha256: input.archive_head_sha256.clone(), session_sha256: session,
-        input_bar_count: input.scenario.bars.len(), max_bar_count: MAX_BARS,
+        input_bar_count: input.scenario.bars.len(), max_bar_count: MAX_FORWARD_BARS,
         replay, accounts,
     })
 }

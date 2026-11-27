@@ -255,12 +255,12 @@ class BinanceArchiveTests(unittest.TestCase):
         with self.assertRaises(archive.ArchiveError):
             archive.export_forward(self.path, START, template, clock=self.feed.clock)
         stop.unlink()
-        self.feed.latest = START + 240 * STEP
+        self.feed.latest = START + archive.MAX_FORWARD_BARS * STEP
         self.run_sync()
         with self.assertRaises(archive.ArchiveError):
             archive.export_forward(self.path, START, template, clock=self.feed.clock)
         result = archive.export_forward(self.path, START + STEP, template, clock=self.feed.clock)
-        self.assertEqual(len(result["scenario"]["bars"]), 240)
+        self.assertEqual(len(result["scenario"]["bars"]), archive.MAX_FORWARD_BARS)
 
     def test_owner_lock_and_stale_capture(self):
         self.run_sync()

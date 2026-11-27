@@ -38,6 +38,7 @@ INTERVALS = {
     "1d": 86_400_000,
 }
 MAX_ROWS = 100_000
+MAX_FORWARD_BARS = 2048
 MAX_BODY = 2 * 1024 * 1024
 CLOSE_GRACE_MS = 2_000
 MAX_CLOCK_SKEW_MS = 5_000
@@ -611,7 +612,7 @@ def export_forward(
             "invalid_forward_start",
         )
         count = (last[0] - start_open_ms) // step + 1
-        require(2 <= count <= 240, "forward_bar_capacity")
+        require(2 <= count <= MAX_FORWARD_BARS, "forward_bar_capacity")
         bars = [
             dict(row)
             for row in db.execute(

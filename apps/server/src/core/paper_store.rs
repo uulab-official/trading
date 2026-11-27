@@ -2,11 +2,12 @@
 //! Always replay verified events before returning account state or appending.
 
 use anyhow::{ensure, Context, Result};
+use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
-    Row, Sqlite, SqlitePool, Transaction,
+    QueryBuilder, Row, Sqlite, SqlitePool, Transaction,
 };
 use std::{collections::BTreeSet, fs::OpenOptions, path::Path, time::Duration};
 
@@ -14,13 +15,13 @@ use super::paper_ledger::{AccountSnapshot, ApplyOutcome, JournalEvent, PaperConf
 
 const SCHEMA_VERSION: i64 = 1;
 /// This development store replays the entire journal for each operation.
-pub const MAX_EVENTS: i64 = 2048;
+pub const MAX_EVENTS: i64 = 16_384;
 /// Maximum events in one atomic compare-and-append transaction.
 pub const MAX_BATCH_EVENTS: usize = 128;
 const MAX_PAYLOAD_BYTES: usize = 4096;
 const BACKUP_VERSION: u32 = 1;
 /// Bound the complete logical backup before parsing untrusted input.
-pub const MAX_BACKUP_BYTES: usize = 9 * 1024 * 1024;
+pub const MAX_BACKUP_BYTES: usize = 65 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -478,6 +479,81 @@ impl PaperStore {
         })
     }
 
+    /// Extend one deterministic replay using a precomputed, validated ledger.
+    /// Verify the exact current history under the writer lock and append the
+    /// entire missing suffix in ONE transaction. Internal forward engine only.
+    /// The caller supplies the earlier verified head and complete expected
+    /// ledger, including all original bar seals. Never trust a cached balance.
+    pub(crate) async fn extend_verified_replay(
+        &self,
+        checkpoint: &JournalCheckpoint,
+        expected: &PaperLedger,
+    ) -> Result<VerifiedState> {
+        ensure!(!self.read_only, "Read-only paper store refuses writes");
+        validate_checkpoint(&self.ledger_id, checkpoint)?;
+        ensure!(expected.config() == &self.config, "Replay configuration mismatch");
+        ensure!(expected.journal().len() <= MAX_EVENTS as usize, "Paper journal capacity exceeded");
+        let mut tx = self.pool.begin().await?;
+        let locked = sqlx::query("UPDATE paper_meta SET head_seq = head_seq WHERE id = 1")
+            .execute(&mut *tx).await?;
+        ensure!(locked.rows_affected() == 1, "Missing paper ledger metadata");
+        let (ledger, previous) = self.load(&mut tx).await?;
+        ensure!(previous == checkpoint.head, "Replay head changed since preflight");
+        let count = ledger.journal().len();
+        ensure!(
+            expected.journal().get(..count) == Some(ledger.journal()),
+            "Stored history is not the expected replay prefix"
+        );
+        let suffix = &expected.journal()[count..];
+        let account = expected.snapshot()?;
+        if suffix.is_empty() {
+            ensure!(ledger.snapshot()? == account, "Stored replay account differs");
+            tx.rollback().await?;
+            return Ok(VerifiedState { head: previous, account });
+        }
+
+        let mut sequence = previous.sequence;
+        let mut hash = previous.hash.clone();
+        // Keep each SQL statement below SQLite's conservative 999-bind limit.
+        // All statements and the final head update share the same transaction.
+        for chunk in suffix.chunks(MAX_BATCH_EVENTS) {
+            let mut encoded = Vec::with_capacity(chunk.len());
+            for event in chunk {
+                sequence = sequence.checked_add(1).context("Replay sequence overflow")?;
+                let payload = encode(event)?;
+                let next_hash = event_digest(sequence, &hash, &payload);
+                encoded.push((sequence, &event.event_id, payload, hash, next_hash.clone()));
+                hash = next_hash;
+            }
+            let mut query = QueryBuilder::<Sqlite>::new(
+                "INSERT INTO paper_events (seq, event_id, payload, prev_hash, event_hash) "
+            );
+            query.push_values(encoded.iter(), |mut row, (seq, id, payload, prev, next)| {
+                row.push_bind(*seq).push_bind(id.as_str()).push_bind(payload.as_str())
+                    .push_bind(prev.as_str()).push_bind(next.as_str());
+            });
+            query.build().execute(&mut *tx).await?;
+        }
+        ensure!(sequence == i64::try_from(expected.journal().len())?, "Unexpected replay length");
+        let updated = sqlx::query(
+            "UPDATE paper_meta SET head_seq = ?, head_hash = ? WHERE id = 1 AND head_seq = ? AND head_hash = ?",
+        )
+        .bind(sequence).bind(&hash).bind(previous.sequence).bind(&previous.hash)
+        .execute(&mut *tx).await?;
+        ensure!(updated.rows_affected() == 1, "Paper journal head changed");
+        // Verify the written rows and economics BEFORE committing, including
+        // unexpected database triggers or a conflicting history.
+        let (written, head) = self.load(&mut tx).await?;
+        ensure!(
+            head.sequence == sequence && head.hash == hash
+                && written.journal() == expected.journal()
+                && written.snapshot()? == account,
+            "Written replay differs from independently computed history"
+        );
+        tx.commit().await?;
+        Ok(VerifiedState { head, account })
+    }
+
     async fn load(&self, tx: &mut Transaction<'_, Sqlite>) -> Result<(PaperLedger, JournalHead)> {
         let metadata = sqlx::query(
             r#"SELECT id, schema_version, ledger_id,
@@ -513,20 +589,6 @@ impl PaperStore {
             "Invalid paper journal head sequence"
         );
 
-        let rows = sqlx::query(
-            r#"SELECT seq, event_id,
-                CASE WHEN length(CAST(payload AS BLOB)) <= 4096 THEN payload END AS payload,
-                prev_hash, event_hash
-                FROM paper_events ORDER BY seq LIMIT ?"#,
-        )
-        .bind(MAX_EVENTS + 1)
-        .fetch_all(&mut **tx)
-        .await?;
-        ensure!(
-            i64::try_from(rows.len())? == head.sequence,
-            "Paper journal length differs from committed head"
-        );
-
         let mut previous_hash = genesis(&self.ledger_id, &config_json);
         let mut checkpoint_matched = false;
         if let Some(checkpoint) = &self.checkpoint_floor {
@@ -534,8 +596,20 @@ impl PaperStore {
             checkpoint_matched = check_prefix(checkpoint, 0, &previous_hash)?;
         }
         let mut ledger = PaperLedger::new(self.config.clone())?;
-        for (index, row) in rows.iter().enumerate() {
-            let sequence = i64::try_from(index)? + 1;
+        // Stream rows rather than materializing the full SQL result. The
+        // verified ledger still retains its accepted events for exact retries.
+        let mut rows = sqlx::query(
+            r#"SELECT seq, event_id,
+                CASE WHEN length(CAST(payload AS BLOB)) <= 4096 THEN payload END AS payload,
+                prev_hash, event_hash
+                FROM paper_events ORDER BY seq LIMIT ?"#,
+        )
+        .bind(MAX_EVENTS + 1)
+        .fetch(&mut **tx);
+        let mut sequence = 0i64;
+        while let Some(row) = rows.try_next().await? {
+            sequence += 1;
+            ensure!(sequence <= head.sequence, "Paper journal length differs from committed head");
             ensure!(
                 row.try_get::<i64, _>("seq")? == sequence,
                 "Paper journal sequence gap"
@@ -564,6 +638,7 @@ impl PaperStore {
                 checkpoint_matched |= check_prefix(checkpoint, sequence, &previous_hash)?;
             }
         }
+        ensure!(sequence == head.sequence, "Paper journal length differs from committed head");
         ensure!(
             self.checkpoint_floor.is_none() || checkpoint_matched,
             "Trusted paper checkpoint not found"

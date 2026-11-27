@@ -24,7 +24,8 @@ sys.path.insert(0, str(ROOT))
 
 from tools import binance_public_archive as archive
 
-MAX_REPORT_BYTES = 8 * 1024 * 1024
+MAX_REPORT_BYTES = 32 * 1024 * 1024
+MAX_EVENT_COUNT = 16_384
 DIGEST = re.compile(r"[a-f0-9]{64}\Z")
 STATUSES = {"initializing", "running", "paper_current", "degraded", "halted", "stopped"}
 
@@ -282,16 +283,19 @@ def verify_report(envelope, report, previous):
         and [a["strategy_id"] for a in accounts] == expected,
         "report_strategy_mismatch",
     )
+    # Old reports remain readable; new output must advertise the supported limit.
+    capacity = report.get("max_event_count", 2048)
+    require(type(capacity) is int and capacity in (2048, MAX_EVENT_COUNT), "invalid_event_capacity")
     for item in accounts:
         checkpoint = item["checkpoint"]
         head = checkpoint["head"]
         require(
             checkpoint["ledger_id"] == f"forward-{session_id}-{item['strategy_id']}"
             and type(head["sequence"]) is int
-            and 1 <= head["sequence"] <= 2048
+            and 1 <= head["sequence"] <= capacity
             and isinstance(head["hash"], str)
             and DIGEST.fullmatch(head["hash"])
-            and item["remaining_event_capacity"] == 2048 - head["sequence"],
+            and item["remaining_event_capacity"] == capacity - head["sequence"],
             "invalid_report_checkpoint",
         )
     return report
