@@ -282,6 +282,100 @@ def capture(session, destination, *, runner=None):
         return capture_locked(session, destination, runner=runner)
 
 
+def backup_directories(session, backup_dir, checkpoint_dir):
+    directories = []
+    for path in (backup_dir, checkpoint_dir):
+        path = Path(path)
+        require(path.is_dir() and not path.is_symlink(), "invalid_backup_directory")
+        directory = path.resolve(strict=True)
+        require(
+            not directory.is_relative_to(session.directory)
+            and not session.directory.is_relative_to(directory)
+            and not session.archive_path.is_relative_to(directory),
+            "backup_directory_overlaps_session",
+        )
+        directories.append(directory)
+    left, right = directories
+    require(
+        not left.is_relative_to(right) and not right.is_relative_to(left),
+        "checkpoint_directory_must_be_separate",
+    )
+    return left, right
+
+
+def publish_json_exclusive(destination, value):
+    with tempfile.TemporaryDirectory(prefix=".receipt-", dir=destination.parent) as temp:
+        candidate = Path(temp) / "receipt.json"
+        write_json(candidate, value)
+        os.link(candidate, destination)
+        candidate.unlink()
+        fsync_directory(destination.parent)
+
+
+def daily_backup_locked(session, backup_dir, checkpoint_dir, *, runner=None):
+    """One independently anchored backup per successful report's UTC day.
+
+    Caller holds the session lock. Never silently replace an orphaned bundle
+    or receipt. Existing pairs are reverified before being reused on restart.
+    """
+    backup_dir, checkpoint_dir = backup_directories(session, backup_dir, checkpoint_dir)
+    state = supervisor.read_state(session)
+    require(
+        state["status"] == "paper_current"
+        and not os.path.lexists(session.stop_path)
+        and not archive.stop_requested(session.archive_path),
+        "paper_session_not_current",
+    )
+    report = state["last_report"]
+    require(report is not None, "no_successful_paper_report")
+    session_id = report["session_sha256"]
+    require(
+        isinstance(session_id, str) and supervisor.DIGEST.fullmatch(session_id),
+        "invalid_session_digest",
+    )
+    day = state["last_success_ms"] // 86_400_000
+    name = f"paper-{session_id}-{day}"
+    bundle = backup_dir / f"{name}.zip"
+    checkpoint = checkpoint_dir / f"{name}.json"
+    bundle_exists = os.path.lexists(bundle)
+    receipt_exists = os.path.lexists(checkpoint)
+    require(bundle_exists == receipt_exists, "incomplete_daily_backup_pair")
+    if receipt_exists:
+        receipt = supervisor.load_json(supervisor.regular(checkpoint))
+        require(
+            receipt.get("mode") == "paper_daily_backup"
+            and receipt.get("version") == 1
+            and receipt.get("session_sha256") == session_id
+            and receipt.get("utc_day") == day
+            and receipt.get("bundle_name") == bundle.name
+            and receipt.get("live_orders_enabled") is False,
+            "invalid_daily_backup_receipt",
+        )
+        checked = verify(bundle, receipt["bundle_sha256"], session.binary, runner=runner)
+        require(
+            checked["session_sha256"] == session_id
+            and checked["report_sha256"] == receipt["report_sha256"]
+            and checked["archive_head_sha256"] == receipt["archive_head_sha256"],
+            "daily_backup_receipt_mismatch",
+        )
+        return receipt
+    result = capture_locked(session, bundle, runner=runner)
+    receipt = {
+        "version": 1,
+        "mode": "paper_daily_backup",
+        "live_orders_enabled": False,
+        "utc_day": day,
+        "session_sha256": session_id,
+        "bundle_name": bundle.name,
+        "bundle_sha256": result["bundle_sha256"],
+        "report_sha256": result["report_sha256"],
+        "archive_head_sha256": result["archive_head_sha256"],
+    }
+    require(result["session_sha256"] == session_id, "changed_backup_session")
+    publish_json_exclusive(checkpoint, receipt)
+    return receipt
+
+
 def validate_manifest(manifest):
     require(
         isinstance(manifest, dict)
@@ -512,6 +606,10 @@ def main(argv=None):
     save = sub.add_parser("backup")
     add_session_arguments(save)
     save.add_argument("--destination", type=Path, required=True)
+    daily = sub.add_parser("daily-backup")
+    add_session_arguments(daily)
+    daily.add_argument("--backup-dir", type=Path, required=True)
+    daily.add_argument("--checkpoint-dir", type=Path, required=True)
     resume = sub.add_parser("review-resume")
     add_session_arguments(resume)
     resume.add_argument("--expected-report-sha256", required=True)
@@ -526,6 +624,10 @@ def main(argv=None):
     try:
         if args.command == "backup":
             result = capture(cli_session(args), args.destination)
+        elif args.command == "daily-backup":
+            session = cli_session(args)
+            with supervisor.owner(session):
+                result = daily_backup_locked(session, args.backup_dir, args.checkpoint_dir)
         elif args.command == "review-resume":
             state = review_resume(cli_session(args), args.expected_report_sha256)
             result = {

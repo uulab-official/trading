@@ -83,3 +83,22 @@ PYTHONPATH=. python tools/binance_paper_recovery_lab.py --binary apps/server/tar
 The test uses no credentials or actual exchange calls. True live-feed soak,
 independent off-host digest retention, scheduling/retention policies and
 broker account reconciliation are separate operational gates.
+
+## Optional automatic daily account + archive backup
+
+Supply two existing, disjoint directories to the paper supervisor:
+`--backup-dir /mounted-backups/paper --checkpoint-dir /independent-anchor/paper`.
+After the first successful paper cycle each UTC day it creates one verified
+recovery bundle and publishes its digest receipt separately. On restart an
+existing pair is fully reverified before reuse. It never silently overwrites
+or rebuilds a missing member of an incomplete pair. A publication or
+verification failure latches the local supervisor halt without resetting
+economic history. The collector remains a separate process.
+
+The standalone `daily-backup` subcommand takes the same session arguments
+and directory pair, and requires exclusive ownership. The two paths must
+be disjoint, but this does not prove that the operator actually mounted
+independent storage. Off-host failure-domain separation, encryption,
+retention and periodic restoration remain operational responsibilities.
+Daily snapshots are immutable; the first successful report of a day is
+not necessarily the latest report. No deletion or automatic promotion.

@@ -234,6 +234,32 @@ class RecoveryBundleTests(unittest.TestCase):
         self.assertEqual(reviewed["status"], "stopped")
         self.assertEqual(reviewed["last_report"], self.report)
 
+    def test_daily_backup_requires_separate_receipt_and_is_immutable(self):
+        backups = self.root / "backups"
+        anchors = self.root / "checkpoints"
+        backups.mkdir()
+        anchors.mkdir()
+        with supervisor.owner(self.session):
+            with self.assertRaises(supervisor.SupervisorError):
+                recovery.daily_backup_locked(
+                    self.session, backups, backups, runner=self.audit_runner
+                )
+            first = recovery.daily_backup_locked(
+                self.session, backups, anchors, runner=self.audit_runner
+            )
+            second = recovery.daily_backup_locked(
+                self.session, backups, anchors, runner=self.audit_runner
+            )
+            self.assertEqual(first, second)
+            self.assertEqual(len(list(backups.iterdir())), 1)
+            receipt = next(anchors.iterdir())
+            receipt.unlink()
+            with self.assertRaises(supervisor.SupervisorError):
+                recovery.daily_backup_locked(
+                    self.session, backups, anchors, runner=self.audit_runner
+                )
+        self.assertEqual(len(list(backups.iterdir())), 1)
+
     def test_extra_zip_member_is_refused_even_with_matching_outer_digest(self):
         bundle, _ = self.bundle()
         with zipfile.ZipFile(bundle, "a") as handle:

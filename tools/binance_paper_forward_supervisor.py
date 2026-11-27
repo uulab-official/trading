@@ -397,6 +397,8 @@ def main(argv=None):
     parser.add_argument("--initialize", action="store_true")
     parser.add_argument("--loop", action="store_true")
     parser.add_argument("--poll-seconds", type=int, default=60)
+    parser.add_argument("--backup-dir", type=Path)
+    parser.add_argument("--checkpoint-dir", type=Path)
     args = parser.parse_args(argv)
     try:
         require(60 <= args.poll_seconds <= 3600, "invalid_poll_interval")
@@ -409,10 +411,33 @@ def main(argv=None):
             args.start_open_ms,
             args.max_failures,
         )
+        require(
+            (args.backup_dir is None) == (args.checkpoint_dir is None),
+            "both_backup_directories_required",
+        )
+        recovery = None
+        if args.backup_dir is not None:
+            from tools import binance_paper_recovery as recovery
+
+            recovery.backup_directories(session, args.backup_dir, args.checkpoint_dir)
+        last_backup_day = None
         with owner(session):
             try:
                 while True:
                     state = cycle(session, initialize=args.initialize)
+                    if recovery is not None and state["status"] == "paper_current":
+                        day = state["last_success_ms"] // 86_400_000
+                        if day != last_backup_day:
+                            try:
+                                receipt = recovery.daily_backup_locked(
+                                    session, args.backup_dir, args.checkpoint_dir
+                                )
+                                last_backup_day = day
+                                print(archive.canonical(receipt), flush=True)
+                            except (OSError, ValueError, sqlite3.Error, RuntimeError):
+                                state = publish(
+                                    session, state, "halted", "daily_backup_refused", archive.now_ms
+                                )
                     print(
                         archive.canonical(
                             {
