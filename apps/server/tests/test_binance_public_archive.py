@@ -238,6 +238,23 @@ class BinanceArchiveTests(unittest.TestCase):
                 expected_head=first["archive_head_sha256"],
             )
 
+    def test_forward_export_pins_independent_previous_archive_prefix(self):
+        self.run_sync()
+        template = self.forward_template()
+        first = archive.export_forward(self.path, START, template, clock=self.feed.clock)
+        stamp = first["scenario"]["bars"][-1]["open_ms"]
+        floor = (stamp, first["archive_head_sha256"])
+        self.feed.latest += STEP
+        self.run_sync()
+        second = archive.export_forward(
+            self.path, START, template, clock=self.feed.clock, expected_prefix=floor
+        )
+        self.assertEqual(second["scenario"]["bars"][:-1], first["scenario"]["bars"])
+        with self.assertRaises(archive.ArchiveError):
+            archive.export_forward(
+                self.path, START, template, clock=self.feed.clock, expected_prefix=(stamp, "0" * 64)
+            )
+
     def test_forward_export_rejects_noncurrent_or_oversize_history_without_sliding(self):
         self.run_sync(pages=1, page_size=2)
         template = self.forward_template()

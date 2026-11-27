@@ -759,6 +759,9 @@ pub struct ForwardInput {
     pub source: String,
     pub source_id: String,
     pub archive_head_sha256: String,
+    /// Optional independently retained floors; not part of the session ID.
+    #[serde(default)]
+    pub trusted_checkpoints: Vec<JournalCheckpoint>,
     pub scenario: ReplayInput,
 }
 
@@ -827,13 +830,27 @@ async fn preflight_forward(
 ) -> Result<Vec<JournalCheckpoint>> {
     let mut checkpoints = Vec::with_capacity(runs.len());
     if mode == ForwardMode::Initialize {
+        ensure!(input.trusted_checkpoints.is_empty(), "New session cannot have previous checkpoints");
         ensure!(fs::read_dir(directory)?.next().is_none(), "Forward initialization requires an empty dedicated directory");
         return Ok(checkpoints);
+    }
+    let floors = &input.trusted_checkpoints;
+    ensure!(floors.is_empty() || floors.len() == runs.len(), "Incomplete forward checkpoint set");
+    let mut identities = BTreeSet::new();
+    for floor in floors {
+        ensure!(identities.insert(floor.ledger_id.as_str()), "Duplicate forward checkpoint");
     }
     for run in runs {
         let id = format!("forward-{session}-{}", run.report.id);
         let path = forward_path(directory, &run.report.id);
-        let store = PaperStore::open_read_only(&path, &id, input.scenario.account.clone()).await?;
+        let store = if floors.is_empty() {
+            PaperStore::open_read_only(&path, &id, input.scenario.account.clone()).await?
+        } else {
+            let floor = floors.iter().find(|floor| floor.ledger_id == id)
+                .context("Missing trusted forward checkpoint")?;
+            PaperStore::open_read_only_with_checkpoint(&path, &id,
+                input.scenario.account.clone(), floor.clone()).await?
+        };
         let verified = store.verify_replay_prefix(&run.ledger).await?;
         store.close().await;
         let count = usize::try_from(verified.head.sequence)?;
@@ -881,7 +898,12 @@ pub async fn forward(
     for run in &runs {
         let id = format!("forward-{session}-{}", run.report.id);
         let path = forward_path(directory, &run.report.id);
-        let store = PaperStore::open_read_only(&path, &id, input.scenario.account.clone()).await?;
+        let store = if let Some(floor) = input.trusted_checkpoints.iter().find(|floor| floor.ledger_id == id) {
+            PaperStore::open_read_only_with_checkpoint(&path, &id,
+                input.scenario.account.clone(), floor.clone()).await?
+        } else {
+            PaperStore::open_read_only(&path, &id, input.scenario.account.clone()).await?
+        };
         let verified = store.verify_replay(&run.ledger).await?;
         store.close().await;
         accounts.push(AuditedAccount {

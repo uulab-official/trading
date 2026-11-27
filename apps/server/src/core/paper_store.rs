@@ -293,6 +293,18 @@ impl PaperStore {
         Ok(store)
     }
 
+    /// Open read-only with an independently supplied trusted history floor.
+    pub async fn open_read_only_with_checkpoint(
+        path: &Path, ledger_id: &str, config: PaperConfig, checkpoint: JournalCheckpoint,
+    ) -> Result<Self> {
+        validate_identity(ledger_id, &config)?;
+        validate_checkpoint(ledger_id, &checkpoint)?;
+        let mut store = Self::connect_mode(path, ledger_id, config, true).await?;
+        store.checkpoint_floor = Some(checkpoint);
+        store.audit().await?;
+        Ok(store)
+    }
+
     async fn connect(path: &Path, ledger_id: &str, config: PaperConfig) -> Result<Self> {
         Self::connect_mode(path, ledger_id, config, false).await
     }

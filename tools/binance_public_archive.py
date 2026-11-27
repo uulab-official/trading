@@ -577,7 +577,14 @@ def scenario_from_template(cfg, bars, template):
 
 
 def export_forward(
-    path, start_open_ms, template, *, expected_head=None, max_age_ms=180_000, clock=now_ms
+    path,
+    start_open_ms,
+    template,
+    *,
+    expected_head=None,
+    expected_prefix=None,
+    max_age_ms=180_000,
+    clock=now_ms,
 ):
     """Build a growing fixed-start Rust forward input in one audited read snapshot.
 
@@ -591,6 +598,11 @@ def export_forward(
         cfg, meta, last = audit(db)
         if expected_head is not None:
             require(meta["head"] == expected_head, "external_checkpoint_mismatch")
+        if expected_prefix is not None:
+            stamp, head = expected_prefix
+            require(type(stamp) is int and stamp >= start_open_ms, "invalid_archive_prefix")
+            saved = db.execute("SELECT hash FROM bars WHERE open_ms=?", (stamp,)).fetchone()
+            require(saved is not None and saved[0] == head, "archive_prefix_mismatch")
         now = clock()
         require(type(now) is int and now > 0, "invalid_clock")
         step = INTERVALS[cfg["interval"]]

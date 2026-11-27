@@ -272,6 +272,10 @@ def verify_report(envelope, report, previous):
     require(isinstance(session_id, str) and DIGEST.fullmatch(session_id), "invalid_report_session")
     if previous is not None:
         require(previous["session_sha256"] == session_id, "changed_report_session")
+        require(
+            report["input_bar_count"] >= previous["input_bar_count"],
+            "regressing_report_bar_count",
+        )
     expected = [item["id"] for item in envelope["scenario"]["strategies"]]
     accounts = report.get("accounts")
     replay = report.get("replay")
@@ -298,7 +302,28 @@ def verify_report(envelope, report, previous):
             and item["remaining_event_capacity"] == capacity - head["sequence"],
             "invalid_report_checkpoint",
         )
+    if previous is not None:
+        old = {item["strategy_id"]: item["checkpoint"] for item in previous["accounts"]}
+        for item in accounts:
+            old_head = old[item["strategy_id"]]["head"]
+            head = item["checkpoint"]["head"]
+            require(
+                head["sequence"] >= old_head["sequence"]
+                and (head["sequence"] > old_head["sequence"] or head["hash"] == old_head["hash"]),
+                "regressing_report_checkpoint",
+            )
     return report
+
+
+def previous_prefix(session, report):
+    if report is None:
+        return None
+    count = report["input_bar_count"]
+    interval = session.template.get("timeframe")
+    require(interval in archive.INTERVALS, "invalid_saved_interval")
+    require(type(count) is int and 2 <= count <= archive.MAX_FORWARD_BARS, "invalid_saved_count")
+    stamp = session.start_ms + (count - 1) * archive.INTERVALS[interval]
+    return stamp, report["archive_head_sha256"]
 
 
 def cycle(session, *, initialize=False, exporter=None, runner=None, clock=archive.now_ms):
@@ -319,7 +344,20 @@ def cycle(session, *, initialize=False, exporter=None, runner=None, clock=archiv
         require(not any(session.directory.iterdir()), "initialization_requires_empty_directory")
     state = publish(session, state, "running", None, clock)
     try:
-        envelope = exporter(session.archive_path, session.start_ms, session.template, clock=clock)
+        previous = state["last_report"]
+        envelope = exporter(
+            session.archive_path,
+            session.start_ms,
+            session.template,
+            clock=clock,
+            expected_prefix=previous_prefix(session, previous),
+        )
+        if previous is not None:
+            require(envelope["source_id"] == previous["source_id"], "changed_archive_identity")
+            envelope = {
+                **envelope,
+                "trusted_checkpoints": [item["checkpoint"] for item in previous["accounts"]],
+            }
         if os.path.lexists(session.stop_path):
             return publish(session, state, "halted", "operator_stop", clock)
         report = verify_report(

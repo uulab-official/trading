@@ -28,7 +28,7 @@ class ForwardSupervisorTests(unittest.TestCase):
         binary.chmod(0o700)
         template = root / "template.json"
         template.write_text(
-            json.dumps({"version": 1, "strategies": [{"id": "ma"}], "bars": []}),
+            json.dumps({"version": 1, "timeframe": "1m", "strategies": [{"id": "ma"}], "bars": []}),
             encoding="utf-8",
         )
         self.session = supervisor.make_session(archive_path, directory, binary, template, 60_000, 2)
@@ -47,11 +47,13 @@ class ForwardSupervisorTests(unittest.TestCase):
 
     def export(self, *args, **kwargs):
         self.export_calls += 1
+        self.expected_prefix = kwargs.get("expected_prefix")
         return self.envelope
 
     def run_binary(self, session, envelope, initialize):
         self.run_calls += 1
         self.assertEqual(session, self.session)
+        self.trusted_checkpoints = envelope.get("trusted_checkpoints")
         return {
             "mode": "offline_paper_forward",
             "live_orders_enabled": False,
@@ -93,6 +95,8 @@ class ForwardSupervisorTests(unittest.TestCase):
         self.assertEqual(second["status"], "paper_current")
         self.assertEqual(second["last_report"]["archive_head_sha256"], "e" * 64)
         self.assertEqual((self.export_calls, self.run_calls), (2, 2))
+        self.assertEqual(self.expected_prefix, (120_000, "b" * 64))
+        self.assertEqual(self.trusted_checkpoints, [first["last_report"]["accounts"][0]["checkpoint"]])
 
     def test_stale_archive_failure_budget_survives_restart_without_running_binary(self):
         def stale(*args, **kwargs):
