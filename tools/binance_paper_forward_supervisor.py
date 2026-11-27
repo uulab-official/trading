@@ -223,7 +223,8 @@ def fail(session, state, reason, retryable, clock):
     return publish(session, state, status, reason, clock, consecutive_failures=failures)
 
 
-def invoke_paper_binary(session, envelope, initialize):
+def invoke_paper_binary(session, envelope, initialize, *, audit_only=False):
+    require(not (initialize and audit_only), "conflicting_paper_mode")
     with tempfile.TemporaryDirectory(prefix="paper-forward-input-") as temporary:
         directory = Path(temporary)
         input_path = directory / "scenario.json"
@@ -239,6 +240,8 @@ def invoke_paper_binary(session, envelope, initialize):
         ]
         if initialize:
             command.append("--initialize")
+        if audit_only:
+            command.append("--audit-only")
         try:
             with open(output_path, "wb") as output:
                 result = subprocess.run(
