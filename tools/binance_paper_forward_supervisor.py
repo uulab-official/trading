@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -434,7 +435,17 @@ def main(argv=None):
                                 )
                                 last_backup_day = day
                                 print(archive.canonical(receipt), flush=True)
-                            except (OSError, ValueError, sqlite3.Error, RuntimeError):
+                            except (
+                                OSError,
+                                ValueError,
+                                sqlite3.Error,
+                                RuntimeError,
+                                KeyError,
+                                TypeError,
+                                IndexError,
+                                AttributeError,
+                                zipfile.BadZipFile,
+                            ):
                                 state = publish(
                                     session, state, "halted", "daily_backup_refused", archive.now_ms
                                 )

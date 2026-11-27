@@ -351,13 +351,44 @@ def daily_backup_locked(session, backup_dir, checkpoint_dir, *, runner=None):
             and receipt.get("live_orders_enabled") is False,
             "invalid_daily_backup_receipt",
         )
-        checked = verify(bundle, receipt["bundle_sha256"], session.binary, runner=runner)
-        require(
-            checked["session_sha256"] == session_id
-            and checked["report_sha256"] == receipt["report_sha256"]
-            and checked["archive_head_sha256"] == receipt["archive_head_sha256"],
-            "daily_backup_receipt_mismatch",
-        )
+        with tempfile.TemporaryDirectory(prefix="paper-daily-verify-") as temp:
+            data, manifest = unpack(bundle, receipt["bundle_sha256"], Path(temp))
+            _, saved = verify_staged(data, manifest, session.binary, runner=runner)
+            require(
+                manifest["session_sha256"] == session_id
+                and manifest["files"]["report.json"]["sha256"] == receipt["report_sha256"]
+                and manifest["archive_head_sha256"] == receipt["archive_head_sha256"],
+                "daily_backup_receipt_mismatch",
+            )
+            # The saved report must still belong to the same source prefix.
+            historical_envelope(session, saved)
+            require(
+                saved["input_bar_count"] <= report["input_bar_count"],
+                "daily_backup_ahead_of_report",
+            )
+            current = {item["strategy_id"]: item["checkpoint"] for item in report["accounts"]}
+            for item in saved["accounts"]:
+                old_head = item["checkpoint"]["head"]
+                new_head = current[item["strategy_id"]]["head"]
+                require(
+                    old_head["sequence"] <= new_head["sequence"]
+                    and (
+                        old_head["sequence"] < new_head["sequence"]
+                        or old_head["hash"] == new_head["hash"]
+                    ),
+                    "daily_backup_divergent_head",
+                )
+                if old_head["sequence"] < new_head["sequence"]:
+                    path = session.directory / f"forward-{item['strategy_id']}.sqlite"
+                    with archive.connection(path, readonly=True) as db:
+                        row = db.execute(
+                            "SELECT event_hash FROM paper_events WHERE seq=?",
+                            (old_head["sequence"],),
+                        ).fetchone()
+                        require(
+                            row is not None and row[0] == old_head["hash"],
+                            "daily_backup_divergent_head",
+                        )
         return receipt
     result = capture_locked(session, bundle, runner=runner)
     receipt = {
