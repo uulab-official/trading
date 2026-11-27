@@ -7,6 +7,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Cargo files
@@ -19,6 +20,12 @@ COPY apps/server/config apps/server/config
 # Test and build the Rust server from the committed dependency lock.
 WORKDIR /app/apps/server
 RUN cargo test --locked && cargo build --release --locked
+
+# Exercise actual Python collector/supervisor and Rust accounting together.
+# Python is needed only in this builder stage, not in the final runtime image.
+WORKDIR /app
+COPY tools tools
+RUN --network=none PYTHONPATH=/app python3 tools/binance_paper_recovery_lab.py --binary /app/apps/server/target/release/trading-server
 
 # Match the builder's Debian release for glibc/OpenSSL runtime compatibility.
 FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
