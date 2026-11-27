@@ -6,10 +6,8 @@ audit-only CLI. Never submit orders, contact an exchange, or start a supervisor.
 
 import argparse
 import hashlib
-import json
 import os
 import re
-import shutil
 import sqlite3
 import stat
 import sys
@@ -381,7 +379,8 @@ def unpack(bundle, expected_sha256, staging):
                 copy_stream(handle, data / name, MAX_FILE, member)
     template = supervisor.load_json(data / "template.json")
     require(
-        set(members) == {"archive.sqlite", "template.json", "report.json", *strategy_files(template)},
+        set(members)
+        == {"archive.sqlite", "template.json", "report.json", *strategy_files(template)},
         "bundle_strategy_set_mismatch",
     )
     return data, manifest
@@ -473,7 +472,8 @@ def review_resume(session, expected_report_sha256, *, runner=None, clock=archive
         state = supervisor.read_state(session)
         require(state["status"] in ("halted", "stopped"), "session_not_stopped")
         require(
-            not os.path.lexists(session.stop_path) and not archive.stop_requested(session.archive_path),
+            not os.path.lexists(session.stop_path)
+            and not archive.stop_requested(session.archive_path),
             "operator_stop",
         )
         report = state["last_report"]
@@ -528,7 +528,11 @@ def main(argv=None):
             result = capture(cli_session(args), args.destination)
         elif args.command == "review-resume":
             state = review_resume(cli_session(args), args.expected_report_sha256)
-            result = {"status": state["status"], "reason": state["reason"], "live_orders_enabled": False}
+            result = {
+                "status": state["status"],
+                "reason": state["reason"],
+                "live_orders_enabled": False,
+            }
         elif args.command == "verify":
             result = verify(args.bundle, args.expected_sha256, args.binary)
         else:

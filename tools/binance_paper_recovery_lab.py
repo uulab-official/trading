@@ -91,7 +91,10 @@ def run(binary):
             if previous is not None:
                 assert report["session_sha256"] == previous["session_sha256"]
                 for old, new in zip(previous["accounts"], report["accounts"]):
-                    assert old["checkpoint"]["head"]["sequence"] < new["checkpoint"]["head"]["sequence"]
+                    assert (
+                        old["checkpoint"]["head"]["sequence"]
+                        < new["checkpoint"]["head"]["sequence"]
+                    )
             previous = report
 
         audit = ops.collect(session, clock=feed.clock, deep_audit=True)
