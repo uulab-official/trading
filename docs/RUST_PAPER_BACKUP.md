@@ -50,8 +50,8 @@ cross-process account ownership, path/symlink race prevention, crash/power-loss 
 and a command-line operational interface remain separate work. Use a trusted local
 directory; do not alias SQLite files or WAL paths.
 
-The version-1 limit remains 2,048 events / 4,096 bytes per event and the complete
-backup is limited to 9 MiB. Full replay is intentionally bounded. This is not a
+The version-1 limit remains 16,384 events / 4,096 bytes per event and the complete
+backup is limited to 65 MiB. Full replay is intentionally bounded. This is not a
 long-term high-throughput storage design.
 
 ## Verification

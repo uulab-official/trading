@@ -50,9 +50,9 @@ that the seal represents the supplied input.
   the end of the previous sample is reconstructed, not discarded or filled
   at the original signal close. The report labels such an intent
   AwaitingNextBar, rather than an expired terminal experiment.
-- Append only missing complete bar groups, in checkpoint-bound atomic
-  transactions of at most 128 events. Each retry verifies the exact segment
-  against its previous head. Existing balances, fills and halt state survive
+- Append only missing complete bar groups, in one checkpoint-bound transaction per account. SQL inserts are grouped
+  into statements of at most 128 events, with a complete post-write replay
+  check before commit. Each retry verifies the exact existing prefix. Existing balances, fills and halt state survive
   restart because the prefix is never replaced.
 - Audit-only requires exact full history, uses read-only SQLite and creates
   no account. JSON/HTML output includes strategy results, journal heads and
@@ -63,7 +63,7 @@ that the seal represents the supplied input.
   identical scenario; complete prefixes can catch up. Missing, corrupt or
   partial-bar accounts are not automatically repaired. A failed initial
   creation requires inspection and a fresh directory or verified restore.
-- The existing limits remain 240 bars and 2,048 events per account. No
+- The bounded forward limits are 2,048 bars and 16,384 events per account. No
   automatic sliding window, reset, compaction or unbounded long-term run.
   Full input is replayed for independent verification; batches reduce the
   number of SQLite transactions but no throughput claim is made.
@@ -154,7 +154,32 @@ Use a trusted executable and directory; this is not an OS sandbox or
 signature verification system.
 
 Seven new orchestration regressions are registered in the network-forbidden
-Python safety suite. The supervisor remains bounded by the Rust 240-bar,
-2,048-event limits; do not rotate/reset accounts automatically to bypass them.
+Python safety suite. The supervisor remains bounded by the Rust 2,048-bar,
+16,384-event limits; do not rotate/reset accounts automatically to bypass them.
 Continuous real-data validation, independently retained external checkpoints,
 incremental long-history replay and a live operator UI remain separate gates.
+
+## Longer sessions and rollback floors
+
+Forward sessions retain their existing v1 identity and event hashes. The forward
+limit is now 2,048 bars and the store limit 16,384 events per account. Research
+replay/walk-forward still accepts at most 240 bars. The backup byte bound is
+65 MiB and the supervisor report byte bound 32 MiB. No old journal is reset.
+Older builds cannot read histories beyond their old limits. Use the new build
+and retain a verified backup before upgrading. This is still bounded full
+strategy reconstruction, not an unbounded journal, and there is no throughput
+benchmark yet.
+
+The store streams rows while verifying the complete journal. An advance checks
+its exact previous head and existing prefix under the writer transaction,
+appends the missing events using multi-row SQL, and verifies the written history
+before committing. The entire account extension rolls back if a later insert,
+head update or final audit fails. Accounts remain independent across DB files.
+
+The optional ForwardInput trusted_checkpoints array must contain every account
+floor or be empty. Initialization cannot accept a prior floor. The supervisor
+now supplies its previous successful account heads and checks the corresponding
+archive hash at the previously reported final bar, rather than silently
+accepting a rollback. These are local retained floors; independently storing
+copies in a separate failure domain remains necessary. Removing or modifying
+all local checkpoint copies can defeat rollback detection.

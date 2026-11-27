@@ -96,7 +96,9 @@ class ForwardSupervisorTests(unittest.TestCase):
         self.assertEqual(second["last_report"]["archive_head_sha256"], "e" * 64)
         self.assertEqual((self.export_calls, self.run_calls), (2, 2))
         self.assertEqual(self.expected_prefix, (120_000, "b" * 64))
-        self.assertEqual(self.trusted_checkpoints, [first["last_report"]["accounts"][0]["checkpoint"]])
+        self.assertEqual(
+            self.trusted_checkpoints, [first["last_report"]["accounts"][0]["checkpoint"]]
+        )
 
     def test_stale_archive_failure_budget_survives_restart_without_running_binary(self):
         def stale(*args, **kwargs):
